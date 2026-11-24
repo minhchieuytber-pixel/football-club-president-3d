@@ -109,6 +109,7 @@ export class SigningEventSystem {
       subjectName: payload.subjectName,
       position: payload.position || '',
       shirtNumber: payload.shirtNumber || null,
+      kitType: payload.kitType || (payload.position === 'GK' ? 'gk' : (this.state.activeKit || 'home')),
       ovr: payload.ovr || null,
       fromClub: payload.fromClub || '',
       fee: Number(payload.fee || 0),
@@ -170,9 +171,11 @@ export class SigningEventSystem {
     evt.currentQuestionIdx = 0;
 
     // Cập nhật động Màn hình LED 3D, Backdrop & Áo đấu 3D trong thế giới game!
+    evt.kitType = evt.position === 'GK' ? 'gk' : (this.state.activeKit || evt.kitType || 'home');
     if (this.mediaRooms) {
       this.mediaRooms.updateEventVisuals(evt);
     }
+    this.state.notifySquadChanged?.();
 
     // Điều phối toàn bộ NPC đi bộ bằng Pathfinding (KHÔNG dịch chuyển tức thời!) đến Phòng Ký Hợp Đồng & Phòng Họp Báo
     this.dispatchNpcsForSigningRoom(evt);

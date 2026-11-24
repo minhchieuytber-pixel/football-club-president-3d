@@ -4,6 +4,7 @@
 // Khu thủ môn, Khu tắm & phục hồi, Phòng HLV, Kho dụng cụ & Sofa nghỉ ngơi
 // Tối ưu GPU/RAM: tách shellGroup / interiorGroup để zone culling, pool 3 geometry tủ đồ (60 -> 3), tái sử dụng 20 canvas/texture theo dirty-key,
 // không tạo trùng raycastMeshes, cắt PointLight 2 -> 1 và hỗ trợ dispose() an toàn.
+import { formatKitName, normalizeKitNumber, resolveKitTheme } from '../characters/PlayerKitSystem.js';
 
 function markShared(asset) {
   if (!asset) return asset;
@@ -56,49 +57,90 @@ export class DressingRoomSystem {
     this.refreshDynamicElements();
   }
 
-  drawLockerJerseyCanvas(c, shirtNumber, displayName, isCaptain, isGK) {
+  drawLockerJerseyCanvas(c, shirtNumber, displayName, isCaptain, isGK, activeKit = 'home') {
     const ctx = c.getContext('2d');
     if (!ctx) return;
+    const kitType = isGK ? 'gk' : (activeKit || 'home');
+    const theme = resolveKitTheme(kitType, 0x00205b);
+    const upperName = displayName ? formatKitName(displayName, displayName) : '';
+    const numStr = normalizeKitNumber(shirtNumber, '');
+
     ctx.fillStyle = '#0b1528';
     ctx.fillRect(0, 0, 160, 220);
+
     // Bảng tên & số trên đỉnh tủ
     ctx.fillStyle = '#00205b';
     ctx.fillRect(8, 8, 144, 34);
-    ctx.fillStyle = '#da291c';
+    ctx.fillStyle = theme.accentHex || '#da291c';
     ctx.fillRect(8, 8, 6, 34);
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(shirtNumber ? `#${shirtNumber} ${displayName}` : 'TỦ TRỐNG', 82, 30);
+    ctx.fillText(numStr ? `#${numStr} ${upperName}` : 'TỦ TRỐNG', 82, 30);
 
-    if (shirtNumber) {
-      // Áo đấu PSG treo trong tủ
-      ctx.fillStyle = isGK ? '#eab308' : '#00205b';
+    if (numStr) {
+      // Áo đấu PSG treo trong tủ theo đúng mẫu áo đang chọn (Sân nhà / Sân khách / Áo thứ ba / Thủ môn)
+      ctx.fillStyle = theme.baseHex;
       ctx.beginPath();
-      ctx.moveTo(46, 56); ctx.lineTo(114, 56); ctx.lineTo(140, 86); ctx.lineTo(124, 102);
-      ctx.lineTo(114, 92); ctx.lineTo(114, 194); ctx.lineTo(46, 194); ctx.lineTo(46, 92);
-      ctx.lineTo(36, 102); ctx.lineTo(20, 86); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = isGK ? '#ca8a04' : '#da291c';
-      ctx.fillRect(70, 56, 20, 138);
-      ctx.fillStyle = isGK ? '#0f172a' : '#ffffff';
-      ctx.font = 'bold 42px sans-serif';
-      ctx.fillText(String(shirtNumber), 80, 140);
-      ctx.font = 'bold 13px sans-serif';
-      ctx.fillText(displayName, 80, 174);
+      ctx.moveTo(42, 56); ctx.lineTo(118, 56); ctx.lineTo(142, 86); ctx.lineTo(126, 102);
+      ctx.lineTo(116, 92); ctx.lineTo(116, 198); ctx.lineTo(44, 198); ctx.lineTo(44, 92);
+      ctx.lineTo(34, 102); ctx.lineTo(18, 86); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = theme.trimHex;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Họa tiết đặc trưng theo từng bộ áo (Hechter / Away sash / Third / GK)
+      if (theme.pattern === 'hechter') {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fillRect(67, 94, 26, 104);
+        ctx.fillStyle = 'rgba(218,41,28,0.84)';
+        ctx.fillRect(69, 94, 22, 104);
+      } else if (theme.pattern === 'away_sash') {
+        ctx.fillStyle = 'rgba(218,41,28,0.45)';
+        ctx.fillRect(74, 168, 12, 30);
+      } else if (theme.pattern === 'third_luxury') {
+        ctx.fillStyle = theme.trimHex;
+        ctx.fillRect(44, 56, 72, 4);
+        ctx.fillStyle = 'rgba(159,18,57,0.6)';
+        ctx.fillRect(44, 186, 72, 12);
+      } else if (theme.pattern === 'gk_diamond') {
+        ctx.fillStyle = theme.accentHex;
+        ctx.fillRect(44, 56, 6, 142);
+        ctx.fillRect(110, 56, 6, 142);
+      }
+
+      // Tên cầu thủ in hoa phía trên lưng áo & Số áo cỡ lớn chính giữa lưng áo
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = upperName.length >= 10 ? 'bold 11px sans-serif' : 'bold 13px sans-serif';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = theme.textStrokeHex;
+      ctx.strokeText(upperName, 80, 77);
+      ctx.fillStyle = theme.textHex;
+      ctx.fillText(upperName, 80, 77);
+
+      ctx.font = numStr.length >= 2 ? '900 40px sans-serif' : '900 44px sans-serif';
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = theme.textStrokeHex;
+      ctx.strokeText(numStr, 80, 134);
+      ctx.fillStyle = theme.textHex;
+      ctx.fillText(numStr, 80, 134);
+
       if (isCaptain) {
         ctx.fillStyle = '#facc15';
-        ctx.fillRect(114, 54, 24, 22);
+        ctx.fillRect(116, 54, 24, 22);
         ctx.fillStyle = '#0f172a';
         ctx.font = 'bold 15px sans-serif';
-        ctx.fillText('C', 126, 70);
+        ctx.fillText('C', 128, 66);
       }
+      ctx.textBaseline = 'alphabetic';
     }
   }
 
-  makeLockerJerseyTexture(shirtNumber, displayName, isCaptain, isGK) {
+  makeLockerJerseyTexture(shirtNumber, displayName, isCaptain, isGK, activeKit = 'home') {
     const c = document.createElement('canvas');
     c.width = 160; c.height = 220;
-    this.drawLockerJerseyCanvas(c, shirtNumber, displayName, isCaptain, isGK);
+    this.drawLockerJerseyCanvas(c, shirtNumber, displayName, isCaptain, isGK, activeKit);
     return configureFlatCanvasTex(new THREE.CanvasTexture(c));
   }
 
@@ -266,14 +308,15 @@ export class DressingRoomSystem {
   // Cập nhật đồng bộ 20 tủ cầu thủ + Màn hình chiến thuật 3D theo dirty-key (KHÔNG tạo mới canvas/texture, KHÔNG lặp raycastMeshes!)
   refreshDynamicElements() {
     this.formation.syncLockers();
+    const activeKit = this.formation?.state?.activeKit || 'home';
     for (let i = 0; i < this.lockerMeshes.length; i++) {
       const slot = this.lockerMeshes[i];
       const l = this.formation.lockers[slot.idx];
       if (!l) continue;
 
-      const key = `${l.shirtNumber || ''}|${l.displayName || ''}|${l.isCaptain ? 1 : 0}|${l.position === 'GK' ? 1 : 0}|${l.fullName || ''}|${l.position || ''}|${l.isAssigned ? 1 : 0}`;
+      const key = `${activeKit}|${l.shirtNumber || ''}|${l.displayName || ''}|${l.isCaptain ? 1 : 0}|${l.position === 'GK' ? 1 : 0}|${l.fullName || ''}|${l.position || ''}|${l.isAssigned ? 1 : 0}`;
       if (slot.lastKey !== key) {
-        this.drawLockerJerseyCanvas(slot.canvas, l.shirtNumber, l.displayName, l.isCaptain, l.position === 'GK');
+        this.drawLockerJerseyCanvas(slot.canvas, l.shirtNumber, l.displayName, l.isCaptain, l.position === 'GK', activeKit);
         slot.tex.needsUpdate = true;
         slot.lastKey = key;
 

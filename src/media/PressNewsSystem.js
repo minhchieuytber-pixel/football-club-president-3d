@@ -287,4 +287,20 @@ export class PressNewsSystem {
       fanTone: 'transfer'
     });
   }
+
+  static generateTrophyNews(state, trophy) {
+    if (!state || !trophy) return;
+    PressNewsSystem.createArticle(state, {
+      scenarioId: 29,
+      category: trophy.category === 'international' ? 'Champions League' : 'Tin PSG',
+      tagType: 'Chính thức',
+      title: `CHAMPIONS! PSG chính thức đăng quang ${trophy.competitionName} mùa giải ${trophy.seasonName}!`,
+      summary: `Chiếc cúp ${trophy.competitionName} đã được trao cho PSG và tự động trưng bày trang trọng tại Bảo tàng Danh hiệu CLB.`,
+      body: `${trophy.historicalDescription} HLV trưởng ${trophy.winningManagerName} cùng đội hình ${trophy.squadSnapshot?.length || 11} cầu thủ đã làm nên trang sử vàng mới dưới sự lãnh đạo của Chủ tịch ${trophy.presidentName}. Người hâm mộ có thể tham quan trực tiếp chiếc cúp tại ${trophy.displayLocation}.`,
+      imageType: 'celebration',
+      imageCaption: `VÔ ĐỊCH ${trophy.competitionName.toUpperCase()} · ${trophy.seasonName}`,
+      relatedEntity: trophy.winningManagerName || 'PSG',
+      fanTone: 'win'
+    });
+  }
 }

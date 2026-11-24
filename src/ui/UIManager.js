@@ -1,4 +1,3 @@
-import { SquadFormationSystem, FORMATION_PRESETS } from '../squad/SquadFormationSystem.js';
 import { MatchSimulationEngine } from '../matches/MatchSimulationEngine.js';
 import { PressNewsSystem } from '../media/PressNewsSystem.js';
 import { RoleDialogueDatabase, NPCPersonalitySystem, TaskAssignmentSystem } from '../dialogue/DialogueSystem.js';
@@ -6,7 +5,16 @@ import { renderPlayerProfileHTML } from './PlayerProfileView.js';
 import { renderStaffCoachTabHTML, renderTrainingTabHTML } from './StaffAndTrainingViews.js';
 import { renderTransferMarketHTML } from './TransferMarketView.js';
 import { renderSigningEventHubHTML, renderLiveCeremonySheetHTML } from './SigningEventView.js';
+import { renderFormationPitchTabHTML, bindFormationPitchEvents } from './FormationPitchView.js';
 import { STAFF_ROLE_META } from '../staff/StaffDatabase.js';
+import { PSG_LEGENDS } from '../trophies/TrophyDatabase.js';
+import {
+  renderMuseumHubHTML,
+  renderTrophyDetailHTML,
+  renderLegendDetailHTML,
+  renderSeasonArchiveDetailHTML,
+  renderCoronationModalHTML
+} from './MuseumView.js';
 // src/ui/UIManager.js
 // Giao diện cảm ứng iPhone Landscape tối ưu + macOS Executive OS tích hợp đầy đủ:
 // Hồ sơ cầu thủ 8 tab, Nhân sự & Ban huấn luyện 12 chức vụ, Huấn luyện 3D, Chuyển nhượng 2 giai đoạn, Đồng hồ thống nhất & Speed Controls
@@ -25,9 +33,14 @@ export class UIManager {
     this.staffSubTab = 'head_coach';
     this.trainingSubTab = 'schedule';
     this.eventSubTab = 'pending';
+    this.museumSubTab = 'history';
     this.newsCategory = 'ALL';
     this.activeArticleId = null;
     this.selectedSlotIdx = null;
+    this.selectedBenchId = null;
+    this.benchPosFilter = 'ALL';
+    this.pendingFormationPreview = null;
+    this.confirmOptimalXI = false;
     this.pitchZoom = 1.0;
     this._abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
     this._hudEls = null;
@@ -308,6 +321,7 @@ export class UIManager {
     }
 
     this.audio.playSuccess();
+    this.cb.autoSaveNow?.(true);
     this.toast(`Đã sang Tuần ${this.state.week} (${this.state.dayName}) · Bản tin hằng ngày đã cập nhật!`, 'success');
     if (this.state.incomingCall) {
       this.audio.playPhoneRing();
@@ -392,6 +406,7 @@ export class UIManager {
         <button class="btn-secondary" id="ph-archive">🗄️ Event Archive</button>
         <button class="btn-accent" id="ph-cctv">📹 Camera SVĐ Parc des Princes</button>
         <button class="btn-secondary" id="ph-map">🗺️ Đi nhanh khuôn viên</button>
+        <button class="btn-primary" id="ph-museum">🏛️ Bảo tàng PSG (${this.state.trophySystem?.getTotalClubTrophies?.() || 53})</button>
         <button class="btn-danger" id="ph-match">⚽ ${weekFx ? `Ngày thi đấu Tuần ${this.state.week}` : 'Lịch thi đấu'}</button>
         <button class="btn-secondary" id="ph-press">📰 Báo chí</button>
         <button class="btn-primary" id="ph-form">👕 Sơ đồ đội hình</button>
@@ -411,6 +426,7 @@ export class UIManager {
     document.getElementById('ph-archive')?.addEventListener('click', () => { this.eventSubTab = 'archive'; this.openComputer('events'); });
     document.getElementById('ph-cctv')?.addEventListener('click', () => { this.closeModal(); this.openStadiumCctvOverlay('overview_gate'); });
     document.getElementById('ph-map')?.addEventListener('click', () => this.openFastTravel());
+    document.getElementById('ph-museum')?.addEventListener('click', () => { this.openComputer('museum'); });
     document.getElementById('ph-match')?.addEventListener('click', () => { this.openMatchdayFlow(); });
     document.getElementById('ph-press')?.addEventListener('click', () => { this.openComputer('media'); });
     document.getElementById('ph-form')?.addEventListener('click', () => { this.openComputer('formation'); });
@@ -425,6 +441,7 @@ export class UIManager {
       ['coach', '📋 Phòng HLV Trưởng'],
       ['finance', '💶 Phòng Tài Chính'],
       ['medical', '🏥 Trung Tâm Y Tế PSG'],
+      ['museum', '🏛️ Bảo tàng Lịch sử & Danh hiệu PSG'],
       ['dressing_room', '👕 Tòa Nhà Phòng Thay Đồ Cầu Thủ PSG'],
       ['signing_room', '✍️ Phòng Ký Hợp Đồng Cao Cấp 3D'],
       ['press_hall', '📺 Phòng Họp Báo & Trường Quay PSG TV'],
@@ -641,6 +658,7 @@ export class UIManager {
       { id: 'events', icon: '📺', name: `Sự kiện & PSG TV${(this.state.signingEventSystem?.pendingEvents?.length || 0) > 0 ? ` (${this.state.signingEventSystem.pendingEvents.length})` : ''}`, bg: 'linear-gradient(135deg,#dc2626,#7f1d1d)' },
       { id: 'finance', icon: '💶', name: 'Tài chính', bg: 'linear-gradient(135deg,#ca8a04,#713f12)' },
       { id: 'leagues', icon: '🏆', name: 'Lịch & BXH', bg: 'linear-gradient(135deg,#dc2626,#7f1d1d)' },
+      { id: 'museum', icon: '🏛️', name: 'Bảo tàng PSG', bg: 'linear-gradient(135deg,#b45309,#1e293b)' },
       { id: 'media', icon: '📰', name: 'Truyền thông', bg: 'linear-gradient(135deg,#db2777,#831843)' },
       { id: 'history', icon: '💾', name: 'Lưu & Biên bản', bg: 'linear-gradient(135deg,#475569,#1e293b)' }
     ];
@@ -659,6 +677,7 @@ export class UIManager {
     else if (tab === 'coach') content = renderStaffCoachTabHTML(this.state, this.staffSubTab);
     else if (tab === 'finance') content = this.renderFinanceTab();
     else if (tab === 'leagues') content = this.renderLeaguesTab();
+    else if (tab === 'museum') content = renderMuseumHubHTML(this.state, this.museumSubTab);
     else if (tab === 'media') content = this.renderMediaTab();
     else content = this.renderHistorySaveTab();
 
@@ -806,68 +825,7 @@ export class UIManager {
   }
 
   renderFormationTab() {
-    const fs = this.state.formationSystem;
-    const data = fs.getFormationData();
-    const sel = this.selectedSlotIdx !== null ? data.starters.find((s) => s.slotIndex === this.selectedSlotIdx) : null;
-    const phase = fs.getRoutinePhase(this.state.clockHour);
-
-    return `
-      <div class="filter-bar" style="align-items:center;">
-        <select id="fm-preset" class="input-ctrl" style="max-width:130px;">
-          ${Object.keys(FORMATION_PRESETS).map((k) => `<option value="${k}" ${k === data.formation ? 'selected' : ''}>Sơ đồ ${k}</option>`).join('')}
-        </select>
-        <input id="fm-name" class="input-ctrl" value="${data.tacticName}" placeholder="Tên chiến thuật..." />
-        <button class="btn-xs btn-primary" id="fm-save-name">💾 Lưu tên</button>
-        <button class="btn-xs btn-secondary" id="fm-zoom-in">🔍+</button>
-        <button class="btn-xs btn-secondary" id="fm-zoom-out">🔍-</button>
-      </div>
-      <div class="muted" style="margin-bottom:6px;">📅 Lịch phòng thay đồ hiện tại: <b style="color:#fde68a;">${phase.label}</b> · Đồng bộ 100% với Tủ đồ 3D & Màn hình Phòng Thay Đồ</div>
-      <div class="formation-layout">
-        <div class="pitch-container">
-          <div class="pitch-board" style="transform:scale(${this.pitchZoom});transform-origin:top center;">
-            <div class="pitch-midline"></div>
-            <div class="pitch-circle"></div>
-            <div class="pitch-box-top"></div>
-            <div class="pitch-box-bot"></div>
-            ${data.starters.map((s) => SquadFormationSystem.renderJerseyCardHTML(s, this.selectedSlotIdx === s.slotIndex)).join('')}
-          </div>
-        </div>
-        <div class="formation-side">
-          ${sel ? `
-            <div class="card-item urgent">
-              <div class="card-head"><strong>#${sel.shirtNumber} ${sel.fullName} ${sel.isCaptain ? '©️' : ''}</strong><span class="tag ok">OVR ${sel.player.ovr}</span></div>
-              <div class="muted">${sel.player.age} tuổi · ${sel.player.nationality} · Sở trường: ${sel.naturalPosition} · Đang đá: ${sel.position}</div>
-              <div class="kpi-mini" style="margin:6px 0;">
-                <span>Phong độ: <b>${sel.player.form}</b></span>
-                <span>Tinh thần: <b>${sel.player.morale}%</b></span>
-                <span>HĐ: <b>${sel.player.contractYears} năm</b></span>
-              </div>
-              <div class="btn-row">
-                <button class="btn-xs btn-primary open-profile-btn" data-pid="${sel.playerId}">👤 Hồ sơ 8 tab</button>
-                <button class="btn-xs btn-accent" id="fm-set-cap" data-pid="${sel.playerId}">©️ Chọn làm Đội trưởng (C)</button>
-                <input id="fm-num-inp" type="number" min="1" max="99" value="${sel.shirtNumber}" class="input-ctrl" style="max-width:66px;padding:4px 6px;" />
-                <button class="btn-xs btn-secondary" id="fm-set-num" data-pid="${sel.playerId}">👕 Đổi số áo</button>
-              </div>
-              <div class="section-label">Thay bằng cầu thủ dự bị / đổi vị trí</div>
-              <div class="scroll-list" style="max-height:150px;">
-                ${data.bench.map((b) => `
-                  <button class="btn-secondary fm-swap" data-rep="${b.playerId}" ${b.availability !== 'available' ? 'disabled' : ''} style="width:100%;text-align:left;margin-bottom:4px;padding:5px 8px;font-size:11px;opacity:${b.availability !== 'available' ? '0.45' : '1'};">
-                    #${b.shirtNumber} <b>${b.fullName}</b> (${b.position} · OVR ${b.player.ovr}) ${b.availability === 'injured' ? '🏥 Chấn thương' : b.availability === 'suspended' ? '🟥 Treo giò' : '→ Thay vào'}
-                  </button>`).join('')}
-              </div>
-            </div>
-          ` : `
-            <div class="card-item">
-              <strong>👕 Chạm vào một áo đấu trên sân</strong>
-              <p class="muted">Xem đầy đủ chỉ số, đổi số áo (tự cập nhật Tủ đồ 3D), chọn Đội trưởng (chữ C tự cập nhật toàn game) hoặc thay cầu thủ dự bị.</p>
-            </div>
-            <div class="section-label">Danh sách dự bị (${data.bench.length})</div>
-            <div class="scroll-list" style="max-height:210px;">
-              ${data.bench.map((b) => `<div class="card-item" style="padding:6px 9px;">#${b.shirtNumber} <b>${b.fullName}</b> (${b.position} · OVR ${b.player.ovr}) ${b.availability === 'injured' ? '<span class="tag bad">🏥 Chấn thương</span>' : ''}</div>`).join('')}
-            </div>
-          `}
-        </div>
-      </div>`;
+    return renderFormationPitchTabHTML(this.state, this);
   }
 
   renderSquadTab() {
@@ -1050,7 +1008,16 @@ export class UIManager {
 
   renderHistorySaveTab() {
     return `
-      <div class="section-label">💾 Lưu / Tải Game (IndexedDB — 3 Ô lưu)</div>
+      <div class="section-label">🔄 Tự động lưu khi thoát (Auto-Save)</div>
+      <div class="card-item" style="border-color:rgba(212,175,55,0.45);">
+        <div class="card-head"><strong>Tiến trình tự động (Khôi phục ngay khi mở lại game)</strong><span class="tag ok">Đang bật</span></div>
+        <div class="muted" id="meta-autosave">Đang kiểm tra bản tự động lưu...</div>
+        <div class="btn-row" style="margin-top:6px;">
+          <button class="btn-xs btn-primary" id="sv-auto-now">💾 Lưu tự động ngay</button>
+          <button class="btn-xs btn-danger" id="sv-reset-new">🔄 Chơi lại từ đầu</button>
+        </div>
+      </div>
+      <div class="section-label">💾 Lưu / Tải Game Thủ Công (3 Ô lưu)</div>
       <div class="grid-3">${['slot_1', 'slot_2', 'slot_3'].map((id, i) => `<div class="card-item"><strong>Ô lưu ${i + 1}</strong><div class="muted" id="meta-${id}">Đang kiểm tra...</div><div class="btn-row" style="margin-top:6px;"><button class="btn-xs btn-primary sv-save" data-slot="${id}">💾 Lưu</button><button class="btn-xs btn-secondary sv-load" data-slot="${id}">📂 Tải</button></div></div>`).join('')}</div>
       <div class="section-label">🏛️ Biên bản Họp Ban Lãnh Đạo (${this.state.meetingMinutes.length})</div>
       <div class="scroll-list" style="max-height:110px;">${this.state.meetingMinutes.map((m) => `<div class="card-item"><div class="card-head"><strong>${m.topic}</strong><span class="muted">${m.date}</span></div><p>${m.decision}</p></div>`).join('')}</div>`;
@@ -1103,47 +1070,7 @@ export class UIManager {
         });
       });
     } else if (tab === 'formation') {
-      document.getElementById('fm-preset')?.addEventListener('change', (e) => {
-        this.state.formationSystem.setFormation(e.target.value);
-        this.audio.playSuccess();
-        this.toast(`Đã chuyển sang sơ đồ ${e.target.value} — Đồng bộ toàn game!`, 'success');
-        this.openComputer('formation');
-      });
-      document.getElementById('fm-save-name')?.addEventListener('click', () => {
-        const val = document.getElementById('fm-name')?.value || '';
-        this.state.formationSystem.setTacticName(val);
-        this.audio.playSuccess();
-        this.toast(`Đã lưu chiến thuật "${val}"!`, 'success');
-      });
-      document.getElementById('fm-zoom-in')?.addEventListener('click', () => { this.pitchZoom = Math.min(1.25, +(this.pitchZoom + 0.1).toFixed(2)); this.openComputer('formation'); });
-      document.getElementById('fm-zoom-out')?.addEventListener('click', () => { this.pitchZoom = Math.max(0.8, +(this.pitchZoom - 0.1).toFixed(2)); this.openComputer('formation'); });
-      document.querySelectorAll('.pitch-jersey').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          this.selectedSlotIdx = Number(btn.dataset.slot);
-          this.audio.playClick();
-          this.openComputer('formation');
-        });
-      });
-      document.getElementById('fm-set-cap')?.addEventListener('click', (e) => {
-        this.state.formationSystem.setCaptain(e.target.dataset.pid);
-        this.audio.playSuccess();
-        this.toast('Đã cập nhật Đội trưởng (C) trên toàn bộ sơ đồ & Tủ đồ 3D!', 'success');
-        this.openComputer('formation');
-      });
-      document.getElementById('fm-set-num')?.addEventListener('click', (e) => {
-        const num = document.getElementById('fm-num-inp')?.value;
-        this.state.formationSystem.setShirtNumber(e.target.dataset.pid, num);
-        this.audio.playSuccess();
-        this.toast(`Đã đổi số áo #${num} — Tủ đồ 3D & sơ đồ đã tự động cập nhật!`, 'success');
-        this.openComputer('formation');
-      });
-      document.querySelectorAll('.fm-swap').forEach((b) => {
-        b.addEventListener('click', () => {
-          const res = this.state.formationSystem.swapStarter(this.selectedSlotIdx, b.dataset.rep);
-          if (res.ok) { this.audio.playSuccess(); this.toast('Đã thay cầu thủ — Đồng bộ trên toàn game!', 'success'); this.openComputer('formation'); }
-          else { this.audio.playAlert(); this.toast(res.reason, 'error'); }
-        });
-      });
+      bindFormationPitchEvents(this.state, this, () => this.openComputer('formation'));
     }
 
     // Sự kiện dùng chung trên mọi tab macOS: bấm vào tên cầu thủ mở Hồ sơ 8 tab!
@@ -1366,23 +1293,73 @@ export class UIManager {
       document.querySelectorAll('.stf-recruit-role').forEach((b) => b.addEventListener('click', () => this.openRoleCandidatesModal(b.dataset.rkey)));
     } else if (tab === 'leagues') {
       document.getElementById('lg-play-now')?.addEventListener('click', () => { this.closeModal(); this.cb.startMatch(); });
+    } else if (tab === 'museum') {
+      document.getElementById('mus-walk-3d')?.addEventListener('click', () => {
+        this.audio.playDoor();
+        this.cb.teleport('museum_entrance');
+        this.closeModal();
+        this.toast('🏛️ Đã tới trước Cổng Bảo Tàng PARIS SAINT-GERMAIN CLUB MUSEUM! Bước vào để cửa kính tự động mở.', 'info');
+      });
+      document.querySelectorAll('.mus-tab-btn').forEach((b) => b.addEventListener('click', () => {
+        this.audio.playClick();
+        this.museumSubTab = b.dataset.mustab || 'history';
+        this.openComputer('museum');
+      }));
+      document.querySelectorAll('.mus-open-trophy').forEach((b) => b.addEventListener('click', () => {
+        this.audio.playClick();
+        this.openTrophyDetail(b.dataset.tid);
+      }));
+      document.querySelectorAll('.mus-open-legend').forEach((b) => b.addEventListener('click', () => {
+        this.audio.playClick();
+        this.openLegendDetail(b.dataset.lid);
+      }));
+      document.querySelectorAll('.mus-open-season').forEach((b) => b.addEventListener('click', () => {
+        this.audio.playClick();
+        this.openSeasonArchive(b.dataset.season);
+      }));
     } else if (tab === 'media') {
       document.querySelectorAll('[data-ncat]').forEach((b) => b.addEventListener('click', () => {
         this.newsCategory = b.dataset.ncat; this.activeArticleId = null;
-    this.selectedSlotIdx = null;
-    this.pitchZoom = 1.0; this.openComputer('media');
+        this.openComputer('media');
       }));
       document.querySelectorAll('[data-open-news]').forEach((card) => card.addEventListener('click', () => {
         this.activeArticleId = card.dataset.openNews; this.openComputer('media');
       }));
-      document.getElementById('news-back')?.addEventListener('click', () => { this.activeArticleId = null;
-    this.selectedSlotIdx = null;
-    this.pitchZoom = 1.0; this.openComputer('media'); });
+      document.getElementById('news-back')?.addEventListener('click', () => {
+        this.activeArticleId = null;
+        this.openComputer('media');
+      });
       document.getElementById('news-save')?.addEventListener('click', (e) => {
         const a = this.state.newsArchive.find((x) => x.id === e.target.dataset.nid);
         if (a) { a.saved = !a.saved; this.audio.playClick(); this.openComputer('media'); }
       });
     } else if (tab === 'history') {
+      this.saveManager.loadAuto().then((rec) => {
+        const el = document.getElementById('meta-autosave');
+        if (el) el.textContent = rec ? `${rec.summary} (Lưu lúc ${rec.savedAt})` : 'Chưa có bản tự động lưu (sẽ tự lưu khi thoát hoặc mỗi 30 giây)';
+      });
+      document.getElementById('sv-auto-now')?.addEventListener('click', async () => {
+        await this.cb.autoSaveNow?.(true);
+        this.audio.playSuccess();
+        this.toast('Đã lưu tự động tiến trình hiện tại!', 'success');
+        this.openComputer('history');
+      });
+      let resetArmed = false;
+      document.getElementById('sv-reset-new')?.addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        if (!resetArmed) {
+          resetArmed = true;
+          btn.textContent = '⚠️ Bấm lần nữa để xác nhận chơi mới';
+          setTimeout(() => {
+            if (resetArmed) {
+              resetArmed = false;
+              btn.textContent = '🔄 Chơi lại từ đầu';
+            }
+          }, 4000);
+          return;
+        }
+        this.cb.resetNewGame?.();
+      });
       this.saveManager.listSlots().then((slots) => {
         slots.forEach(({ id, rec }) => { const el = document.getElementById(`meta-${id}`); if (el) el.textContent = rec ? `${rec.summary} (${rec.savedAt})` : 'Ô trống'; });
       });
@@ -1393,7 +1370,7 @@ export class UIManager {
       document.querySelectorAll('.sv-load').forEach((b) => b.addEventListener('click', async () => {
         const rec = await this.saveManager.loadSlot(b.dataset.slot);
         if (!rec) { this.toast('Ô trống.', 'warn'); return; }
-        this.cb.importSnapshot(rec.data); this.audio.playSuccess(); this.toast('Đã tải game!', 'success'); this.closeModal();
+        this.cb.importSnapshot(rec.data); this.cb.autoSaveNow?.(true); this.audio.playSuccess(); this.toast('Đã tải game!', 'success'); this.closeModal();
       }));
     }
   }
@@ -1402,8 +1379,16 @@ export class UIManager {
   openMatchdayFlow() {
     const fx = this.state.getCurrentWeekFixture() || this.state.getNextFixture();
     if (!fx) {
-      this.state.concludeSeason();
-      this.toast(`Đã sang mùa giải mới ${this.state.season}!`, 'success');
+      const { summary } = this.state.concludeSeason();
+      this.cb.refreshMuseumAndTv?.();
+      this.cb.autoSaveNow?.(true);
+      const nextTrophy = this.state.trophySystem?.popNextCelebration?.();
+      if (nextTrophy) {
+        this.audio.playSuccess();
+        this.openCoronationCelebration(nextTrophy);
+      } else {
+        this.toast(`Đã tổng kết mùa ${summary.season} & sang mùa giải mới ${this.state.season}!`, 'success');
+      }
       return;
     }
     const rep = MatchSimulationEngine.buildPreMatchCoachReport(fx, this.state);
@@ -1427,6 +1412,7 @@ export class UIManager {
         <p>"${rep.summary}"</p>
         <div class="muted" style="margin-top:6px;">
           <b>Sơ đồ đồng bộ (${this.state.formationSystem.formation}):</b> ${this.state.formationSystem.getFormationData().starters.map((s) => `#${s.shirtNumber} ${s.displayName}${s.isCaptain ? ' (C)' : ''}`).join(' · ')}<br/>
+          <b>Độ phù hợp chiến thuật AI TB:</b> <span style="color:#4ade80;font-weight:700;">${rep.avgSuitability ?? '--'}/100</span><br/>
           <b>Phong độ cao:</b> ${rep.inForm.map((p) => `${p.name} (${p.form})`).join(' · ')}<br/>
           <b>Chấn thương / Vắng mặt:</b> ${rep.injured.length ? rep.injured.map((p) => `${p.name} (${p.injuryDays}n)`).join(', ') : 'Không có'} · <b>Điểm cần lưu ý:</b> ${rep.vulnerable}
         </div>
@@ -1435,12 +1421,22 @@ export class UIManager {
       <div class="grid-2">
         ${directives.map(([k, txt]) => `<button class="btn-primary md-dir" data-dir="${k}" style="text-align:left;">${txt}</button>`).join('')}
       </div>
-      <div class="btn-row" style="margin-top:8px;">
+      <div class="btn-row" style="margin-top:8px;align-items:center;">
+        <select id="md-kit-select" class="input-ctrl" aria-label="Chọn áo đấu PSG trận này" style="max-width:190px;">
+          <option value="home" ${(this.state.activeKit || 'home') === 'home' ? 'selected' : ''}>👕 Áo Sân nhà PSG</option>
+          <option value="away" ${this.state.activeKit === 'away' ? 'selected' : ''}>👕 Áo Sân khách PSG</option>
+          <option value="third" ${this.state.activeKit === 'third' ? 'selected' : ''}>👕 Áo Thứ ba PSG</option>
+        </select>
         <button class="btn-secondary" id="md-open-news">📰 Tin báo chí trước trận</button>
         <button class="btn-accent" id="md-open-form">👕 Chỉnh Sơ đồ đội hình</button>
       </div>`;
 
     this.openModal('⚽ NGÀY THI ĐẤU — PARIS SAINT-GERMAIN', html, 'wide');
+    document.getElementById('md-kit-select')?.addEventListener('change', (e) => {
+      this.state.setActiveKit?.(e.target.value);
+      this.audio.playClick();
+      this.toast('👕 Đã cập nhật trang phục thi đấu 3D của PSG!', 'info');
+    });
     document.getElementById('md-open-news')?.addEventListener('click', () => this.openComputer('media'));
     document.getElementById('md-open-form')?.addEventListener('click', () => this.openComputer('formation'));
     document.querySelectorAll('.md-dir').forEach((b) => {
@@ -1448,6 +1444,8 @@ export class UIManager {
         const res = this.state.runAutomaticMatchday(b.dataset.dir);
         if (res) {
           this.audio.playWhistle();
+          this.cb.refreshMuseumAndTv?.();
+          this.cb.autoSaveNow?.(true);
           this.openMatchResultModal(res);
         }
       });
@@ -1458,11 +1456,24 @@ export class UIManager {
     const psgGoalsList = res.goalEvents.filter((e) => e.team === 'Paris Saint-Germain');
     const oppGoalsList = res.goalEvents.filter((e) => e.team !== 'Paris Saint-Germain');
     const cr = res.coachReport;
+    const penLine = res.penalties
+      ? `<div class="tag ok" style="margin-top:4px;">⚖️ Luân lưu 11m: ${res.fixture.home} ${res.penalties.home} - ${res.penalties.away} ${res.fixture.away} (Thắng: ${res.penalties.winner})</div>`
+      : '';
+    const trophyBanner = res.awardedTrophy
+      ? `
+        <div class="card-item urgent" style="border:2px solid #d4af37;background:linear-gradient(135deg,rgba(0,32,91,0.9),rgba(212,175,55,0.22));text-align:center;">
+          <strong style="color:#fde68a;font-size:15px;">🏆 CHÚC MỪNG VÔ ĐỊCH ${res.awardedTrophy.competitionName.toUpperCase()} (${res.awardedTrophy.seasonName})!</strong>
+          <p style="margin:4px 0;">Chiếc cúp 3D mới đã tự động được khắc tên đội hình & trưng bày tại <b>${res.awardedTrophy.displayLocation}</b>.</p>
+          <button class="btn-xs btn-primary" id="mr-celebrate">🎉 Mở Lễ Đăng Quang & Xem Bảo Tàng PSG</button>
+        </div>`
+      : '';
 
     const html = `
+      ${trophyBanner}
       <div class="card-item ${res.psgWon ? '' : 'urgent'}" style="text-align:center;">
         <div class="tag">${res.fixture.comp} · ${res.fixture.round} · ${res.fixture.stadium}</div>
         <h2 style="margin:8px 0;font-size:21px;">${res.fixture.home}  ${res.homeGoals} - ${res.awayGoals}  ${res.fixture.away}</h2>
+        ${penLine}
         <div class="muted">⭐ Cầu thủ xuất sắc nhất: <b style="color:#fde68a;">${res.motm.name} (${res.motm.rating})</b> · ${cr.resultLabel}</div>
         <div class="kpi-mini" style="justify-content:center;margin-top:8px;">
           <span>Kiểm soát: <b>${res.stats.homePoss}% - ${res.stats.awayPoss}%</b></span>
@@ -1505,7 +1516,7 @@ export class UIManager {
         </div>`).join('')}
       <div class="btn-row" style="margin-top:8px;">
         <button class="btn-primary" id="mr-press">📰 Đọc báo chí & bình luận CĐV sau trận</button>
-        <button class="btn-secondary" id="mr-close">🏢 Đóng báo cáo</button>
+        <button class="btn-secondary" id="mr-close">${res.awardedTrophy ? '🏆 Tiếp tục Lễ Đăng Quang' : '🏢 Đóng báo cáo'}</button>
       </div>`;
 
     this.openModal('🏁 THÔNG BÁO KẾT QUẢ & BÁO CÁO SAU TRẬN', html, 'wide');
@@ -1515,10 +1526,90 @@ export class UIManager {
         if (pr) { pr.status = b.dataset.act; this.audio.playSuccess(); this.toast(`Đã cập nhật đề xuất HLV: ${pr.status}`, 'success'); this.openMatchResultModal(res); }
       });
     });
-    document.getElementById('mr-press')?.addEventListener('click', () => { this.activeArticleId = null;
-    this.selectedSlotIdx = null;
-    this.pitchZoom = 1.0; this.newsCategory = 'ALL'; this.openComputer('media'); });
-    document.getElementById('mr-close')?.addEventListener('click', () => this.closeModal());
+    document.getElementById('mr-celebrate')?.addEventListener('click', () => {
+      const nextTrophy = this.state.trophySystem?.popNextCelebration?.() || res.awardedTrophy;
+      if (nextTrophy) this.openCoronationCelebration(nextTrophy);
+    });
+    document.getElementById('mr-press')?.addEventListener('click', () => {
+      this.activeArticleId = null;
+      this.selectedSlotIdx = null;
+      this.pitchZoom = 1.0;
+      this.newsCategory = 'ALL';
+      this.openComputer('media');
+    });
+    document.getElementById('mr-close')?.addEventListener('click', () => {
+      const nextTrophy = this.state.trophySystem?.popNextCelebration?.();
+      if (nextTrophy) {
+        this.openCoronationCelebration(nextTrophy);
+      } else {
+        this.closeModal();
+      }
+    });
+  }
+
+  // ==================== BẢO TÀNG TRUYỀN THỐNG & LỄ ĐĂNG QUANG PSG ====================
+  openMuseumModal(tab = 'history') {
+    this.museumSubTab = tab;
+    this.openComputer('museum');
+  }
+
+  openTrophyDetail(trophyId) {
+    const t = this.state.trophySystem?.getTrophyById?.(trophyId);
+    if (!t) return;
+    if (t.isNewHighlight) {
+      this.state.trophySystem.clearHighlight(trophyId);
+      this.cb.refreshMuseumAndTv?.();
+    }
+    const html = renderTrophyDetailHTML(t, this.state);
+    this.openModal(`🏆 CHIÊM NGƯỠNG DANH HIỆU · ${t.competitionName.toUpperCase()} (${t.seasonName})`, html, 'wide');
+    document.querySelectorAll('#modal-body .open-profile-btn').forEach((b) => {
+      b.addEventListener('click', () => this.openPlayerProfileModal(b.dataset.pid, 'overview'));
+    });
+    document.getElementById('td-open-museum')?.addEventListener('click', () => {
+      this.openMuseumModal(t.category === 'domestic' ? 'domestic' : 'international');
+    });
+    document.getElementById('td-close')?.addEventListener('click', () => this.closeModal());
+  }
+
+  openLegendDetail(legendId) {
+    const leg = PSG_LEGENDS.find((l) => l.legendId === legendId);
+    if (!leg) return;
+    const html = renderLegendDetailHTML(leg);
+    this.openModal(`⭐ HUYỀN THOẠI PSG · ${leg.name.toUpperCase()}`, html, 'normal');
+    document.getElementById('lgd-open-museum')?.addEventListener('click', () => this.openMuseumModal('legends'));
+    document.getElementById('lgd-close')?.addEventListener('click', () => this.closeModal());
+  }
+
+  openSeasonArchive(seasonName) {
+    const arc = this.state.trophySystem?.seasonArchives?.find((a) => a.season === seasonName || a.seasonId === seasonName);
+    if (!arc) return;
+    const html = renderSeasonArchiveDetailHTML(arc, this.state);
+    this.openModal(`📚 LỊCH SỬ MÙA GIẢI ${arc.season} · PARIS SAINT-GERMAIN`, html, 'wide');
+    document.querySelectorAll('#modal-body .open-profile-btn').forEach((b) => {
+      b.addEventListener('click', () => this.openPlayerProfileModal(b.dataset.pid, 'overview'));
+    });
+    document.getElementById('sa-open-museum')?.addEventListener('click', () => this.openMuseumModal('seasons'));
+    document.getElementById('sa-close')?.addEventListener('click', () => this.closeModal());
+  }
+
+  openCoronationCelebration(trophy) {
+    if (!trophy) return;
+    const html = renderCoronationModalHTML(trophy);
+    this.openModal(`🏆 LỄ ĐĂNG QUANG · ${trophy.competitionName.toUpperCase()} ${trophy.seasonName}`, html, 'normal');
+    document.getElementById('cor-go-museum')?.addEventListener('click', () => {
+      this.audio.playDoor();
+      this.cb.teleport('museum');
+      this.closeModal();
+      this.toast(`🏛️ Chào mừng Chủ tịch đến Bảo tàng PSG chiêm ngưỡng Cúp ${trophy.competitionName} mới!`, 'success');
+    });
+    document.getElementById('cor-inspect')?.addEventListener('click', () => {
+      this.openTrophyDetail(trophy.trophyId);
+    });
+    document.getElementById('cor-skip')?.addEventListener('click', () => {
+      const next = this.state.trophySystem?.popNextCelebration?.();
+      if (next) this.openCoronationCelebration(next);
+      else this.closeModal();
+    });
   }
 
   // ==================== HỒ SƠ CẦU THỦ CHI TIẾT 8 TAB (DÙNG CHUNG TOÀN GAME) ====================

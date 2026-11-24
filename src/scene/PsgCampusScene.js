@@ -339,10 +339,21 @@ export class PsgCampusScene {
           }
         }
       }
-      if (d.open && !npcNear && playerPos) {
+      let playerAutoNear = false;
+      if (playerPos) {
         const pdx = playerPos.x - d.x;
         const pdz = playerPos.z - d.z;
-        if (pdx * pdx + pdz * pdz > 12.96) {
+        const pd2 = pdx * pdx + pdz * pdz;
+        if (d.autoOpenNearPlayer && !d.locked && pd2 <= 12.25) {
+          playerAutoNear = true;
+          if (!d.open) {
+            d.open = true;
+            d.targetAngle = Math.PI * 0.48;
+            d.collider.active = false;
+          }
+        }
+        const closeDist2 = d.autoOpenNearPlayer ? 18.5 : 12.96;
+        if (d.open && !npcNear && !playerAutoNear && pd2 > closeDist2) {
           d.open = false;
           d.targetAngle = 0;
           d.collider.active = true;
@@ -774,12 +785,22 @@ export class PsgCampusScene {
     infoScr.rotation.y = Math.PI / 2;
     this.root.add(infoScr);
 
+    const LobbyMatCtor = typeof THREE.MeshBasicMaterial === 'function' ? THREE.MeshBasicMaterial : THREE.MeshStandardMaterial;
+    this.lobbyTvOverlay = new THREE.Mesh(
+      this._planeGeo(3.2, 1.55),
+      new LobbyMatCtor({ map: this.tex.signTexture('PARC DES PRINCES · WELCOME', '#00205b', '#fde68a', '#da291c') })
+    );
+    this.lobbyTvOverlay.position.set(-5.70, 2.35, 6.5);
+    this.lobbyTvOverlay.rotation.y = Math.PI / 2;
+    this.lobbyTvOverlay.userData.dynamicObject = true;
+    this.root.add(this.lobbyTvOverlay);
+
     const trophy = this.furn.createTrophyCabinet();
     trophy.position.set(-5.2, 0.14, 17.5);
     trophy.rotation.y = Math.PI / 2;
     this.root.add(trophy);
     this.addCollider(-5.2, 17.5, 0.6, 2.25);
-    this.tagInteractable(trophy, 'lobby_trophy', 'Tủ Danh Hiệu & Lịch Sử PSG', '🏆', 'open_history');
+    this.tagInteractable(trophy, 'lobby_trophy', 'Mở Bảo Tàng Danh Hiệu & Lịch Sử PSG', '🏆', 'open_museum_ui');
 
     const sofa = this.furn.createSofa(3.0);
     sofa.position.set(4.9, 0.14, 17.5);
@@ -852,12 +873,22 @@ export class PsgCampusScene {
     pTrophy.rotation.y = -Math.PI / 2;
     this.root.add(pTrophy);
     this.addCollider(-18.5, -14.2, 0.6, 2.25);
-    this.tagInteractable(pTrophy, 'pres_trophy', 'Kệ Danh Hiệu Phòng Chủ tịch', '🏆', 'open_history');
+    this.tagInteractable(pTrophy, 'pres_trophy', 'Kệ Danh Hiệu Phòng Chủ tịch · Bảo Tàng PSG', '🏆', 'open_museum_ui');
 
     const wallScr = this.furn.createWallScreen(3.4, 1.8, 'PSG PRESIDENT COMMAND CENTER');
     wallScr.position.set(-18.22, 2.35, -10.5);
     wallScr.rotation.y = -Math.PI / 2;
     this.root.add(wallScr);
+
+    const TvMatCtor = typeof THREE.MeshBasicMaterial === 'function' ? THREE.MeshBasicMaterial : THREE.MeshStandardMaterial;
+    this.presidentTvOverlay = new THREE.Mesh(
+      this._planeGeo(3.2, 1.6),
+      new TvMatCtor({ map: this.tex.signTexture('PSG PRESIDENT COMMAND CENTER', '#00205b', '#ffffff', '#da291c') })
+    );
+    this.presidentTvOverlay.position.set(-18.30, 2.35, -10.5);
+    this.presidentTvOverlay.rotation.y = -Math.PI / 2;
+    this.presidentTvOverlay.userData.dynamicObject = true;
+    this.root.add(this.presidentTvOverlay);
 
     const pCrest = new THREE.Mesh(
       this._tagShared(new THREE.CircleGeometry(0.85, 28)),
@@ -1151,5 +1182,22 @@ export class PsgCampusScene {
       crowns.setMatrixAt(i, dummy.matrix);
     });
     this.root.add(trunks, crowns);
+  }
+
+  updateBroadcastTv(broadcast = null) {
+    const title = broadcast?.title || 'PSG PRESIDENT COMMAND CENTER · PARIS SAINT-GERMAIN';
+    const sub = broadcast?.subtitle || 'PARC DES PRINCES · WELCOME';
+    const updateScreen = (mesh, txt, bg, fg, accent) => {
+      if (!mesh || !mesh.material || !this.tex?.signTexture) return;
+      const oldMap = mesh.material.map;
+      const nextMap = this.tex.signTexture(txt, bg, fg, accent);
+      if (oldMap && oldMap !== nextMap && typeof oldMap.dispose === 'function' && !oldMap.userData?.sharedAsset) {
+        oldMap.dispose();
+      }
+      mesh.material.map = nextMap;
+      mesh.material.needsUpdate = true;
+    };
+    updateScreen(this.presidentTvOverlay, title, '#00205b', broadcast ? '#fde68a' : '#ffffff', '#da291c');
+    updateScreen(this.lobbyTvOverlay, broadcast ? `${title} · ${sub}` : sub, '#00205b', '#fde68a', '#da291c');
   }
 }

@@ -139,7 +139,17 @@ export class PathfindingSystem {
       pitch_gk:     { x: -18.5, z: -44.0 },
       pitch_shoot:  { x: 15.0,  z: -44.0 },
       pitch_south:  { x: 0.0,   z: -53.0 },
-      pitch_east_side: { x: 42.0, z: -44.0 },
+      pitch_east_side: { x: 55.0, z: -44.0 },
+      // Bảo tàng PSG (PARIS SAINT-GERMAIN CLUB MUSEUM: x ∈ [18, 50], z ∈ [-57, -31])
+      museum_plaza:    { x: 14.5, z: -44.0 },
+      museum_door:     { x: 18.0, z: -44.0, doorId: 'door_museum_main' },
+      museum_in:       { x: 20.5, z: -44.0 },
+      museum_history:  { x: 28.0, z: -44.0 },
+      museum_domestic: { x: 27.5, z: -48.2 },
+      museum_east_hall:{ x: 38.5, z: -44.0 },
+      museum_intl:     { x: 41.0, z: -48.2 },
+      museum_legends:  { x: 42.0, z: -38.5 },
+      museum_seasons:  { x: 27.5, z: -39.5 },
       dr_outside:   { x: -23.2, z: -43.5 },
       dr_door:      { x: -26.0, z: -43.5, doorId: 'door_dressing_main' },
       dr_in:        { x: -28.5, z: -43.5 },
@@ -204,16 +214,22 @@ export class PathfindingSystem {
     link('se_1', 'medic_door'); link('medic_door', 'medic_in');
     link('se_2', 'hr_door'); link('hr_door', 'hr_in');
 
-    // Ngoài trời & Sân tập & Phòng Thay Đồ (nhiều nhánh phụ giúp tự tìm đường thay thế khi một lối bị chặn!)
+    // Ngoài trời & Sân công viên & Bảo tàng PSG & Phòng Thay Đồ
     link('out_north', 'pitch_n'); link('out_north', 'out_nw'); link('out_north', 'out_ne');
     link('out_nw', 'pitch_w'); link('out_nw', 'dr_outside');
-    link('out_ne', 'pitch_e'); link('out_ne', 'pitch_east_side');
+    link('out_ne', 'pitch_e'); link('out_ne', 'museum_plaza');
     link('pitch_n', 'pitch_w'); link('pitch_n', 'pitch_e'); link('pitch_n', 'pitch_mid');
     link('pitch_w', 'pitch_mid'); link('pitch_w', 'pitch_gk'); link('pitch_w', 'dr_outside');
-    link('pitch_e', 'pitch_mid'); link('pitch_e', 'pitch_shoot'); link('pitch_e', 'pitch_east_side');
+    link('pitch_e', 'pitch_mid'); link('pitch_e', 'pitch_shoot'); link('pitch_e', 'museum_plaza');
     link('pitch_mid', 'pitch_gk'); link('pitch_mid', 'pitch_shoot'); link('pitch_mid', 'pitch_south');
     link('pitch_gk', 'dr_outside'); link('pitch_gk', 'pitch_south');
-    link('pitch_shoot', 'pitch_south'); link('pitch_shoot', 'pitch_east_side');
+    link('pitch_shoot', 'pitch_south'); link('pitch_shoot', 'museum_plaza');
+    link('museum_plaza', 'museum_door'); link('museum_door', 'museum_in');
+    link('museum_in', 'museum_domestic'); link('museum_in', 'museum_seasons');
+    link('museum_domestic', 'museum_history'); link('museum_seasons', 'museum_history');
+    link('museum_history', 'museum_east_hall');
+    link('museum_east_hall', 'museum_intl'); link('museum_east_hall', 'museum_legends');
+    link('pitch_east_side', 'east_road_mid');
     link('dr_outside', 'dr_door'); link('dr_door', 'dr_in'); link('dr_in', 'dr_center'); link('dr_in', 'dr_south'); link('dr_center', 'dr_south');
 
     // Kết nối đường nội bộ & đại lộ cảnh quan tới SVĐ Parc des Princes trong cùng khuôn viên PSG
@@ -453,7 +469,18 @@ export class PathfindingSystem {
       return 'media_corridor';
     }
     if (x < -25.2 && z < -31.5 && z > -56.5) return x < -31 ? 'dr_center' : 'dr_in';
-    if (x > 34 && z < -30) return 'pitch_east_side';
+    if (x >= 18.0 && x <= 50.2 && z >= -57.2 && z <= -30.8) {
+      if (x < 22.2) return 'museum_in';
+      if (x < 34.5) {
+        if (z < -46.2) return 'museum_domestic';
+        if (z > -41.5) return 'museum_seasons';
+        return 'museum_history';
+      }
+      if (z < -46.2) return 'museum_intl';
+      if (z > -41.5) return 'museum_legends';
+      return 'museum_east_hall';
+    }
+    if (x > 50.2 && z < -30) return 'pitch_east_side';
     if (z < -23) {
       if (x < -12 && z < -38) return 'pitch_gk';
       if (x > 10 && z < -38) return 'pitch_shoot';

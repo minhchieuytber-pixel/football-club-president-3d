@@ -1,6 +1,7 @@
 // src/npc/NpcSystem.js
 // Hệ thống NPC 3D toàn diện: Pathfinding A* kết hợp Spatial-Hash Local Avoidance + Steering + 4-Tier Simulation/Animation LOD + Quản lý vòng đời NPC (Safe Disposal) + Đồng bộ huấn luyện 3D
 import { PathfindingSystem } from '../ai/PathfindingSystem.js';
+import { formatKitName } from '../characters/PlayerKitSystem.js';
 
 const COACH_SIDELINE_SPOTS = [
   { x: 0, z: -130.5 }, { x: -10, z: -130.5 }, { x: 10, z: -130.5 }, { x: 0, z: -133.0 }
@@ -60,6 +61,8 @@ export class NpcSystem {
     this._wasMeetingActive = false;
     this.pathfinder = new PathfindingSystem(campusScene);
     this.trainingSystem = null;
+    this.activeClubKit = 'home';
+    this.captainId = null;
     this._sharedAssets = null;
     this._frameCounter = 0;
     this.lodCounts = [0, 0, 0, 0];
@@ -74,7 +77,8 @@ export class NpcSystem {
       boardMat: markSharedAsset(new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4 })),
       tabletGeo: markSharedAsset(new THREE.BoxGeometry(0.24, 0.016, 0.30)),
       tabletMat: markSharedAsset(new THREE.MeshStandardMaterial({ color: 0x1e293b, emissive: 0x0ea5e9, emissiveIntensity: 0.35 })),
-      bibGeo: markSharedAsset(new THREE.BoxGeometry(0.43, 0.42, 0.255)),
+      // Đai phân đội mỏng ở gấu áo (KHÔNG che tên & số áo trên lưng!)
+      bibGeo: markSharedAsset(new THREE.BoxGeometry(0.415, 0.055, 0.242)),
       bibMat: markSharedAsset(new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.45 }))
     };
     return this._sharedAssets;
@@ -83,6 +87,7 @@ export class NpcSystem {
   // Giải phóng an toàn geometry/material không dùng chung khi xóa/tái tạo NPC (tuyệt đối KHÔNG dispose sharedAsset!)
   _disposeMeshTree(mesh) {
     if (!mesh || typeof mesh.traverse !== 'function') return;
+    this.charFactory?.releaseMeshKit?.(mesh);
     mesh.traverse((child) => {
       if (!child.isMesh) return;
       if (child.geometry && !child.geometry.userData?.sharedAsset && typeof child.geometry.dispose === 'function') {
@@ -152,14 +157,58 @@ export class NpcSystem {
     }
   }
 
+  _resolvePlayerKitType(npc, trainingNow = false, drNow = false, clockHour = 9.5) {
+    if (npc.position === 'GK') return 'gk';
+    if (npc.mode === 'event_travel' || npc.mode === 'event_hold' || npc.mode === 'going_president' || npc.mode === 'sit_president') {
+      return this.activeClubKit || 'home';
+    }
+    if (drNow && clockHour >= 9.25 && clockHour < 9.5) return 'warmup';
+    if (trainingNow) {
+      if (npc.scrimmageTeam === 'B' || npc.bibMesh?.visible) return 'scrimmage';
+      const drill = this.trainingSystem?.currentDrill;
+      if (drill === 'warmup' || drill === 'recovery') return 'warmup';
+      return 'training';
+    }
+    return this.activeClubKit || 'home';
+  }
+
+  _syncPlayerNpcKit(npc, kitType = null, trainingNow = false, drNow = false, clockHour = 9.5) {
+    if (!npc || !npc.isPlayer || !npc.mesh || typeof this.charFactory?.applyPlayerKit !== 'function') return;
+    const resolvedType = kitType || this._resolvePlayerKitType(npc, trainingNow, drNow, clockHour);
+    this.charFactory.applyPlayerKit(npc.mesh, {
+      kitType: resolvedType,
+      playerId: npc.playerId || npc.id,
+      displayName: npc.kitName || formatKitName(npc.name),
+      fullName: npc.name,
+      shirtNumber: npc.shirtNumber,
+      isCaptain: !!(npc.isCaptain || (this.captainId && npc.playerId === this.captainId)),
+      position: npc.position,
+      club: 'Paris Saint-Germain'
+    });
+  }
+
   createNpcRecord(p, idx, trainingAtStart = false) {
+    const initialKit = p.isPlayer
+      ? {
+          kitType: p.position === 'GK' ? 'gk' : (trainingAtStart ? 'training' : (this.activeClubKit || 'home')),
+          playerId: p.playerId || p.id,
+          displayName: p.kitName || formatKitName(p.name),
+          fullName: p.name,
+          shirtNumber: p.shirtNumber ?? null,
+          isCaptain: !!p.isCaptain,
+          position: p.position,
+          club: 'Paris Saint-Germain'
+        }
+      : null;
+
     const mesh = this.charFactory.createHumanoid({
-      outfit: p.outfit || (p.isPlayer ? 'player_home' : p.isCoachingStaff ? 'coach_psg' : 'suit_navy'),
+      outfit: p.outfit || (p.isPlayer ? (p.position === 'GK' ? 'kit_gk' : 'player_home') : p.isCoachingStaff ? 'coach_psg' : 'suit_navy'),
       skinTone: p.skin || 0xf2c6a0,
       hairColor: p.hair || 0x2c1d11,
       hairStyle: p.hairStyle ?? (idx % 3),
       heightScale: p.heightScale || (0.96 + (idx % 5) * 0.02),
-      jerseyColor: p.jerseyColor || (p.position === 'GK' ? 0xfacc15 : 0x00205b)
+      jerseyColor: p.jerseyColor || (p.position === 'GK' ? 0xeab308 : 0x00205b),
+      kit: initialKit
     });
 
     if (p.isCoachingStaff) this.attachCoachProp(mesh, p.roleKey);
@@ -218,6 +267,10 @@ export class NpcSystem {
       _velZ: 0,
       drillAnim: null,
       bibMesh: null,
+      scrimmageTeam: null,
+      kitName: p.kitName || (p.isPlayer ? formatKitName(p.name) : null),
+      shirtNumber: p.shirtNumber ?? null,
+      isCaptain: !!p.isCaptain,
       // Trạng thái 4-Tier LOD & cache ghế 3D
       _lod: 0,
       _accDt: 0,
@@ -231,12 +284,12 @@ export class NpcSystem {
       _chairCacheY: 0.14
     };
 
-    // Thêm áo tập phân đội (bib) dùng chung geometry/material (sharedAsset = true)
+    // Đai phân đội mỏng ở gấu áo (luôn giữ mặt lưng thoáng 100% để tên & số áo hiển thị rõ nét!)
     if (p.isPlayer && mesh.userData?.rig?.torso) {
       const assets = this._getSharedAssets();
       if (assets) {
         const bib = new THREE.Mesh(assets.bibGeo, assets.bibMat);
-        bib.position.y = 0.27;
+        bib.position.y = 0.055;
         bib.visible = false;
         mesh.userData.rig.torso.add(bib);
         npc.bibMesh = bib;
@@ -304,7 +357,10 @@ export class NpcSystem {
   }
 
   // Đồng bộ danh sách cầu thủ đội một PSG vào thế giới 3D (tối đa 16 cầu thủ active trên sân tập & phòng thay đồ để mượt trên iPhone)
-  syncSquadPlayers(psgSquad, currentClockHour = 9.5) {
+  syncSquadPlayers(psgSquad, currentClockHour = 9.5, activeKit = null, captainId = null) {
+    if (activeKit) this.activeClubKit = activeKit;
+    if (captainId !== null) this.captainId = captainId;
+
     const validIds = new Set(psgSquad.map((p) => p.id));
     // Xóa NPC cầu thủ đã bị bán / cho mượn + giải phóng buffer an toàn + dọn summonedPlayerNpc nếu trùng
     for (let i = this.npcs.length - 1; i >= 0; i--) {
@@ -340,6 +396,8 @@ export class NpcSystem {
       if (n.playerId) existingByPlayerId.set(n.playerId, n);
     }
 
+    const trainingNow = this.isTrainingHour(currentClockHour);
+    const drNow = this.isDressingRoomHour(currentClockHour);
     const maxVisiblePlayers = 16;
 
     // Đảm bảo mọi cầu thủ mới mua / mới đôn lên đội một đều có NPC thực tế trong thế giới 3D!
@@ -347,12 +405,18 @@ export class NpcSystem {
     for (let idx = 0; idx < candidates.length; idx++) {
       const p = candidates[idx];
       const existingNpc = existingByPlayerId.get(p.id);
+      const isCap = !!(this.captainId && p.id === this.captainId);
+      const kitName = formatKitName(p.name);
       if (existingNpc) {
         existingNpc.name = p.name;
+        existingNpc.kitName = kitName;
+        existingNpc.shirtNumber = p.shirtNumber ?? existingNpc.shirtNumber;
+        existingNpc.isCaptain = isCap;
         existingNpc.role = `${p.position} · #${p.shirtNumber || ''} PSG`;
         existingNpc.skill = p.ovr;
         existingNpc.morale = p.morale;
         existingNpc.position = p.position;
+        this._syncPlayerNpcKit(existingNpc, null, trainingNow, drNow, currentClockHour);
         continue;
       }
       if (playerNpcCount >= maxVisiblePlayers && !p.justJoined) continue;
@@ -364,6 +428,9 @@ export class NpcSystem {
         id: `npc_pl_${p.id}`,
         playerId: p.id,
         name: p.name,
+        kitName,
+        shirtNumber: p.shirtNumber ?? null,
+        isCaptain: isCap,
         role: `${p.position} · #${p.shirtNumber || ''} PSG`,
         dept: 'Đội Một PSG',
         position: p.position,
@@ -373,8 +440,8 @@ export class NpcSystem {
         skill: p.ovr,
         morale: p.morale || 84,
         relation: 82,
-        outfit: p.position === 'GK' ? 'player_away' : 'player_home',
-        jerseyColor: p.position === 'GK' ? 0xfacc15 : 0x00205b,
+        outfit: p.position === 'GK' ? 'kit_gk' : 'player_home',
+        jerseyColor: p.position === 'GK' ? 0xeab308 : 0x00205b,
         skin: skinPalette[hash % skinPalette.length],
         hair: hairPalette[hash % hairPalette.length],
         hairStyle: hash % 3,
@@ -384,6 +451,7 @@ export class NpcSystem {
       };
       const added = this.addNpc(profile, currentClockHour, true);
       if (added) {
+        this._syncPlayerNpcKit(added, null, trainingNow, drNow, currentClockHour);
         existingByPlayerId.set(p.id, added);
         playerNpcCount++;
       }
@@ -795,6 +863,7 @@ export class NpcSystem {
     if (n.isPlayer && n !== this.summonedPlayerNpc && n.mode !== 'going_president' && n.mode !== 'sit_president' && n.mode !== 'event_travel' && n.mode !== 'event_hold') {
       if (drNow) {
         if (n.bibMesh) n.bibMesh.visible = false;
+        n.scrimmageTeam = null;
         n.task = 'Có mặt tại Phòng Thay Đồ thay trang phục & chuẩn bị giáo án';
         if (n.mode !== 'dressing') {
           n.mode = 'dressing';
@@ -807,12 +876,14 @@ export class NpcSystem {
         }
       } else {
         if (n.bibMesh) n.bibMesh.visible = false;
+        n.scrimmageTeam = null;
         n.task = 'Nghỉ ngơi & phục hồi thể lực tại Phòng Thay Đồ Cầu Thủ PSG';
         if (n.mode === 'train' || n.mode === 'drill' || n.mode === 'dressing') {
           n.mode = 'rest';
           this._setLod3LogicalDestination(n, n.restSpot.x, n.restSpot.z);
         }
       }
+      this._syncPlayerNpcKit(n, null, trainingNow, drNow, clockHour);
     }
 
     // Kiểm tra cầu thủ được TrainingSystem đổi đích logic khi đang ở LOD 3
@@ -1102,6 +1173,7 @@ export class NpcSystem {
       if (n.isPlayer && n !== this.summonedPlayerNpc && n.mode !== 'going_president' && n.mode !== 'sit_president' && n.mode !== 'event_travel' && n.mode !== 'event_hold') {
         if (drNow) {
           if (n.bibMesh) n.bibMesh.visible = false;
+          n.scrimmageTeam = null;
           n.task = 'Có mặt tại Phòng Thay Đồ thay trang phục & chuẩn bị giáo án';
           if (n.mode !== 'dressing') {
             n.mode = 'dressing';
@@ -1114,12 +1186,16 @@ export class NpcSystem {
           }
         } else {
           if (n.bibMesh) n.bibMesh.visible = false;
+          n.scrimmageTeam = null;
           n.task = 'Nghỉ ngơi & phục hồi thể lực tại Phòng Thay Đồ Cầu Thủ PSG';
           if (n.mode === 'train' || n.mode === 'drill' || n.mode === 'dressing') {
             n.mode = 'rest';
             this.setNpcDestination(n, n.restSpot.x, n.restSpot.z, pathOpts);
           }
         }
+      }
+      if (n.isPlayer) {
+        this._syncPlayerNpcKit(n, null, trainingNow, drNow, clockHour);
       }
 
       // 4. Thực hiện bước di chuyển phân tầng theo LOD
@@ -1224,7 +1300,19 @@ export class NpcSystem {
         n.timer -= stepDt;
         if (n.timer <= 0 && !this.meetingActive && lod <= 1) {
           n.timer = 9 + Math.random() * 10;
-          if (n.mode === 'work_pc' && n.id !== 'npc_recep' && n.id !== 'npc_sec') {
+          if (n.isMuseumNpc) {
+            const museumSpots = [
+              { x: 26.2, z: -42.5 },
+              { x: 27.5, z: -48.2 },
+              { x: 38.5, z: -44.0 },
+              { x: 41.0, z: -48.2 },
+              { x: 42.0, z: -38.5 },
+              { x: 27.5, z: -39.5 }
+            ];
+            const spot = museumSpots[Math.floor(Math.random() * museumSpots.length)];
+            n.mode = 'stand_duty';
+            this.setNpcDestination(n, spot.x, spot.z);
+          } else if (n.mode === 'work_pc' && n.id !== 'npc_recep' && n.id !== 'npc_sec') {
             n.mode = 'roam';
             const rx = n.home.x + (Math.random() - 0.5) * 1.8;
             const rz = n.home.z + (n.home.z < 0 ? 1.4 : -1.4);

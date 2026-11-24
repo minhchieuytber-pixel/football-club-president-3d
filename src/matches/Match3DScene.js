@@ -5,6 +5,7 @@ import {
   HomeAdvantageSystem, RivalrySystem, CoachAI, CrowdReactionSystem,
   CommentarySystem, ReplaySystem
 } from './MatchSystems.js';
+import { formatKitName } from '../characters/PlayerKitSystem.js';
 
 export class Match3DScene {
   constructor(texFactory, charFactory, animSystem, audio) {
@@ -154,8 +155,10 @@ export class Match3DScene {
     this.scene.add(this.ball);
   }
 
-  startMatch(fixture, homeClub, awayClub, psgSquad, h2hMap, onUpdateUI, onMatchEnd) {
+  startMatch(fixture, homeClub, awayClub, psgSquad, h2hMap, onUpdateUI, onMatchEnd, formationSystem = null, options = {}) {
     this.state = new MatchState(fixture, homeClub, awayClub);
+    this.formationSystem = formationSystem;
+    this.subbedOutHomeIds = new Set();
     this.events = new MatchEvents();
     this.stats = new MatchStatistics();
     this.momentum = new MomentumSystem();
@@ -176,6 +179,10 @@ export class Match3DScene {
     this.ballVelY = 0;
     this.lastPasser = null;
 
+    if (this.formationSystem) {
+      this.formationSystem.startInMatchSession(5, 1);
+    }
+
     // Tin trước trận từ Lịch sử đối đầu (RivalrySystem)
     const h2h = RivalrySystem.getRecord(h2hMap || {}, homeClub.name, awayClub.name);
     const h2hText = h2h.matches > 0
@@ -183,13 +190,26 @@ export class Match3DScene {
       : `Lần chạm trán đầu tiên giữa ${homeClub.name} và ${awayClub.name} trong triều đại Chủ tịch Phạm Minh Chiêu!`;
     this.commentary.lines.unshift(`🏟️ 0' — Khai cuộc tại ${this.homeAdv.stadium} (${this.homeAdv.attendancePct}% sức chứa)! ${h2hText}`);
 
-    this.players.forEach((p) => this.scene.remove(p.mesh));
+    this.players.forEach((p) => {
+      this.charFactory.releaseMeshKit?.(p.mesh);
+      this.scene.remove(p.mesh);
+    });
     this.players = [];
 
     const psgIsHome = homeClub.name === 'Paris Saint-Germain';
-    this.benchHome = psgSquad.slice(11, 18);
+    this.activePsgKit = options.psgKit || this.formationSystem?.state?.activeKit || (psgIsHome ? 'home' : 'away');
+    const fd = this.formationSystem ? this.formationSystem.getFormationData({ fillEmpty: true }) : null;
+    const psgStarters = fd ? fd.starters.map((s) => s.player) : psgSquad.slice(0, 11);
+    this.benchHome = fd ? fd.bench.filter((b) => b.availability === 'available').map((b) => b.player) : psgSquad.slice(11, 18);
 
-    const homeForm = [
+    const mapSlotTo3D = (slot, isHomeSide) => {
+      const sign = isHomeSide ? 1 : -1;
+      const fx = ((100 - slot.formationY) / 100 - 0.5) * 58 * sign;
+      const fz = ((slot.formationX / 100) - 0.5) * 34 * sign;
+      return [fx, fz, slot.position];
+    };
+
+    const defaultHomeForm = [
       [-29,0,'GK'],[-19,-13,'LB'],[-20,-4.5,'CB'],[-20,4.5,'CB'],[-19,13,'RB'],
       [-9,-10,'CM'],[-11,0,'DM'],[-9,10,'CM'],[7,-11,'LW'],[12,0,'ST'],[7,11,'RW']
     ];
@@ -198,33 +218,59 @@ export class Match3DScene {
       [9,10,'CM'],[11,0,'DM'],[9,-10,'CM'],[-7,11,'LW'],[-12,0,'ST'],[-7,-11,'RW']
     ];
 
+    const homeForm = (psgIsHome && fd && fd.starters.length === 11)
+      ? fd.starters.map((sl) => mapSlotTo3D(sl, true))
+      : defaultHomeForm;
+    const computedAwayForm = (!psgIsHome && fd && fd.starters.length === 11)
+      ? fd.starters.map((sl) => mapSlotTo3D(sl, false))
+      : awayForm;
+
     const spawnTeam = (isHome, form, club) => {
       const isPsg = club.name === 'Paris Saint-Germain';
       const shirtCol = isPsg ? 0x00205b : (club.color === 0x00205b ? 0xef4444 : club.color);
       form.forEach(([fx, fz, role], idx) => {
-        const sq = isPsg && psgSquad[idx] ? psgSquad[idx] : null;
+        const sq = isPsg && psgStarters[idx] ? psgStarters[idx] : null;
+        const suitScore = (isPsg && fd?.starters?.[idx]?.suitability?.score) || 90;
+        const playerName = sq ? sq.name : `${club.name.split(' ')[0]} ${idx + 1}`;
+        const shirtNumber = sq?.shirtNumber ?? (idx + 1);
+        const isGK = role === 'GK';
+        const kitType = isPsg ? (isGK ? 'gk' : this.activePsgKit) : (isGK ? 'gk_away' : 'opponent');
+        const isCap = !!(isPsg && sq && this.formationSystem?.captainId === sq.id);
         const mesh = this.charFactory.createHumanoid({
-          outfit: idx === 0 ? 'player_away' : (isPsg ? 'player_home' : 'player_away'),
-          jerseyColor: idx === 0 ? (isHome ? 0xfacc15 : 0x22c55e) : shirtCol,
+          outfit: isGK ? 'kit_gk' : (isPsg ? `kit_${this.activePsgKit}` : 'player_away'),
+          jerseyColor: isGK ? (isPsg ? 0xeab308 : 0x10b981) : shirtCol,
           skinTone: this.charFactory.skinTones[idx % 5],
           hairColor: this.charFactory.hairColors[idx % 6],
           hairStyle: idx % 3,
-          heightScale: 0.94
+          heightScale: 0.94,
+          kit: {
+            kitType,
+            playerId: sq?.id || `${isHome ? 'h' : 'a'}_${idx}`,
+            displayName: sq ? formatKitName(sq.name) : formatKitName(club.name.split(' ')[0]),
+            fullName: playerName,
+            shirtNumber,
+            isCaptain: isCap,
+            position: role,
+            club: club.name,
+            clubColor: shirtCol
+          }
         });
         mesh.position.set(fx, 0, fz);
         this.scene.add(mesh);
         this.players.push({
-          mesh, isHome, isGK: idx === 0, role,
+          mesh, isHome, isPsg, isGK, role, slotIndex: idx,
           id: sq ? sq.id : `${isHome ? 'h' : 'a'}_${idx}`,
-          name: sq ? sq.name : `${club.name.split(' ')[0]} #${idx + 1}`,
+          name: playerName,
+          shirtNumber,
+          kitType,
           age: sq ? sq.age : 24 + (idx % 7),
-          rating: sq ? sq.ovr : club.rating,
+          rating: sq ? Math.round(sq.ovr * (0.65 + (suitScore / 100) * 0.35)) : club.rating,
           tech: sq ? sq.tech : club.rating,
           phys: sq ? sq.phys : club.rating,
           homePos: new THREE.Vector3(fx, 0, fz),
           stamina: 100,
-          formRating: 6.4, // Phong độ trong trận (4.8 - 9.8)
-          confidence: 0.0, // -0.2 đến +0.25
+          formRating: 6.4,
+          confidence: 0.0,
           goals: 0, assists: 0, saves: 0,
           action: null, actionTimer: 0, cooldown: 0
         });
@@ -232,7 +278,7 @@ export class Match3DScene {
     };
 
     spawnTeam(true, homeForm, homeClub);
-    spawnTeam(false, awayForm, awayClub);
+    spawnTeam(false, computedAwayForm, awayClub);
 
     const refMesh = this.charFactory.createHumanoid({ outfit: 'security', heightScale: 0.92 });
     refMesh.position.set(0, 0, 8);
@@ -245,37 +291,105 @@ export class Match3DScene {
     if (this.onUpdateUI) this.onUpdateUI(this.getHUDState());
   }
 
+  // Thay người chủ động từ Bảng sơ đồ chiến thuật hoặc tự động tạo đột biến (Impact Sub)
+  substituteHomePlayer(slotIndex, inPlayerId) {
+    if (!this.state || this.state.finished) return { ok: false, reason: 'Trận đấu đã kết thúc.' };
+    if (this.state.homeSubsUsed >= 5) return { ok: false, reason: 'Đã hết 5 lượt thay người tối đa.' };
+    if (this.subbedOutHomeIds?.has(inPlayerId)) return { ok: false, reason: 'Cầu thủ này đã bị thay ra, không thể vào lại sân.' };
+
+    const psgIsHome = this.state.homeClub.name === 'Paris Saint-Germain';
+    const outP = this.players.find((p) => !p.isRef && p.isHome === psgIsHome && p.slotIndex === slotIndex);
+    const inP = this.benchHome.find((b) => b.id === inPlayerId);
+    if (!outP || !inP) return { ok: false, reason: 'Không tìm thấy cầu thủ cần thay thế.' };
+
+    if (this.formationSystem && this.formationSystem.matchSubSession?.active) {
+      const subRes = this.formationSystem.performInMatchSubstitution(slotIndex, inPlayerId, { minute: this.state.minute });
+      if (!subRes.ok) return subRes;
+    }
+
+    const oldId = outP.id;
+    const oldName = outP.name;
+    this.subbedOutHomeIds.add(oldId);
+    this.benchHome = this.benchHome.filter((b) => b.id !== inPlayerId);
+
+    outP.id = inP.id;
+    outP.name = inP.name;
+    outP.shirtNumber = inP.shirtNumber ?? outP.shirtNumber;
+    outP.age = inP.age;
+    outP.rating = inP.ovr;
+    outP.tech = inP.tech;
+    outP.phys = inP.phys;
+    outP.stamina = 100;
+    outP.confidence = 0.14;
+    outP.formRating = 6.7;
+    this.charFactory.applyPlayerKit?.(outP.mesh, {
+      kitType: outP.isGK ? 'gk' : (this.activePsgKit || 'home'),
+      playerId: inP.id,
+      displayName: formatKitName(inP.name),
+      fullName: inP.name,
+      shirtNumber: inP.shirtNumber,
+      isCaptain: this.formationSystem?.captainId === inP.id,
+      position: outP.role,
+      club: 'Paris Saint-Germain'
+    });
+    this.state.homeSubsUsed++;
+
+    const teamName = psgIsHome ? this.state.homeClub.name : this.state.awayClub.name;
+    const evt = this.events.emit('sub', this.state.minute, psgIsHome ? 'home' : 'away', { team: teamName, inPlayer: inP.name, outPlayer: oldName });
+    this.commentary.addFromEvent(evt);
+    this.momentum.shift(psgIsHome, 4);
+    if (this.onUpdateUI) this.onUpdateUI(this.getHUDState());
+    return { ok: true, inName: inP.name, oldName };
+  }
+
+  setPsgMatchKit(kitType = 'home') {
+    this.activePsgKit = kitType;
+    for (const p of this.players) {
+      if (!p.isPsg || p.isRef) continue;
+      const nextKit = p.isGK ? 'gk' : kitType;
+      p.kitType = nextKit;
+      this.charFactory.applyPlayerKit?.(p.mesh, {
+        kitType: nextKit,
+        playerId: p.id,
+        displayName: formatKitName(p.name),
+        fullName: p.name,
+        shirtNumber: p.shirtNumber,
+        isCaptain: this.formationSystem?.captainId === p.id,
+        position: p.role,
+        club: 'Paris Saint-Germain'
+      });
+    }
+  }
+
   // 7. Hệ thống Cầu thủ dự bị tạo đột biến (Impact Sub)
   makeImpactSub(isHome = true) {
     if (!this.state || this.state.finished) return null;
     if (isHome && (this.state.homeSubsUsed >= 5 || this.benchHome.length === 0)) return null;
     const teamPlayers = this.players.filter((p) => !p.isRef && !p.isGK && p.isHome === isHome);
-    // Chọn cầu thủ mệt nhất trên sân ra nghỉ
     teamPlayers.sort((a, b) => a.stamina - b.stamina);
     const outP = teamPlayers[0];
     if (!outP) return null;
 
-    let inName = `${isHome ? this.state.homeClub.name.split(' ')[0] : this.state.awayClub.name.split(' ')[0]} Dự bị #${12 + this.state.awaySubsUsed}`;
-    let inRating = (isHome ? this.state.homeClub.rating : this.state.awayClub.rating) + 1;
-    if (isHome && this.benchHome.length > 0) {
-      const subData = this.benchHome.shift();
-      inName = subData.name;
-      inRating = subData.ovr;
-      this.state.homeSubsUsed++;
-    } else {
-      this.state.awaySubsUsed++;
+    if (isHome) {
+      const eligible = this.benchHome.find((b) => !this.subbedOutHomeIds?.has(b.id) && (b.injuryDays || 0) <= 0 && !b.suspended);
+      if (!eligible) return null;
+      const res = this.substituteHomePlayer(outP.slotIndex, eligible.id);
+      return res.ok ? { inName: res.inName, oldName: res.oldName } : null;
     }
+
+    const inName = `${this.state.awayClub.name.split(' ')[0]} Dự bị #${12 + this.state.awaySubsUsed}`;
+    const inRating = this.state.awayClub.rating + 1;
+    this.state.awaySubsUsed++;
 
     const oldName = outP.name;
     outP.name = inName;
     outP.rating = inRating;
     outP.stamina = 100;
-    outP.confidence = 0.14; // Cầu thủ dự bị vào sân sung mãn & tạo đột biến tốc độ!
+    outP.confidence = 0.14;
     outP.formRating = 6.7;
-    const teamName = isHome ? this.state.homeClub.name : this.state.awayClub.name;
-    const evt = this.events.emit('sub', this.state.minute, isHome ? 'home' : 'away', { team: teamName, inPlayer: inName, outPlayer: oldName });
+    const evt = this.events.emit('sub', this.state.minute, 'away', { team: this.state.awayClub.name, inPlayer: inName, outPlayer: oldName });
     this.commentary.addFromEvent(evt);
-    this.momentum.shift(isHome, 4);
+    this.momentum.shift(false, 4);
     if (this.onUpdateUI) this.onUpdateUI(this.getHUDState());
     return { inName, oldName };
   }
@@ -405,6 +519,7 @@ export class Match3DScene {
       const simDt = dt * this.speed;
       this.state.minute += simDt * 1.75;
       const min = this.state.minute;
+      if (this.formationSystem) this.formationSystem.updateInMatchMinute(min, false);
 
       this.momentum.decay(simDt);
       this.crowd.update(simDt, this.state.homeGoals - this.state.awayGoals, min);
@@ -430,6 +545,7 @@ export class Match3DScene {
       if (min >= 90) {
         this.state.minute = 90;
         this.state.finished = true;
+        if (this.formationSystem) this.formationSystem.updateInMatchMinute(90, true);
         this.audio.playWhistle();
         this.commentary.lines.unshift(`🏁 90' — HẾT GIỜ! ${this.state.homeClub.name} ${this.state.homeGoals} - ${this.state.awayGoals} ${this.state.awayClub.name}.`);
         if (this.onUpdateUI) this.onUpdateUI(this.getHUDState());

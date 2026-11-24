@@ -491,6 +491,19 @@ export class ParcDesPrincesZone {
         }
       }
 
+      if (extraZones.museumGroup) {
+        const mDx = playerPos.x - 34;
+        const mDz = playerPos.z + 44;
+        const mDist2 = mDx * mDx + mDz * mDz;
+        const mShellVisible = !this.cctvModeActive && mDist2 <= 105 * 105;
+        extraZones.museumGroup.visible = mShellVisible;
+        const mInterior = extraZones.museumGroup.userData?.interiorGroup;
+        if (mInterior) {
+          // Ẩn nội thất chi tiết & tủ kính cúp 3D khi người chơi ở sâu trong Trụ sở HQ hoặc xa > 42m
+          mInterior.visible = mShellVisible && playerPos.z <= -21.5 && mDist2 <= 42 * 42;
+        }
+      }
+
       if (extraZones.trainingEquipGroup) {
         extraZones.trainingEquipGroup.visible = this.lodHighGroup.visible || this.cctvModeActive;
       }
@@ -515,8 +528,11 @@ export class ParcDesPrincesZone {
     if (!playerPos) return 'Khu Nhà Điều Hành PSG';
     const dSt = Math.hypot(playerPos.x - this.stadiumCenter.x, playerPos.z - this.stadiumCenter.z);
     if (dSt <= 66) return '🏟️ SVĐ Parc des Princes (Tập luyện & Thi đấu · LOD Cao)';
+    if (playerPos.x >= 16 && playerPos.x <= 51 && playerPos.z >= -58 && playerPos.z <= -30) {
+      return '🏛️ PARIS SAINT-GERMAIN CLUB MUSEUM (Bảo tàng Danh hiệu)';
+    }
     if (playerPos.z < -62) return '🛣️ Khu Hậu Cần, Bãi Xe & Đại Lộ SVĐ';
-    if (playerPos.z < -25) return '🌳 Công Viên Nội Bộ & Phòng Thay Đồ PSG';
+    if (playerPos.z < -25) return '🌳 Công Viên Nội Bộ, Bảo Tàng & Phòng Thay Đồ PSG';
     if (playerPos.z > 23) return '🚘 Bãi Đỗ Xe & Cổng Chính PSG';
     return '🏢 Khu Nhà Điều Hành PSG';
   }

@@ -3,9 +3,11 @@
 // Đảm bảo thống nhất dữ liệu 100%: Cầu thủ ghi bàn/kiến tạo thuộc đúng đội hình ra sân, không chấn thương/treo giò, khớp tuyệt đối với bảng tỷ số & thống kê
 
 export class MatchCalendarSystem {
-  static buildSeasonSchedule(clubs, seasonStartYear = 2026) {
+  static buildSeasonSchedule(clubs, seasonStartYear = 2026, options = {}) {
     const ligue1 = clubs.filter((c) => c.league === 'Ligue 1' && c.name !== 'Paris Saint-Germain');
     const uclPool = clubs.filter((c) => c.rating >= 82 && c.name !== 'Paris Saint-Germain').slice(0, 12);
+    const qualifiedSuperCup = options.qualifiedSuperCup !== undefined ? !!options.qualifiedSuperCup : true;
+    const qualifiedClubWorldCup = options.qualifiedClubWorldCup !== undefined ? !!options.qualifiedClubWorldCup : true;
     const list = [];
     let id = 1;
 
@@ -26,13 +28,24 @@ export class MatchCalendarSystem {
 
     // Tuần 2: Trophée des Champions (Siêu cúp Pháp)
     list.push({
-      id: `fx_${id++}`, week: 2, comp: 'Trophée des Champions', round: 'Chung kết Siêu cúp Pháp',
+      id: `fx_${id++}`, week: 2, comp: 'Trophée des Champions', competitionId: 'trophee_des_champions',
+      round: 'Chung kết Siêu cúp Pháp', stage: 'final', isFinal: true,
       date: makeDate(2), time: '21:00', home: 'Paris Saint-Germain', away: 'AS Monaco',
-      stadium: 'Parc des Princes', status: 'Sắp diễn ra', played: false, homeGoals: null, awayGoals: null, importance: 1.15
+      stadium: 'Parc des Princes', status: 'Sắp diễn ra', played: false, homeGoals: null, awayGoals: null, importance: 1.2
     });
 
-    // 30 vòng Ligue 1 xen kẽ UEFA Champions League & Coupe de France
     let weekCursor = 3;
+    if (qualifiedSuperCup) {
+      const uelRep = clubs.find((c) => c.name === 'Tottenham Hotspur' || c.name === 'Chelsea') || uclPool[1];
+      list.push({
+        id: `fx_${id++}`, week: weekCursor++, comp: 'UEFA Super Cup', competitionId: 'uefa_super_cup',
+        round: 'Chung kết Siêu cúp Châu Âu', stage: 'final', isFinal: true,
+        date: makeDate(weekCursor - 1), time: '21:00', home: 'Paris Saint-Germain', away: uelRep?.name || 'Chelsea',
+        stadium: 'Sân Trung Lập Châu Âu', status: 'Sắp diễn ra', played: false, homeGoals: null, awayGoals: null, importance: 1.3
+      });
+    }
+
+    // 30 vòng Ligue 1 xen kẽ UEFA Champions League, Coupe de France & FIFA Club World Cup
     for (let round = 1; round <= 30; round++) {
       const opp = ligue1[(round - 1) % ligue1.length];
       const isHome = round % 2 === 1;
@@ -41,7 +54,7 @@ export class MatchCalendarSystem {
       const stadium = isHome ? 'Parc des Princes' : opp.stadium;
 
       list.push({
-        id: `fx_${id++}`, week: weekCursor++, comp: 'Ligue 1', round: `Vòng ${round}`,
+        id: `fx_${id++}`, week: weekCursor++, comp: 'Ligue 1', competitionId: 'ligue_1', round: `Vòng ${round}`,
         date: makeDate(weekCursor - 1), time: isHome ? '21:00' : '19:00',
         home: homeClub, away: awayClub, stadium,
         status: 'Sắp diễn ra', played: false, homeGoals: null, awayGoals: null,
@@ -50,26 +63,48 @@ export class MatchCalendarSystem {
 
       if (round % 4 === 0 && uclPool.length > 0) {
         const uOpp = uclPool[(round / 4 - 1) % uclPool.length];
-        const uHome = (round / 4) % 2 === 1;
+        const uHome = round === 28 ? true : (round / 4) % 2 === 1;
+        const stage = round <= 16 ? 'group' : round === 20 ? 'qf' : round === 24 ? 'sf' : 'final';
+        const roundLabel = round <= 16
+          ? `Vòng bảng · Lượt ${round / 4}`
+          : round === 20
+            ? 'Tứ kết Champions League'
+            : round === 24
+              ? 'Bán kết Champions League'
+              : 'Chung kết UEFA Champions League';
         list.push({
-          id: `fx_${id++}`, week: weekCursor++, comp: 'UEFA Champions League',
-          round: round <= 16 ? `Vòng bảng · Lượt ${round / 4}` : 'Vòng Knock-out Châu Âu',
+          id: `fx_${id++}`, week: weekCursor++, comp: 'UEFA Champions League', competitionId: 'ucl',
+          round: roundLabel, stage, isFinal: stage === 'final',
           date: makeDate(weekCursor - 1), time: '21:00',
           home: uHome ? 'Paris Saint-Germain' : uOpp.name,
           away: uHome ? uOpp.name : 'Paris Saint-Germain',
-          stadium: uHome ? 'Parc des Princes' : uOpp.stadium,
-          status: 'Sắp diễn ra', played: false, homeGoals: null, awayGoals: null, importance: 1.35
+          stadium: stage === 'final' ? 'Sân Trung Lập Châu Âu (Allianz Arena)' : (uHome ? 'Parc des Princes' : uOpp.stadium),
+          status: 'Sắp diễn ra', played: false, homeGoals: null, awayGoals: null, importance: stage === 'final' ? 1.5 : 1.35
         });
       }
 
-      if (round % 8 === 0) {
-        const cOpp = ligue1[(round + 2) % ligue1.length];
+      if (round === 18 && qualifiedClubWorldCup) {
+        const cwcOpp = clubs.find((c) => c.name === 'Real Madrid') || uclPool[0];
         list.push({
-          id: `fx_${id++}`, week: weekCursor++, comp: 'Coupe de France',
-          round: round === 8 ? 'Vòng 1/16' : round === 16 ? 'Tứ kết' : 'Bán kết / Chung kết',
+          id: `fx_${id++}`, week: weekCursor++, comp: 'FIFA Club World Cup', competitionId: 'fifa_club_world_cup',
+          round: 'Chung kết FIFA Club World Cup', stage: 'final', isFinal: true,
+          date: makeDate(weekCursor - 1), time: '20:00',
+          home: 'Paris Saint-Germain', away: cwcOpp?.name || 'Real Madrid',
+          stadium: 'Sân Trung Lập FIFA', status: 'Sắp diễn ra', played: false, homeGoals: null, awayGoals: null, importance: 1.45
+        });
+      }
+
+      if (round === 8 || round === 16 || round === 24 || round === 29) {
+        const cOpp = ligue1[(round + 2) % ligue1.length];
+        const stage = round === 8 ? 'r16' : round === 16 ? 'qf' : round === 24 ? 'sf' : 'final';
+        const cRound = round === 8 ? 'Vòng 1/16' : round === 16 ? 'Tứ kết' : round === 24 ? 'Bán kết' : 'Chung kết Coupe de France';
+        list.push({
+          id: `fx_${id++}`, week: weekCursor++, comp: 'Coupe de France', competitionId: 'coupe_de_france',
+          round: cRound, stage, isFinal: stage === 'final',
           date: makeDate(weekCursor - 1), time: '20:45',
-          home: 'Paris Saint-Germain', away: cOpp.name, stadium: 'Parc des Princes',
-          status: 'Sắp diễn ra', played: false, homeGoals: null, awayGoals: null, importance: 1.1
+          home: 'Paris Saint-Germain', away: cOpp.name,
+          stadium: stage === 'final' ? 'Stade de France' : 'Parc des Princes',
+          status: 'Sắp diễn ra', played: false, homeGoals: null, awayGoals: null, importance: stage === 'final' ? 1.35 : 1.15
         });
       }
     }
@@ -78,15 +113,32 @@ export class MatchCalendarSystem {
 }
 
 export class MatchSimulationEngine {
+  static validateLineup(formationSystem) {
+    if (!formationSystem) return { valid: true, missingCount: 0, avgSuitability: 85, outOfPosCount: 0 };
+    const fd = formationSystem.getFormationData({ fillEmpty: false });
+    const ev = formationSystem.getSquadEvaluation ? formationSystem.getSquadEvaluation() : null;
+    return {
+      valid: fd.starters.length === 11,
+      missingCount: Math.max(0, 11 - fd.starters.length),
+      avgSuitability: ev?.avgSuitability ?? 85,
+      outOfPosCount: ev?.outOfPosCount ?? 0
+    };
+  }
+
   static selectLineup(psgSquad, preferYouth = false, formationSystem = null) {
     if (formationSystem && !preferYouth) {
-      const fd = formationSystem.getFormationData();
+      const fd = formationSystem.getFormationData({ fillEmpty: true });
       const xi = fd.starters.map((s) => s.player).filter((p) => p && (p.injuryDays || 0) <= 0 && !p.suspended);
       if (xi.length === 11) {
-        const bench = fd.bench.map((b) => b.player).filter((p) => p && (p.injuryDays || 0) <= 0 && !p.suspended).slice(0, 7);
+        const slotRoles = fd.starters.map((s) => s.position);
+        const suitScores = fd.starters.map((s) => s.suitability?.score ?? 85);
+        const avgSuitability = suitScores.length
+          ? Math.round(suitScores.reduce((a, b) => a + b, 0) / suitScores.length)
+          : 85;
+        const bench = fd.bench.map((b) => b.player).filter((p) => p && (p.injuryDays || 0) <= 0 && !p.suspended).slice(0, 9);
         const injured = psgSquad.filter((p) => (p.injuryDays || 0) > 0);
         const suspended = psgSquad.filter((p) => !!p.suspended);
-        return { xi, bench, injured, suspended };
+        return { xi, slotRoles, avgSuitability, bench, injured, suspended };
       }
     }
     // Tuyệt đối loại trừ cầu thủ đang chấn thương hoặc bị treo giò
@@ -113,22 +165,25 @@ export class MatchSimulationEngine {
       if (xi.length >= 11) break;
       if (!xi.includes(p)) xi.push(p);
     }
-    const bench = avail.filter((p) => !xi.includes(p)).slice(0, 7);
+    const bench = avail.filter((p) => !xi.includes(p)).slice(0, 9);
     const injured = psgSquad.filter((p) => (p.injuryDays || 0) > 0);
     const suspended = psgSquad.filter((p) => !!p.suspended);
-    return { xi, bench, injured, suspended };
+    return { xi, slotRoles: xi.map((p) => p.position), avgSuitability: 86, bench, injured, suspended };
   }
 
   static buildPreMatchCoachReport(fixture, state) {
     const squad = state.getPsgSquad();
-    const { xi, injured, suspended } = MatchSimulationEngine.selectLineup(squad, false, state.formationSystem);
+    const { xi, injured, suspended, avgSuitability } = MatchSimulationEngine.selectLineup(squad, false, state.formationSystem);
     const inForm = [...xi].sort((a, b) => b.form - a.form).slice(0, 3);
     const weakSpot = [...xi].sort((a, b) => a.ovr - b.ovr)[0];
     return {
       fixture,
       coachName: state.coach.name,
       formation: state.coach.formation,
-      summary: 'Thưa Chủ tịch, công tác chuẩn bị cho trận đấu đã hoàn tất. Đội hình hiện tại có thể đáp ứng yêu cầu chuyên môn. Tuy nhiên, chúng ta cần lưu ý một số vấn đề về thể lực và phong độ của cầu thủ.',
+      avgSuitability,
+      summary: avgSuitability < 72
+        ? 'Thưa Chủ tịch, đội hình hiện có nhiều vị trí đá trái sở trường làm giảm độ gắn kết. Ban huấn luyện khuyến nghị điều chỉnh lại sơ đồ trước giờ bóng lăn.'
+        : 'Thưa Chủ tịch, công tác chuẩn bị cho trận đấu đã hoàn tất. Đội hình hiện tại có thể đáp ứng yêu cầu chuyên môn. Tuy nhiên, chúng ta cần lưu ý một số vấn đề về thể lực và phong độ của cầu thủ.',
       xi,
       injured,
       suspended,
@@ -141,14 +196,15 @@ export class MatchSimulationEngine {
   static simulateMatch(fixture, homeClub, awayClub, state, presidentDirective = 'none') {
     const psgIsHome = fixture.home === 'Paris Saint-Germain';
     const preferYouth = presidentDirective === 'youth';
-    const { xi, bench } = MatchSimulationEngine.selectLineup(state.getPsgSquad(), preferYouth, state.formationSystem);
+    const { xi, bench, avgSuitability } = MatchSimulationEngine.selectLineup(state.getPsgSquad(), preferYouth, state.formationSystem);
 
-    // 1. Tính điểm sức mạnh đội hình PSG (GK, DEF, MID, ATT, Form, Morale, Coach Tactics, Directive)
+    // 1. Tính điểm sức mạnh đội hình PSG (GK, DEF, MID, ATT, Form, Morale, Coach Tactics, Tactical Suitability, Directive)
     const avg = (arr, fn, fallback = 80) => arr.length ? arr.reduce((s, x) => s + fn(x), 0) / arr.length : fallback;
     const psgOvr = avg(xi, (p) => p.ovr, 84);
     const psgForm = avg(xi, (p) => p.form, 78);
     const psgMorale = avg(xi, (p) => p.morale, 80);
     const psgBench = avg(bench, (p) => p.ovr, 77);
+    const suitabilityMod = ((typeof avgSuitability === 'number' ? avgSuitability : 85) - 82) * 0.16;
     const directiveMod =
       presidentDirective === 'win' ? 1.8 :
       presidentDirective === 'cheer' ? 1.2 :
@@ -156,7 +212,7 @@ export class MatchSimulationEngine {
       presidentDirective === 'rest' ? -0.8 :
       presidentDirective === 'youth' ? -0.4 : 0;
 
-    const psgPower = psgOvr * 0.62 + psgForm * 0.14 + psgMorale * 0.10 + state.coach.tactics * 0.09 + psgBench * 0.05 + directiveMod + (psgIsHome ? 2.6 : -1.1);
+    const psgPower = psgOvr * 0.62 + psgForm * 0.14 + psgMorale * 0.10 + state.coach.tactics * 0.09 + psgBench * 0.05 + suitabilityMod + directiveMod + (psgIsHome ? 2.6 : -1.1);
     const oppClub = psgIsHome ? awayClub : homeClub;
     const oppPower = (oppClub?.rating || 78) * 0.96 + (psgIsHome ? -0.8 : 2.5) + (Math.random() - 0.5) * 3.8;
 
@@ -233,8 +289,20 @@ export class MatchSimulationEngine {
 
     const psgGoals = psgIsHome ? homeGoals : awayGoals;
     const oppGoals = psgIsHome ? awayGoals : homeGoals;
-    const psgWon = psgGoals > oppGoals;
-    const psgDrew = psgGoals === oppGoals;
+    const isKnockoutMatch = !!(fixture.isFinal || ['r16', 'qf', 'sf', 'final'].includes(fixture.stage));
+    let penalties = null;
+    let psgWon = psgGoals > oppGoals;
+    let psgDrew = psgGoals === oppGoals;
+    if (isKnockoutMatch && psgGoals === oppGoals) {
+      const psgPenScore = 4 + (Math.random() < (psgPower >= oppPower ? 0.65 : 0.4) ? 1 : 0);
+      const oppPenScore = psgPenScore === 5 ? (Math.random() < 0.72 ? 4 : 3) : (Math.random() < 0.55 ? 5 : 3);
+      const homePen = psgIsHome ? psgPenScore : oppPenScore;
+      const awayPen = psgIsHome ? oppPenScore : psgPenScore;
+      const penWinner = homePen > awayPen ? fixture.home : fixture.away;
+      penalties = { home: homePen, away: awayPen, winner: penWinner };
+      psgWon = penWinner === 'Paris Saint-Germain';
+      psgDrew = false;
+    }
     const cleanSheet = oppGoals === 0;
     const lateWinner = psgWon && goalEvents.some((e) => e.team === 'Paris Saint-Germain' && e.minute >= 82);
 
@@ -298,7 +366,7 @@ export class MatchSimulationEngine {
     };
 
     return {
-      fixture, homeClub, awayClub, homeGoals, awayGoals, psgIsHome, psgGoals, oppGoals, psgWon, psgDrew,
+      fixture, homeClub, awayClub, homeGoals, awayGoals, penalties, psgIsHome, psgGoals, oppGoals, psgWon, psgDrew,
       cleanSheet, lateWinner, oppName: oppClub.name,
       stats: { homePoss, awayPoss, homeShots, awayShots, homeOnTarget, awayOnTarget, homeXg, awayXg, yellowCards },
       goalEvents, ratings, motm, youngStar, gkRating, matchInjury, coachReport

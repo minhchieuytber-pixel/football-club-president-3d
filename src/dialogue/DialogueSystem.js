@@ -69,6 +69,7 @@ export class RoleDialogueDatabase {
     if (id === 'npc_acad') return 'academy';
     if (id === 'npc_med') return 'medical';
     if (id === 'npc_fac' || id === 'npc_sec') return 'facilities';
+    if (id === 'npc_curator' || id === 'npc_museum_guide') return 'museum';
     if (id === 'npc_recep') return 'reception';
     if (npc.name === 'Marquinhos') return 'captain';
     if (npc.isPlayer) return 'player';
@@ -233,6 +234,19 @@ export class RoleDialogueDatabase {
           { type: 'praise', label: '⭐ "Tôi đã theo dõi cậu thi đấu gần đây — rất ấn tượng!"', reply: 'Cảm ơn Chủ tịch Phạm Minh Chiêu! Sự ghi nhận của ngài là động lực cực lớn để tôi tiếp tục bùng nổ tại Parc des Princes!' },
           { type: 'talk', label: '💪 "Cậu cảm thấy thế nào về vai trò và thời gian thi đấu hiện tại?"', reply: 'Tôi luôn khao khát được ra sân cống hiến tối đa cho PSG. Tôi sẽ nỗ lực hết mình trong từng buổi tập để thuyết phục HLV.' },
           { type: 'talk', label: '✍️ "Cậu có dự định gắn bó lâu dài với Paris Saint-Germain không?"', reply: 'PSG là CLB tuyệt vời với tham vọng vô địch Champions League. Nếu ban lãnh đạo tin tưởng, tôi sẵn sàng ngồi vào bàn đàm phán gia hạn hợp đồng!' }
+        ]
+      },
+      museum: {
+        greeting: `Kính chào Chủ tịch Phạm Minh Chiêu tại PARIS SAINT-GERMAIN CLUB MUSEUM! Bảo tàng hiện lưu giữ ${state.trophySystem?.getTotalClubTrophies?.() || 53} danh hiệu lịch sử (${state.trophySystem?.getTotalCareerTrophies?.() || 0} cúp mới từ triều đại của ngài).`,
+        options: [
+          { type: 'talk', label: '🏆 "Tình hình trưng bày các chiếc cúp mới mùa giải gần đây thế nào?"', reply: (() => {
+            const list = state.trophySystem?.trophies || [];
+            if (list.length === 0) return 'Các bệ vinh danh Quốc Nội và Quốc Tế đang sẵn sàng hệ thống đèn chiếu và tủ kính bảo vệ. Ngay khi PSG đăng quang giải đấu chính thức, chiếc cúp 3D sẽ tự động xuất hiện tại đây!';
+            const latest = list[list.length - 1];
+            return `Chiếc cúp mới nhất là ${latest.competitionName} (${latest.seasonName}), đăng quang ngày ${latest.winningDate} dưới quyền HLV ${latest.winningManagerName}, đang tỏa sáng tại ${latest.displayLocation}!`;
+          })() },
+          { type: 'talk', label: '📜 "Giới thiệu cho tôi về 5 khu trưng bày trong Bảo tàng PSG."', reply: 'Bảo tàng gồm 5 không gian: (1) Sảnh Lịch Sử PSG từ năm 1970, (2) Phòng Danh Hiệu Quốc Nội, (3) Phòng Danh Hiệu Quốc Tế, (4) Phòng Huyền Thoại PSG, và (5) Phòng Lưu Trữ Lịch Sử Các Mùa Giải.' },
+          { type: 'praise', label: '👏 Khen ngợi công tác bảo tồn di sản & không gian sang trọng của Bảo tàng', reply: 'Xin cảm ơn Chủ tịch Phạm Minh Chiêu! Mỗi chiến công của PSG sẽ được bảo tồn nguyên vẹn đội hình vô địch và trang sử hào hùng cho các thế hệ sau.' }
         ]
       }
     };

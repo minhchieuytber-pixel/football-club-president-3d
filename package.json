@@ -5,9 +5,10 @@
   "type": "module",
   "description": "Football Club President Simulator 3D - Paris Saint-Germain (Three.js, Web Game, iPhone Landscape)",
   "scripts": {
-    "dev": "vite --host",
+    "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host 0.0.0.0 --port 3000",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "three": "^0.128.0"

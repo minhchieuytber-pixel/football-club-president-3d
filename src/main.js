@@ -17,6 +17,7 @@ import { PsgCampusScene } from './scene/PsgCampusScene.js';
 import { DressingRoomSystem } from './scene/DressingRoomSystem.js';
 import { MediaEventRooms } from './scene/MediaEventRooms.js';
 import { ParcDesPrincesZone } from './scene/ParcDesPrincesZone.js';
+import { PsgMuseumScene } from './scene/PsgMuseumScene.js';
 import { NpcSystem } from './npc/NpcSystem.js';
 import { SaveManager } from './save/SaveManager.js';
 import { GameState } from './club/GameState.js';
@@ -46,6 +47,13 @@ class FootballPresidentGame3D {
     this.audio = new AudioManager();
     this.saveManager = new SaveManager();
     this.state = new GameState();
+    this._restoredAutoSave = this.saveManager.loadAutoSync();
+    if (this._restoredAutoSave?.data) {
+      this.state.importFullState(this._restoredAutoSave.data);
+    }
+    this._suppressExitAutoSave = false;
+    this._lastAutoSaveAt = 0;
+    this._autoSaveTimer = 0;
 
     const isMobileViewport = (
       typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent || '')
@@ -78,7 +86,7 @@ class FootballPresidentGame3D {
     this._vMoveDir = new THREE.Vector3();
     this._rayTargets = [];
     this._rayHits = [];
-    this._extraZones = { mediaRoomsGroup: null, dressingRoomGroup: null, trainingEquipGroup: null, eventActive: false };
+    this._extraZones = { mediaRoomsGroup: null, dressingRoomGroup: null, museumGroup: null, trainingEquipGroup: null, eventActive: false };
     this._npcUpdateOpts = { focusPos: null, lodStrideMultiplier: 1.5, stadiumTrainingVisible: true };
 
     this.texFactory = new TextureFactory();
@@ -91,6 +99,7 @@ class FootballPresidentGame3D {
     this.dressingRoom = new DressingRoomSystem(this.campus, this.texFactory, this.furnFactory, this.state.formationSystem);
     this.mediaRooms = new MediaEventRooms(this.campus, this.texFactory, this.furnFactory);
     this.stadiumZone = new ParcDesPrincesZone(this.campus, this.texFactory, this.furnFactory, this.vehicleSystem);
+    this.museumScene = new PsgMuseumScene(this.campus, this.texFactory, this.furnFactory, this.state.trophySystem);
     this.state.trainingSystem.build3DTrainingEquipment(this.campus);
 
     this.perfManager = new AdaptivePerformanceManager(
@@ -104,7 +113,12 @@ class FootballPresidentGame3D {
     this.npcSystem.attachTrainingSystem(this.state.trainingSystem);
     this.npcSystem.spawnFromProfiles(this.state.npcs, this.state.clockHour);
     this.npcSystem.syncStaffNpcs(this.state.staffDb.active, this.state.clockHour);
-    this.npcSystem.syncSquadPlayers(this.state.getPsgSquad(), this.state.clockHour);
+    this.npcSystem.syncSquadPlayers(
+      this.state.getPsgSquad(),
+      this.state.clockHour,
+      this.state.activeKit,
+      this.state.formationSystem?.captainId || null
+    );
     this.state.signingEventSystem.attach3D(this.mediaRooms, this.npcSystem);
 
     this.eventCameraAngle = null; // Góc máy truyền hình 3D khi đang diễn ra Lễ Ký Kết / Họp Báo / PSG TV LIVE
@@ -112,7 +126,12 @@ class FootballPresidentGame3D {
 
     // Đăng ký đồng bộ Single Source of Truth -> Thế giới 3D!
     this.state.onSquadChange(() => {
-      this.npcSystem.syncSquadPlayers(this.state.getPsgSquad(), this.state.clockHour);
+      this.npcSystem.syncSquadPlayers(
+        this.state.getPsgSquad(),
+        this.state.clockHour,
+        this.state.activeKit,
+        this.state.formationSystem?.captainId || null
+      );
       this.dressingRoom.refreshDynamicElements();
     });
     this.state.onStaffChange(() => {
@@ -121,13 +140,24 @@ class FootballPresidentGame3D {
 
     this.playerMesh = this.charFactory.createHumanoid({ outfit: 'suit_president', heightScale: 1.02 });
     this.playerMesh.visible = false;
-    this.playerMesh.position.set(-26.0, 0.14, -12.5);
+    let initPos = { x: -26.0, z: -12.5, yaw: 0, pitch: -0.06 };
+    const savedPos = this._restoredAutoSave?.data?.playerPos;
+    if (savedPos && Number.isFinite(savedPos.x) && Number.isFinite(savedPos.z)) {
+      const safeInit = this.campus.resolveCollision(savedPos.x, savedPos.z, 0.42);
+      initPos = {
+        x: safeInit.x,
+        z: safeInit.z,
+        yaw: typeof savedPos.yaw === 'number' ? savedPos.yaw : 0,
+        pitch: typeof savedPos.pitch === 'number' ? savedPos.pitch : -0.06
+      };
+    }
+    this.playerMesh.position.set(initPos.x, 0.14, initPos.z);
     this.campusSceneObj.add(this.playerMesh);
 
     // Fixed-timestep physics state for player position & smooth kinematics
-    this._physPos = { x: -26.0, z: -12.5 };
-    this._prevPhysPos = { x: -26.0, z: -12.5 };
-    this._lastVisualPos = { x: -26.0, z: -12.5 };
+    this._physPos = { x: initPos.x, z: initPos.z };
+    this._prevPhysPos = { x: initPos.x, z: initPos.z };
+    this._lastVisualPos = { x: initPos.x, z: initPos.z };
     this._velX = 0;
     this._velZ = 0;
     this._stepDistAccum = 0;
@@ -136,7 +166,7 @@ class FootballPresidentGame3D {
 
     this.tpCam = new ThirdPersonCamera(this.camera);
     this.tpCam.setCollisionResolver((x, z, r) => this.campus.resolveCollision(x, z, r));
-    this.tpCam.snapTo(this.playerMesh.position, 0, -0.06);
+    this.tpCam.snapTo(this.playerMesh.position, initPos.yaw, initPos.pitch);
     this.controls = new TouchControls(this.tpCam, this.canvas, () => this.handleInteract());
 
     this.mode = 'campus';
@@ -219,23 +249,18 @@ class FootballPresidentGame3D {
       setQuality: (q) => this.applyQuality(q),
       toggleSprint: () => { this.controls.sprint = !this.controls.sprint; return this.controls.sprint; },
       interact: () => this.handleInteract(),
-      exportSnapshot: () => this.state.exportFullState({ x: this.playerMesh.position.x, z: this.playerMesh.position.z }),
-      importSnapshot: (snap) => {
-        this.state.importFullState(snap);
-        this.npcSystem.spawnFromProfiles(this.state.npcs, this.state.clockHour);
-        this.npcSystem.syncStaffNpcs(this.state.staffDb.active, this.state.clockHour);
-        this.npcSystem.syncSquadPlayers(this.state.getPsgSquad(), this.state.clockHour);
-        this.dressingRoom.refreshDynamicElements();
-        this.campus.updateDayNightCycle(this.state.clockHour, this.state.timeSystem.weather);
-        this.standUp(true);
-        this._preEventPlayerState = null;
-        if (snap.playerPos) {
-          this.playerMesh.position.set(snap.playerPos.x, 0.14, snap.playerPos.z);
-          this._syncPhysicsFromVisual();
-          this.tpCam.snapTo(this.playerMesh.position);
-        }
-        this.updateWorldStreaming(true);
-        this.perfManager.requestShadowUpdate();
+      refreshMuseumAndTv: () => {
+        this.museumScene?.syncWithTrophySystem(this.state.trophySystem);
+        this.campus?.updateBroadcastTv?.(this.state.latestTrophyBroadcast);
+        this.perfManager?.requestShadowUpdate();
+      },
+      exportSnapshot: () => this._buildExportSnapshot(),
+      importSnapshot: (snap) => this._applySnapshot(snap),
+      autoSaveNow: (mirrorIdb = true) => this.autoSaveNow(mirrorIdb),
+      resetNewGame: async () => {
+        this._suppressExitAutoSave = true;
+        await this.saveManager.clearAutoSave();
+        window.location.reload();
       }
     });
 
@@ -273,6 +298,7 @@ class FootballPresidentGame3D {
     this.applyQuality(defaultQuality);
 
     this.campus.updateDayNightCycle(this.state.clockHour, this.state.timeSystem.weather);
+    this.campus.updateBroadcastTv?.(this.state.latestTrophyBroadcast);
     this.updateWorldStreaming(true);
     this.onResize();
 
@@ -291,9 +317,93 @@ class FootballPresidentGame3D {
       }
     }
 
+    this._bindAutoSaveHandlers();
+
     this.lastTime = performance.now();
-    this.ui.toast('Chào mừng Chủ tịch Phạm Minh Chiêu! Đồng hồ chuẩn 15 phút = 1 ngày game · Trỏ vào bàn/NPC để tương tác.', 'success');
+    if (this._restoredAutoSave) {
+      this.ui.toast(`🔄 Tiếp tục phần chơi trước: ${this._restoredAutoSave.summary}`, 'success');
+    } else {
+      // Nếu LocalStorage trống, kiểm tra thêm bản sao lưu trong IndexedDB
+      this.saveManager.loadAuto().then((idbRec) => {
+        if (idbRec?.data && !this._suppressExitAutoSave && this.state.week === 1 && this.state.dayNum === 1) {
+          this._applySnapshot(idbRec.data);
+          this.ui.toast(`🔄 Tiếp tục phần chơi trước: ${idbRec.summary}`, 'success');
+        }
+      }).catch(() => {});
+      this.ui.toast('Chào mừng Chủ tịch Phạm Minh Chiêu! Đồng hồ chuẩn 15 phút = 1 ngày game · Tiến trình tự động lưu khi thoát.', 'success');
+    }
     this.resumeLoop();
+  }
+
+  _buildExportSnapshot() {
+    let px = this.playerMesh.position.x;
+    let pz = this.playerMesh.position.z;
+    if (this._preEventPlayerState) {
+      px = this._preEventPlayerState.x;
+      pz = this._preEventPlayerState.z;
+    } else if (this.seatedSeat) {
+      px = this.seatedSeat.standX;
+      pz = this.seatedSeat.standZ;
+    }
+    return this.state.exportFullState({
+      x: px,
+      z: pz,
+      yaw: this.tpCam ? this.tpCam.yaw : 0,
+      pitch: this.tpCam ? this.tpCam.pitch : -0.06
+    });
+  }
+
+  _applySnapshot(snap) {
+    if (!snap) return;
+    this.state.importFullState(snap);
+    this.npcSystem.spawnFromProfiles(this.state.npcs, this.state.clockHour);
+    this.npcSystem.syncStaffNpcs(this.state.staffDb.active, this.state.clockHour);
+    this.npcSystem.syncSquadPlayers(this.state.getPsgSquad(), this.state.clockHour);
+    this.dressingRoom.refreshDynamicElements();
+    this.museumScene?.syncWithTrophySystem(this.state.trophySystem);
+    this.campus.updateBroadcastTv?.(this.state.latestTrophyBroadcast);
+    this.campus.updateDayNightCycle(this.state.clockHour, this.state.timeSystem.weather);
+    this.standUp(true);
+    this._preEventPlayerState = null;
+    if (snap.playerPos && Number.isFinite(snap.playerPos.x) && Number.isFinite(snap.playerPos.z)) {
+      const safe = this.campus.resolveCollision(snap.playerPos.x, snap.playerPos.z, 0.42);
+      this.playerMesh.position.set(safe.x, 0.14, safe.z);
+      this._syncPhysicsFromVisual();
+      this.tpCam.snapTo(
+        this.playerMesh.position,
+        typeof snap.playerPos.yaw === 'number' ? snap.playerPos.yaw : null,
+        typeof snap.playerPos.pitch === 'number' ? snap.playerPos.pitch : null
+      );
+    }
+    this.updateWorldStreaming(true);
+    this.perfManager.requestShadowUpdate();
+  }
+
+  autoSaveNow(mirrorToIdb = false) {
+    if (this._suppressExitAutoSave) return { ok: false };
+    const now = performance.now();
+    if (!mirrorToIdb && now - this._lastAutoSaveAt < 80) return { ok: true, skipped: true };
+    this._lastAutoSaveAt = now;
+    const snap = this._buildExportSnapshot();
+    if (mirrorToIdb) {
+      return this.saveManager.saveAuto(snap);
+    }
+    return this.saveManager.saveAutoSync(snap);
+  }
+
+  _bindAutoSaveHandlers() {
+    if (typeof window === 'undefined') return;
+    this._onAutoSaveVisibility = () => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        this.autoSaveNow(true);
+      }
+    };
+    this._onAutoSaveExit = () => {
+      this.autoSaveNow(false);
+    };
+    document.addEventListener('visibilitychange', this._onAutoSaveVisibility);
+    window.addEventListener('pagehide', this._onAutoSaveExit);
+    window.addEventListener('beforeunload', this._onAutoSaveExit);
   }
 
   _bindWebGLContextHandlers() {
@@ -315,6 +425,11 @@ class FootballPresidentGame3D {
       if (this.texFactory?.markAllNeedsUpdate) this.texFactory.markAllNeedsUpdate();
       if (this.mediaRooms?.markTexturesNeedsUpdate) this.mediaRooms.markTexturesNeedsUpdate();
       if (this.dressingRoom?.markTexturesNeedsUpdate) this.dressingRoom.markTexturesNeedsUpdate();
+      if (this.museumScene?.group) {
+        this.museumScene.group.traverse((o) => {
+          if (o.material?.map) o.material.map.needsUpdate = true;
+        });
+      }
       this.perfManager.reapplyCurrentTier();
       this.perfManager.requestShadowUpdate();
       this.onResize();
@@ -394,6 +509,7 @@ class FootballPresidentGame3D {
     if (!this.stadiumZone) return;
     this._extraZones.mediaRoomsGroup = this.mediaRooms?.group || null;
     this._extraZones.dressingRoomGroup = this.dressingRoom?.group || null;
+    this._extraZones.museumGroup = this.museumScene?.group || null;
     this._extraZones.trainingEquipGroup = this.state.trainingSystem?.sceneGroup || null;
     this._extraZones.eventActive = !!this.eventCameraAngle;
     this.stadiumZone.updateStreaming(
@@ -476,6 +592,9 @@ class FootballPresidentGame3D {
         const meta = this.campus.interactables.get(obj.userData.interactId);
         if (meta) {
           if (meta.action === 'toggle_door' && meta.extra) {
+            if (meta.extra.autoOpenNearPlayer) {
+              return { type: 'obj', data: meta, prompt: meta.extra.open ? '🚪 Cửa kính tự động Bảo tàng PSG (Đang mở)' : '🚪 Mở cửa kính tự động Bảo tàng PSG' };
+            }
             return { type: 'obj', data: meta, prompt: meta.extra.open ? '🚪 Đóng cửa gỗ' : '🚪 Mở cửa gỗ' };
           }
           return { type: 'obj', data: meta, prompt: `${meta.icon} ${meta.label}` };
@@ -514,6 +633,10 @@ class FootballPresidentGame3D {
       else if (act === 'open_medical') this.ui.openComputer('squad');
       else if (act === 'open_tactics' || act === 'open_formation') this.ui.openComputer('formation');
       else if (act === 'open_signing_event') this.ui.openComputer('events');
+      else if (act === 'open_museum_ui') this.ui.openMuseumModal(t.data.extra?.tab || 'history');
+      else if (act === 'inspect_trophy' && t.data.extra?.trophyId) this.ui.openTrophyDetail(t.data.extra.trophyId);
+      else if (act === 'inspect_legend' && t.data.extra?.legendId) this.ui.openLegendDetail(t.data.extra.legendId);
+      else if (act === 'inspect_season' && t.data.extra?.season) this.ui.openSeasonArchive(t.data.extra.season);
       else if (act === 'open_stadium_cctv') this.ui.openStadiumCctvOverlay('overview_gate');
       else if (act === 'open_matchday') this.enterMatchday();
     }
@@ -640,11 +763,16 @@ class FootballPresidentGame3D {
     this._lastVisualPos.z = this.playerMesh.position.z;
     this.tpCam.setMotionState(Math.min(1.4, curSpeed / 4.2), this.controls.sprint && curSpeed > 4.6);
 
-    // 4. Streaming & Culling theo khoảng cách (5 Hz) + Doors + Signing Event + NPC 3D
+    // 4. Streaming & Culling theo khoảng cách (5 Hz) + Doors + Signing Event + NPC 3D + Periodic AutoSave
     this._streamTimer += dt;
     if (this._streamTimer >= STREAM_INTERVAL) {
       this._streamTimer = 0;
       this.updateWorldStreaming(false);
+    }
+    this._autoSaveTimer += dt;
+    if (this._autoSaveTimer >= 30) {
+      this._autoSaveTimer = 0;
+      this.autoSaveNow(true);
     }
 
     const simDt = this.state.timeSystem.isPaused() ? 0 : dt;

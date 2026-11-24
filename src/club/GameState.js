@@ -19,6 +19,8 @@ import { TrainingSystem } from '../training/TrainingSystem.js';
 import { GameTimeSystem } from '../time/GameTimeSystem.js';
 import { SigningEventSystem, createMediaNpcProfiles } from '../media/SigningEventSystem.js';
 import { MediaReputationSystem } from '../media/MediaNewsGenerator.js';
+import { TrophySystem } from '../trophies/TrophySystem.js';
+import { TournamentSystem } from '../leagues/TournamentSystem.js';
 
 export class GameState {
   constructor() {
@@ -57,6 +59,7 @@ export class GameState {
     this.seasonNum = 1;
     this.week = 1;
     this.dayNum = 1;
+    this.activeKit = 'home';
 
     // Hệ thống thời gian thống nhất toàn game (1 ngày = 15 phút thực, scale = 96)
     this.timeSystem = new GameTimeSystem('2026-08-03T09:15:00Z');
@@ -194,6 +197,7 @@ export class GameState {
     this.matchReports = [];
     this.lastMatchResult = null;
     this.lastSeasonSummary = null;
+    this.latestTrophyBroadcast = null;
 
     // Khởi tạo toàn bộ các hệ thống con kết nối chung Single Source of Truth
     this.formationSystem = new SquadFormationSystem(this);
@@ -202,6 +206,8 @@ export class GameState {
     this.developmentSystem = new PlayerDevelopmentSystem(this);
     this.trainingSystem = new TrainingSystem(this);
     this.transferSystem = new TransferSystem(this);
+    this.trophySystem = new TrophySystem(this);
+    this.tournamentSystem = new TournamentSystem(this, this.trophySystem);
     this.brandMetrics = null;
     MediaReputationSystem.ensureBrandMetrics(this);
     this.signingEventSystem = new SigningEventSystem(this);
@@ -238,6 +244,16 @@ export class GameState {
     return this.players
       .filter((p) => p.club === 'Paris Saint-Germain' && p.squadLevel !== 'Cho mượn')
       .sort((a, b) => b.ovr - a.ovr);
+  }
+
+  setActiveKit(kitKey) {
+    const valid = ['home', 'away', 'third'];
+    if (!valid.includes(kitKey)) return false;
+    if (this.activeKit === kitKey) return true;
+    this.activeKit = kitKey;
+    this.formationSystem?.notify();
+    this.notifySquadChanged();
+    return true;
   }
 
   getNextFixture() {
@@ -495,6 +511,10 @@ export class GameState {
     }
 
     PressNewsSystem.generatePostMatchNews(this, res);
+    const tourRes = this.tournamentSystem.evaluateMatchResult(res);
+    if (tourRes?.awarded && tourRes.trophy) {
+      res.awardedTrophy = tourRes.trophy;
+    }
     this.pushPhoneMsg(
       'Trung Tâm Thi Đấu PSG',
       `🏁 KẾT QUẢ: ${fx.home} ${res.homeGoals} - ${res.awayGoals} ${fx.away} (${fx.comp})`,
@@ -507,35 +527,30 @@ export class GameState {
 
   // Tổng kết mùa giải hoàn chỉnh & tự động mở kỳ chuyển nhượng Mùa Hè cho mùa mới!
   concludeSeason() {
-    const ligue1 = this.clubs.filter((c) => c.league === 'Ligue 1').sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
-    const champ = ligue1[0]?.name || 'Paris Saint-Germain';
-    const psgRankIdx = ligue1.findIndex((c) => c.name === 'Paris Saint-Germain') + 1;
+    const eos = this.tournamentSystem.resolveEndOfSeason();
+    const champ = eos.ligue1Winner;
+    const psgRankIdx = eos.psgRankIdx;
     const psgSquad = this.getPsgSquad();
     const topScorer = [...psgSquad].sort((a, b) => b.goals - a.goals)[0];
     const topAssister = [...psgSquad].sort((a, b) => b.assists - a.assists)[0];
     const expiringContracts = psgSquad.filter((p) => (p.contractYears || 1) <= 1).map((p) => p.name);
     const revenueNum = Math.round(760 + this.president.prestige * 1.2);
+    const earnedNames = eos.earnedThisSeason.map((t) => t.competitionName);
 
     const summary = {
       season: this.season,
       ligue1Winner: champ,
-      uclWinner: psgRankIdx === 1 ? 'Paris Saint-Germain' : 'Real Madrid',
+      uclWinner: eos.uclWinner,
       topScorer: topScorer ? `${topScorer.name} (${topScorer.goals} bàn)` : 'Ousmane Dembélé',
       topAssister: topAssister ? `${topAssister.name} (${topAssister.assists} kiến tạo)` : 'Vitinha',
       psgRank: `Hạng ${psgRankIdx || 1}`,
-      trophies: champ === 'Paris Saint-Germain' ? 'Vô địch Ligue 1' : 'Á quân Ligue 1',
+      trophies: earnedNames.length > 0 ? earnedNames.join(', ') : (champ === 'Paris Saint-Germain' ? 'Vô địch Ligue 1' : `Hạng ${psgRankIdx || 2} Ligue 1 (0 danh hiệu)`),
       revenue: `€${revenueNum}M`,
-      expiringContracts
+      expiringContracts,
+      earnedTrophies: eos.earnedThisSeason
     };
     this.lastSeasonSummary = summary;
     this.seasonHistory.unshift(summary);
-
-    // Ghi nhận danh hiệu cho cầu thủ PSG nếu vô địch
-    if (champ === 'Paris Saint-Germain') {
-      psgSquad.forEach((p) => {
-        if (p.career?.trophies) p.career.trophies.unshift(`Ligue 1 (${this.season})`);
-      });
-    }
 
     // Xử lý tự động các cầu thủ hết hạn cho mượn
     const loanSummary = this.transferSystem.processExpiredLoans();
@@ -576,7 +591,12 @@ export class GameState {
       this.coach.contractYears = Math.max(1, (this.coach.contractYears || 1) - 1);
     }
 
-    this.fixtures = MatchCalendarSystem.buildSeasonSchedule(this.clubs, startY);
+    const wonUclLast = eos.uclWinner === 'Paris Saint-Germain';
+    this.fixtures = MatchCalendarSystem.buildSeasonSchedule(this.clubs, startY, {
+      qualifiedSuperCup: wonUclLast,
+      qualifiedClubWorldCup: wonUclLast || (this.seasonNum % 2 === 1)
+    });
+    this.tournamentSystem.resetSeasonState();
     this.addLedger(`Tiền thưởng kết thúc mùa ${summary.season} & bản quyền truyền hình`, 85.0);
 
     // Tự động mở kỳ chuyển nhượng Mùa Hè mới (cấu hình động theo năm startY)
@@ -598,6 +618,7 @@ export class GameState {
       dayNum: this.dayNum,
       dayName: this.dayName,
       clockHour: this.clockHour,
+      activeKit: this.activeKit,
       coach: this.coach,
       finance: this.finance,
       departments: this.departments,
@@ -613,11 +634,15 @@ export class GameState {
       socialFeed: this.socialFeed,
       seasonHistory: this.seasonHistory,
       dialogueLogs: this.dialogueLogs,
+      transferLogs: this.transferLogs,
+      loseStreak: this.loseStreak,
       headToHead: this.headToHead,
       assignedTasks: this.assignedTasks,
       newsArchive: this.newsArchive,
       matchReports: this.matchReports,
+      lastMatchResult: this.lastMatchResult,
       lastSeasonSummary: this.lastSeasonSummary,
+      latestTrophyBroadcast: this.latestTrophyBroadcast,
       staffDb: this.staffDb,
       brandMetrics: this.brandMetrics,
       formationState: this.formationSystem.exportState(),
@@ -625,6 +650,8 @@ export class GameState {
       trainingState: this.trainingSystem.exportState(),
       timeState: this.timeSystem.exportState(),
       signingEventState: this.signingEventSystem.exportState(),
+      trophyState: this.trophySystem.exportState(),
+      tournamentState: this.tournamentSystem.exportState(),
       playerPos
     };
   }
@@ -632,15 +659,19 @@ export class GameState {
   importFullState(snap) {
     if (!snap) return;
     const directKeys = [
-      'president', 'season', 'seasonNum', 'week', 'dayNum', 'dayName', 'clockHour',
+      'president', 'season', 'seasonNum', 'week', 'dayNum', 'dayName', 'clockHour', 'activeKit',
       'coach', 'finance', 'departments', 'npcs', 'clubs', 'fixtures',
       'pendingReports', 'dailyBriefings', 'meetingMinutes', 'phoneInbox', 'socialFeed',
-      'seasonHistory', 'dialogueLogs', 'headToHead', 'assignedTasks', 'newsArchive',
-      'matchReports', 'lastSeasonSummary', 'brandMetrics'
+      'seasonHistory', 'dialogueLogs', 'transferLogs', 'loseStreak', 'headToHead',
+      'assignedTasks', 'newsArchive', 'matchReports', 'lastMatchResult', 'lastSeasonSummary',
+      'latestTrophyBroadcast', 'brandMetrics'
     ];
     directKeys.forEach((k) => {
       if (snap[k] !== undefined) this[k] = snap[k];
     });
+    if (!['home', 'away', 'third'].includes(this.activeKit)) {
+      this.activeKit = 'home';
+    }
 
     if (Array.isArray(snap.players)) {
       this.players = snap.players.map((p, idx) => enrichPlayerProfile(p, idx, false));
@@ -659,6 +690,8 @@ export class GameState {
     if (snap.trainingState) this.trainingSystem.importState(snap.trainingState);
     MediaReputationSystem.ensureBrandMetrics(this);
     if (snap.signingEventState) this.signingEventSystem.importState(snap.signingEventState);
+    if (snap.trophyState) this.trophySystem.importState(snap.trophyState);
+    if (snap.tournamentState) this.tournamentSystem.importState(snap.tournamentState);
 
     this.notifyStaffChanged();
     this.notifySquadChanged();

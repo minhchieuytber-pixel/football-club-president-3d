@@ -3,6 +3,7 @@
 // Gắn liền mạch với tường Đông Trụ sở chính (x = 34..58, z = -20..20) để mọi NPC đi bộ qua hành lang chính & cửa gỗ bằng Pathfinding thật!
 // Tối ưu GPU/RAM Phase 2: tách shellGroup / interiorGroup để zone culling, giảm 4 PointLights -> 1 đèn fill kiêm flash an toàn,
 // sửa rò rỉ tallyMat, chia sẻ geometry/material đạo cụ (userData.sharedAsset = true), tắt mipmap CanvasTexture & hỗ trợ dispose().
+import { drawJerseyBackSection, normalizeKitSpec } from '../characters/PlayerKitSystem.js';
 
 function markShared(asset) {
   if (!asset) return asset;
@@ -229,21 +230,15 @@ export class MediaEventRooms {
     bCtx.fillText(eventData ? `${shirtNum} ${position} · Chủ tịch Phạm Minh Chiêu` : 'CHỦ TỊCH PHẠM MINH CHIÊU · PSG', bw / 2, 164);
     this.backdropTex.needsUpdate = true;
 
-    // 3. Áo đấu PSG trưng bày tại bàn ký kết
+    // 3. Áo đấu PSG trưng bày tại bàn ký kết (dùng chung drawJerseyBackSection & theme PSG chuẩn)
     const jCtx = this.jerseyCanvas.getContext('2d');
-    jCtx.fillStyle = '#00205b';
-    jCtx.fillRect(0, 0, 256, 256);
-    jCtx.fillStyle = '#da291c';
-    jCtx.fillRect(102, 0, 52, 256);
-    jCtx.fillStyle = '#ffffff';
-    jCtx.fillRect(96, 0, 6, 256);
-    jCtx.fillRect(154, 0, 6, 256);
-    jCtx.textAlign = 'center';
-    jCtx.font = 'bold 22px sans-serif';
-    const surname = (subjectName.split(' ').pop() || 'PSG').toUpperCase();
-    jCtx.fillText(surname.slice(0, 12), 128, 74);
-    jCtx.font = 'bold 88px sans-serif';
-    jCtx.fillText(eventData?.shirtNumber ? String(eventData.shirtNumber) : '26', 128, 178);
+    const jerseySpec = normalizeKitSpec({
+      kitType: eventData?.kitType || (position === 'GK' ? 'gk' : 'home'),
+      fullName: eventData?.subjectName || 'PARIS',
+      shirtNumber: eventData?.shirtNumber || '26',
+      club: 'Paris Saint-Germain'
+    });
+    drawJerseyBackSection(jCtx, 0, 0, 256, 256, jerseySpec);
     this.jerseyTex.needsUpdate = true;
 
     if (this.liveIndicatorMat) {

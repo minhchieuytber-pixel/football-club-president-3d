@@ -273,6 +273,7 @@ export class TrainingSystem {
         for (let i = 0; i < playerNpcs.length; i++) {
           const n = playerNpcs[i];
           n.drillAnim = null;
+          n.scrimmageTeam = null;
           if (n.bibMesh) n.bibMesh.visible = false;
         }
       }
@@ -322,6 +323,7 @@ export class TrainingSystem {
       for (let i = 0; i < outfield.length; i++) {
         const n = outfield[i];
         n.mode = 'drill';
+        n.scrimmageTeam = null;
         if (n.bibMesh) n.bibMesh.visible = false;
         if (refreshMeta || !n.task) n.task = taskText;
         const tx = -12 + (i % 6) * 4.4;
@@ -343,6 +345,7 @@ export class TrainingSystem {
         const n = outfield[i];
         n.mode = 'drill';
         n.speed = 4.9;
+        n.scrimmageTeam = null;
         if (n.bibMesh) n.bibMesh.visible = false;
         if (refreshMeta || !n.task) n.task = taskText;
         const laneZ = -138.0 - (i % 7) * 4.2;
@@ -369,6 +372,7 @@ export class TrainingSystem {
         const n = outfield[i];
         n.mode = 'drill';
         n.speed = 3.6;
+        n.scrimmageTeam = null;
         if (n.bibMesh) n.bibMesh.visible = false;
         if (refreshMeta || !n.task) n.task = taskText;
         const ang = (i / ringCount) * Math.PI * 2;
@@ -408,6 +412,7 @@ export class TrainingSystem {
         const n = outfield[i];
         n.mode = 'drill';
         n.speed = 4.0;
+        n.scrimmageTeam = null;
         if (n.bibMesh) n.bibMesh.visible = false;
         if (refreshMeta || !n.task) n.task = taskText;
         const tx = i === 0 ? -18.0 : i === 1 ? -21.5 : (-10 + (i % 5) * 3.8);
@@ -452,6 +457,7 @@ export class TrainingSystem {
         const n = outfield[i];
         n.mode = 'drill';
         n.speed = 3.8;
+        n.scrimmageTeam = null;
         if (n.bibMesh) n.bibMesh.visible = false;
         if (refreshMeta || !n.task) n.task = taskText;
         const sl = slots[(i + 1) % slots.length];
@@ -477,6 +483,7 @@ export class TrainingSystem {
         const isTeamB = i >= half;
         n.mode = 'drill';
         n.speed = 4.4;
+        n.scrimmageTeam = isTeamB ? 'B' : 'A';
         if (n.bibMesh) n.bibMesh.visible = isTeamB;
         if (refreshMeta || !n.task) {
           n.task = isTeamB
