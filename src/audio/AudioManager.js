@@ -86,4 +86,24 @@ export class AudioManager {
     setTimeout(() => this.playTone(392.0, 0.22, 'triangle', 0.09), 240);
     setTimeout(() => this.playTone(523.25, 0.45, 'triangle', 0.1), 360);
   }
+
+  playTvPower(isOn = true) {
+    if (isOn) {
+      this.playTone(330, 0.08, 'sine', 0.05, 580);
+      setTimeout(() => this.playTone(660, 0.12, 'sine', 0.06), 80);
+    } else {
+      this.playTone(480, 0.1, 'sine', 0.05, 180);
+    }
+  }
+
+  playTvChannelSwitch() {
+    this.playTone(760, 0.04, 'square', 0.03, 520);
+    setTimeout(() => this.playTone(540, 0.05, 'triangle', 0.04, 680), 45);
+  }
+
+  playNewsJingle() {
+    this.playTone(587.33, 0.11, 'triangle', 0.06);
+    setTimeout(() => this.playTone(659.25, 0.11, 'triangle', 0.06), 100);
+    setTimeout(() => this.playTone(880.0, 0.22, 'triangle', 0.07), 200);
+  }
 }

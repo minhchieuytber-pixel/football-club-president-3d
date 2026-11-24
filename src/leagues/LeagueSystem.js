@@ -78,18 +78,48 @@ export function createWorldClubs() {
     ['Dinamo Zagreb','Croatia','HNL',76,40,'Maksimir','Fabio Cannavaro',0x2563eb]
   ];
 
-  return raw.map((c, i) => ({
-    id: `club_${i + 1}`,
-    name: c[0],
-    country: c[1],
-    league: c[2],
-    rating: c[3],
-    budget: c[4],
-    stadium: c[5],
-    manager: c[6],
-    color: c[7],
-    played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, pts: 0
-  }));
+  const needSets = [
+    ['ST', 'CB', 'DM'],
+    ['RW', 'CM', 'LB'],
+    ['GK', 'CB', 'ST'],
+    ['AM', 'RB', 'LW'],
+    ['CM', 'CB', 'ST']
+  ];
+
+  return raw.map((c, i) => {
+    const rating = c[3];
+    const budget = c[4];
+    const strategy = c[0] === 'Paris Saint-Germain'
+      ? 'Thống trị Châu Âu & Phát triển Học viện'
+      : rating >= 87
+        ? 'Tấn công danh hiệu'
+        : rating >= 81
+          ? 'Săn cơ hội'
+          : (i % 2 === 0 ? 'Đào tạo & Chuyển nhượng trẻ' : 'Cân bằng tài chính');
+    const seasonTarget = c[0] === 'Paris Saint-Germain'
+      ? 'Vô địch Ligue 1 & Vô địch Champions League'
+      : rating >= 87
+        ? 'Vô địch quốc nội & Bán kết Champions League'
+        : rating >= 81
+          ? 'Top 4 & Vé dự cúp Châu Âu'
+          : 'Trụ hạng an toàn & Lợi nhuận chuyển nhượng';
+    return {
+      id: `club_${i + 1}`,
+      name: c[0],
+      country: c[1],
+      league: c[2],
+      rating,
+      budget,
+      wageBudget: +(budget * 0.042 + rating * 0.03).toFixed(2),
+      positionalNeeds: needSets[i % needSets.length],
+      strategy,
+      seasonTarget,
+      stadium: c[5],
+      manager: c[6],
+      color: c[7],
+      played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, pts: 0
+    };
+  });
 }
 
 export function generateSeasonFixtures(clubs, seasonYear = 2026) {

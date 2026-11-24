@@ -30,7 +30,7 @@ export function renderTransferMarketHTML(state, uiState) {
     const maxWage = f.maxWage ? Number(f.maxWage) : 9999;
     const maxContract = f.maxContract ? Number(f.maxContract) : 99;
 
-    const list = state.players.filter((p) =>
+    const allMatches = state.players.filter((p) =>
       p.club !== 'Paris Saint-Germain' &&
       (!f.pos || f.pos === 'ALL' || p.position === f.pos) &&
       (!q || p.name.toLowerCase().includes(q)) &&
@@ -42,7 +42,12 @@ export function renderTransferMarketHTML(state, uiState) {
       p.age <= maxAge &&
       p.wage <= maxWage &&
       p.contractYears <= maxContract
-    ).slice(0, 60);
+    );
+    const pageSize = 25;
+    const totalPages = Math.max(1, Math.ceil(allMatches.length / pageSize));
+    const curPage = Math.max(1, Math.min(totalPages, Number(uiState.transferPage) || 1));
+    const startIdx = (curPage - 1) * pageSize;
+    const list = allMatches.slice(startIdx, startIdx + pageSize);
 
     content = `
       <div class="filter-bar">
@@ -57,18 +62,28 @@ export function renderTransferMarketHTML(state, uiState) {
         <input id="tf-maxwage" type="number" class="input-ctrl" placeholder="Lương≤k" value="${f.maxWage || ''}" style="max-width:76px;" />
         <input id="tf-maxct" type="number" class="input-ctrl" placeholder="HĐ≤năm" value="${f.maxContract || ''}" style="max-width:74px;" />
       </div>
-      <div class="table-wrap" style="max-height:36vh;">
+      <div class="table-wrap" style="max-height:33vh;">
         <table class="data-table">
           <thead><tr><th>Cầu thủ</th><th>CLB</th><th>VT</th><th>Tuổi</th><th>OVR/POT</th><th>Giá</th><th>Lương</th><th>HĐ</th><th>Thao tác</th></tr></thead>
           <tbody>
-            ${list.map((p) => `<tr>
+            ${list.map((p) => `<tr class="${uiState.selectedPlayerId === p.id ? 'highlight-row' : ''}" data-rowid="${p.id}">
               <td><button class="btn-xs btn-secondary open-profile-btn" data-pid="${p.id}">👤 ${p.name}</button></td>
               <td>${p.club}</td><td>${p.position}</td><td>${p.age}</td>
               <td><b>${p.ovr}</b>/${p.pot}</td><td>€${p.value}M</td><td>€${p.wage}k</td><td>${p.contractYears}n</td>
-              <td><button class="btn-xs btn-primary tr-start-neg" data-pid="${p.id}">✍️ Đàm phán</button></td>
+              <td>
+                <button class="btn-xs btn-primary tr-start-neg" data-pid="${p.id}" data-dealtype="buy">✍️ Mua</button>
+                <button class="btn-xs btn-secondary tr-start-loan-in" data-pid="${p.id}">🤝 Mượn</button>
+              </td>
             </tr>`).join('')}
           </tbody>
         </table>
+      </div>
+      <div class="btn-row" style="justify-content:space-between;align-items:center;margin-top:6px;">
+        <span class="muted">Tìm thấy <b>${allMatches.length}</b> cầu thủ · Trang <b>${curPage}/${totalPages}</b></span>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-xs btn-secondary" id="tf-prev-page" ${curPage <= 1 ? 'disabled' : ''}>◀ Trang trước</button>
+          <button class="btn-xs btn-secondary" id="tf-next-page" ${curPage >= totalPages ? 'disabled' : ''}>Trang sau ▶</button>
+        </div>
       </div>`;
   } else if (sub === 'recommended') {
     const recs = ts.getRecommendedTargets();
@@ -102,12 +117,17 @@ export function renderTransferMarketHTML(state, uiState) {
     const squad = state.getPsgSquad();
     content = `
       ${ts.incomingBids.length > 0 ? `
-        <div class="section-label">📩 Lời hỏi mua từ các CLB khác (${ts.incomingBids.length})</div>
+        <div class="section-label">📩 Lời hỏi mua / mượn từ các CLB đối thủ (${ts.incomingBids.length})</div>
         ${ts.incomingBids.map((b) => `
           <div class="card-item urgent">
-            <div class="card-head"><strong>${b.buyerClub} hỏi mua ${b.playerName} (${b.position} · OVR ${b.ovr})</strong><span class="tag ok">Đề nghị €${b.fee}M</span></div>
+            <div class="card-head">
+              <strong>${b.buyerClub} hỏi ${b.dealType === 'loan' ? 'MƯỢN' : 'MUA'} ${b.playerName} (${b.position} · OVR ${b.ovr})</strong>
+              <span class="tag ok">${b.dealType === 'loan' ? `Phí mượn €${b.fee}M${b.buyOptionFee ? ` · Mua đứt €${b.buyOptionFee}M` : ''}` : `Đề nghị €${b.fee}M`}</span>
+            </div>
+            <div class="muted" style="margin-bottom:6px;">Chiến lược đối tác: ${b.buyerStrategy || 'Cạnh tranh châu Âu'} · Vòng thương lượng: ${b.rounds || 0}</div>
             <div class="btn-row">
-              <button class="btn-xs btn-primary tr-accept-bid" data-bid="${b.id}">✅ Đồng ý bán (+€${b.fee}M)</button>
+              <button class="btn-xs btn-primary tr-accept-bid" data-bid="${b.id}">✅ Chấp nhận (+€${b.fee}M)</button>
+              <button class="btn-xs btn-accent tr-counter-bid" data-bid="${b.id}" data-fee="${Math.round(b.fee * 1.15)}">💬 Ép giá (+15%)</button>
               <button class="btn-xs btn-danger tr-reject-bid" data-bid="${b.id}">❌ Từ chối</button>
             </div>
           </div>`).join('')}
@@ -164,8 +184,19 @@ export function renderTransferMarketHTML(state, uiState) {
           ${ts.isWindowOpen() ? `<button class="btn-xs btn-danger" id="tr-close-win">🔒 Đóng kỳ chuyển nhượng & Lập báo cáo</button>` : `<button class="btn-xs btn-accent" id="tr-open-win">🟢 Mở kỳ chuyển nhượng bổ sung</button>`}
         </div>
       </div>
+      <div class="section-label">🏟️ Chiến lược & Ngân sách CLB Đối thủ Châu Âu</div>
+      <div class="table-wrap" style="max-height:18vh;margin-bottom:8px;">
+        <table class="data-table">
+          <thead><tr><th>CLB</th><th>Giải</th><th>Quỹ CN</th><th>Quỹ lương/t</th><th>Nhu cầu</th><th>Chiến lược</th></tr></thead>
+          <tbody>
+            ${state.clubs.filter((c) => c.name !== 'Paris Saint-Germain' && c.rating >= 81).slice(0, 14).map((c) => `
+              <tr><td><b>${c.name}</b></td><td>${c.league}</td><td>€${c.budget}M</td><td>€${c.wageBudget || 4.5}M</td><td>${(c.positionalNeeds || []).join(', ')}</td><td>${c.strategy || 'Cân bằng'}</td></tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
       <div class="section-label">📰 Tin đồn chuyển nhượng Châu Âu</div>
-      <div class="scroll-list" style="max-height:26vh;">
+      <div class="scroll-list" style="max-height:20vh;">
         ${ts.rumors.map((r) => `<div class="card-item"><div class="card-head"><strong>${r.title}</strong><span class="tag">${r.reliability}</span></div><p class="muted">${r.detail}</p></div>`).join('')}
       </div>`;
   }

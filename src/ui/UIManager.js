@@ -15,24 +15,38 @@ import {
   renderSeasonArchiveDetailHTML,
   renderCoronationModalHTML
 } from './MuseumView.js';
+import { renderTelevisionModalHTML } from './TelevisionView.js';
+import {
+  renderExecutiveOverviewHTML,
+  renderContractsNegotiationHTML,
+  renderSponsorsHTML,
+  renderFacilitiesHTML,
+  renderCommercialHTML,
+  renderMediaCenterHTML,
+  renderApprovalsQueueHTML
+} from './ComputerAppsView.js';
+import { DockStateManager, NavigationHistoryManager } from './DockAndNavManager.js';
 // src/ui/UIManager.js
-// Giao diện cảm ứng iPhone Landscape tối ưu + macOS Executive OS tích hợp đầy đủ:
-// Hồ sơ cầu thủ 8 tab, Nhân sự & Ban huấn luyện 12 chức vụ, Huấn luyện 3D, Chuyển nhượng 2 giai đoạn, Đồng hồ thống nhất & Speed Controls
+// Giao diện cảm ứng iPhone Landscape/Portrait tối ưu + Trung tâm Điều hành Chủ tịch (Máy tính 17 ứng dụng, TV 9 kênh, Điện thoại thông minh)
 export class UIManager {
   constructor(state, audio, saveManager, callbacks) {
     this.state = state;
     this.audio = audio;
     this.saveManager = saveManager;
     this.cb = callbacks;
-    this.activeTab = 'reports';
+    this.activeTab = 'overview';
     this.macMinimized = false;
     this.macMaximized = false;
     this.academyFilter = 'U19';
     this.transferSubTab = 'buy';
     this.transferFilters = { search: '', club: '', nat: '', pos: 'ALL', minOvr: '', minPot: '', maxAge: '', maxVal: '', maxWage: '', maxContract: '' };
+    this.transferPage = 1;
+    this.selectedPlayerId = null;
     this.staffSubTab = 'head_coach';
     this.trainingSubTab = 'schedule';
     this.eventSubTab = 'pending';
+    this.mediaSubTab = 'news';
+    this.reportsSubTab = 'daily';
     this.museumSubTab = 'history';
     this.newsCategory = 'ALL';
     this.activeArticleId = null;
@@ -42,6 +56,23 @@ export class UIManager {
     this.pendingFormationPreview = null;
     this.confirmOptimalXI = false;
     this.pitchZoom = 1.0;
+
+    // Quản lý thống nhất trạng thái thanh Dock macOS (không bao giờ reset khi bấm app/đóng cửa sổ)
+    const initialDockState = saveManager?.loadSettings?.()?.dockState || state?.uiPrefs?.dockState || null;
+    this.dockManager = new DockStateManager(initialDockState);
+
+    // Quản lý lịch sử điều hướng thông minh dùng chung toàn hệ thống (Smart Back đa cấp)
+    this.navHistory = new NavigationHistoryManager(45);
+    if (state?.uiPrefs?.navState) {
+      this.navHistory.importState(state.uiPrefs.navState);
+    }
+    this._navRestoring = false;
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._pendingConfirmAction = null;
+    this._dockPopoverOpen = false;
+    this._restoringDockScroll = false;
+    this._dockDragCleanup = null;
+
     this._abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
     this._hudEls = null;
     this._hudCache = {
@@ -145,7 +176,14 @@ export class UIManager {
       const ov = document.getElementById('portrait-warning');
       if (ov) ov.classList.add('dismissed');
     });
-    on('modal-close', () => this.closeModal());
+    on('modal-close', () => this.requestCloseModal());
+    on('modal-smart-back', () => this.handleSmartBack());
+    on('sc-cancel', () => this.hideSmartConfirmDialog());
+    on('sc-confirm', () => {
+      const fn = this._pendingConfirmAction;
+      this.hideSmartConfirmDialog();
+      if (typeof fn === 'function') fn();
+    });
 
     // Điều khiển tốc độ & tạm dừng đồng hồ toàn game (GameTimeSystem)
     on('btn-time-pause', () => {
@@ -269,6 +307,8 @@ export class UIManager {
     for (let i = 0; i < inbox.length; i++) {
       if (!inbox[i].read) unread++;
     }
+    const activeCrisesCnt = (s.rumorCrisisSystem?.crises || []).filter((c) => c.status === 'active').length;
+    unread += activeCrisesCnt;
     if (els.phoneBadge) {
       const showBadge = unread > 0;
       const badgeText = showBadge ? String(unread) : '';
@@ -329,13 +369,444 @@ export class UIManager {
     }
   }
 
-  openModal(title, html, mode = 'normal') {
+  _saveDockState() {
+    this.saveManager?.saveSettings?.({ dockState: this.dockManager.exportState() });
+  }
+
+  isSmartConfirmOpen() {
+    if (typeof document === 'undefined') return false;
+    return !!document.getElementById('smart-confirm-overlay')?.classList.contains('open');
+  }
+
+  showSmartConfirmDialog({ title = '⚠️ Xác nhận rời trang', message = '', confirmLabel = 'Rời đi', cancelLabel = 'Ở lại xử lý', onConfirm } = {}) {
+    if (typeof document === 'undefined') {
+      if (typeof onConfirm === 'function') onConfirm();
+      return;
+    }
+    const overlay = document.getElementById('smart-confirm-overlay');
+    if (!overlay) {
+      if (typeof onConfirm === 'function') onConfirm();
+      return;
+    }
+    const tEl = document.getElementById('sc-title');
+    const mEl = document.getElementById('sc-msg');
+    const cBtn = document.getElementById('sc-confirm');
+    const kBtn = document.getElementById('sc-cancel');
+    if (tEl) tEl.textContent = title;
+    if (mEl) mEl.textContent = message;
+    if (cBtn) cBtn.textContent = confirmLabel;
+    if (kBtn) kBtn.textContent = cancelLabel;
+    this._pendingConfirmAction = onConfirm || null;
+    overlay.classList.add('open');
+  }
+
+  hideSmartConfirmDialog() {
+    this._pendingConfirmAction = null;
+    if (typeof document !== 'undefined') {
+      document.getElementById('smart-confirm-overlay')?.classList.remove('open');
+    }
+  }
+
+  _captureCurrentUiSnapshot() {
+    const hasDoc = typeof document !== 'undefined';
+    const modalBody = hasDoc ? document.getElementById('modal-body') : null;
+    const macMain = hasDoc ? document.querySelector('.macos-main') : null;
+    const tableWrap = hasDoc ? document.querySelector('#modal-body .table-wrap') : null;
+    const scrollLists = hasDoc
+      ? Array.from(document.querySelectorAll('#modal-body .scroll-list')).map((el) => Math.round(el.scrollTop || 0))
+      : [];
+    const expandedIds = [];
+    if (hasDoc) {
+      document.querySelectorAll('#modal-body [data-collapse-id]').forEach((el) => {
+        const cid = el.dataset?.collapseId;
+        if (!cid) return;
+        if (el.tagName === 'DETAILS') {
+          if (el.open) expandedIds.push(cid);
+        } else if (el.classList.contains('expanded') || el.getAttribute('aria-expanded') === 'true') {
+          expandedIds.push(cid);
+        }
+      });
+    }
+    return {
+      activeTab: this.activeTab,
+      macMinimized: !!this.macMinimized,
+      macMaximized: !!this.macMaximized,
+      academyFilter: this.academyFilter,
+      transferSubTab: this.transferSubTab,
+      transferFilters: { ...this.transferFilters },
+      transferPage: this.transferPage || 1,
+      selectedPlayerId: this.selectedPlayerId || null,
+      staffSubTab: this.staffSubTab,
+      trainingSubTab: this.trainingSubTab,
+      eventSubTab: this.eventSubTab,
+      mediaSubTab: this.mediaSubTab,
+      reportsSubTab: this.reportsSubTab,
+      museumSubTab: this.museumSubTab,
+      newsCategory: this.newsCategory,
+      activeArticleId: this.activeArticleId || null,
+      selectedSlotIdx: this.selectedSlotIdx,
+      selectedBenchId: this.selectedBenchId,
+      benchPosFilter: this.benchPosFilter,
+      scrollMainTop: Math.round((macMain ? macMain.scrollTop : modalBody?.scrollTop) || 0),
+      scrollTableTop: Math.round(tableWrap?.scrollTop || 0),
+      scrollListTops: scrollLists,
+      expandedIds
+    };
+  }
+
+  _restoreUiFieldsFromSnapshot(snap) {
+    if (!snap || typeof snap !== 'object') return;
+    if (snap.activeTab) this.activeTab = snap.activeTab;
+    if (typeof snap.macMinimized === 'boolean') this.macMinimized = snap.macMinimized;
+    if (typeof snap.macMaximized === 'boolean') this.macMaximized = snap.macMaximized;
+    if (snap.academyFilter) this.academyFilter = snap.academyFilter;
+    if (snap.transferSubTab) this.transferSubTab = snap.transferSubTab;
+    if (snap.transferFilters && typeof snap.transferFilters === 'object') {
+      this.transferFilters = { ...this.transferFilters, ...snap.transferFilters };
+    }
+    if (Number.isFinite(snap.transferPage)) this.transferPage = Math.max(1, snap.transferPage);
+    if ('selectedPlayerId' in snap) this.selectedPlayerId = snap.selectedPlayerId;
+    if (snap.staffSubTab) this.staffSubTab = snap.staffSubTab;
+    if (snap.trainingSubTab) this.trainingSubTab = snap.trainingSubTab;
+    if (snap.eventSubTab) this.eventSubTab = snap.eventSubTab;
+    if (snap.mediaSubTab) this.mediaSubTab = snap.mediaSubTab;
+    if (snap.reportsSubTab) this.reportsSubTab = snap.reportsSubTab;
+    if (snap.museumSubTab) this.museumSubTab = snap.museumSubTab;
+    if (snap.newsCategory) this.newsCategory = snap.newsCategory;
+    if ('activeArticleId' in snap) this.activeArticleId = snap.activeArticleId;
+    if ('selectedSlotIdx' in snap) this.selectedSlotIdx = snap.selectedSlotIdx;
+    if ('selectedBenchId' in snap) this.selectedBenchId = snap.selectedBenchId;
+    if (snap.benchPosFilter) this.benchPosFilter = snap.benchPosFilter;
+  }
+
+  _applyDomSnapshotAfterRender(snap, focusId = null) {
+    if (typeof document === 'undefined') return;
+    const apply = () => {
+      if (snap) {
+        const macMain = document.querySelector('.macos-main');
+        const modalBody = document.getElementById('modal-body');
+        const mainScroller = macMain || modalBody;
+        if (mainScroller && Number.isFinite(snap.scrollMainTop)) {
+          mainScroller.scrollTop = snap.scrollMainTop;
+        }
+        const tableWrap = document.querySelector('#modal-body .table-wrap');
+        if (tableWrap && Number.isFinite(snap.scrollTableTop)) {
+          tableWrap.scrollTop = snap.scrollTableTop;
+        }
+        if (Array.isArray(snap.scrollListTops)) {
+          const lists = document.querySelectorAll('#modal-body .scroll-list');
+          lists.forEach((el, idx) => {
+            if (Number.isFinite(snap.scrollListTops[idx])) {
+              el.scrollTop = snap.scrollListTops[idx];
+            }
+          });
+        }
+        if (Array.isArray(snap.expandedIds)) {
+          const set = new Set(snap.expandedIds);
+          document.querySelectorAll('#modal-body [data-collapse-id]').forEach((el) => {
+            const cid = el.dataset?.collapseId;
+            if (!cid) return;
+            const isOpen = set.has(cid);
+            if (el.tagName === 'DETAILS') el.open = isOpen;
+            else {
+              el.classList.toggle('expanded', isOpen);
+              el.setAttribute('aria-expanded', String(isOpen));
+            }
+          });
+        }
+        if (snap.selectedPlayerId) {
+          document.querySelectorAll('#modal-body [data-rowid]').forEach((row) => {
+            row.classList.toggle('highlight-row', row.dataset.rowid === snap.selectedPlayerId);
+          });
+        }
+      }
+      if (focusId) {
+        const fEl = document.getElementById(focusId);
+        if (fEl && typeof fEl.focus === 'function') {
+          fEl.focus();
+          if (typeof fEl.setSelectionRange === 'function' && typeof fEl.value === 'string') {
+            const len = fEl.value.length;
+            try { fEl.setSelectionRange(len, len); } catch (_) {}
+          }
+        }
+      }
+    };
+    apply();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(apply);
+    }
+  }
+
+  _bindScrollAndCollapseTrackers() {
+    if (typeof document === 'undefined') return;
+    const syncSnap = () => {
+      if (this._navRestoring) return;
+      this.navHistory.updateCurrentSnapshot(this._captureCurrentUiSnapshot());
+    };
+    const targets = [
+      document.querySelector('.macos-main'),
+      document.getElementById('modal-body'),
+      document.querySelector('#modal-body .table-wrap'),
+      ...Array.from(document.querySelectorAll('#modal-body .scroll-list'))
+    ].filter(Boolean);
+    targets.forEach((el) => {
+      el.addEventListener('scroll', syncSnap, { passive: true });
+    });
+    document.querySelectorAll('#modal-body [data-collapse-id]').forEach((el) => {
+      const evtName = el.tagName === 'DETAILS' ? 'toggle' : 'click';
+      el.addEventListener(evtName, () => {
+        if (el.tagName !== 'DETAILS') {
+          el.classList.toggle('expanded');
+          el.setAttribute('aria-expanded', String(el.classList.contains('expanded')));
+        }
+        syncSnap();
+      });
+    });
+  }
+
+  _snapshotFormBaselines(lockReason = null, trackedPrefixRegex = null) {
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: lockReason };
+    if (typeof document === 'undefined') return;
+    const body = document.getElementById('modal-body');
+    if (!body) return;
+    const controls = body.querySelectorAll('input, select, textarea');
+    controls.forEach((ctrl) => {
+      if (!ctrl.id) return;
+      if (trackedPrefixRegex && !trackedPrefixRegex.test(ctrl.id) && ctrl.dataset.trackDirty !== 'true') return;
+      this._dirtyTracker.baseline.set(ctrl.id, String(ctrl.value ?? ''));
+      ctrl.addEventListener('input', () => {
+        this._dirtyTracker.dirty = this._computeFormDirty();
+      });
+      ctrl.addEventListener('change', () => {
+        this._dirtyTracker.dirty = this._computeFormDirty();
+      });
+    });
+  }
+
+  _computeFormDirty() {
+    if (typeof document === 'undefined') return this._dirtyTracker.dirty;
+    for (const [id, initVal] of this._dirtyTracker.baseline.entries()) {
+      const el = document.getElementById(id);
+      if (el && String(el.value ?? '') !== initVal) return true;
+    }
+    return false;
+  }
+
+  _getNavigationBlockReason(targetAction = 'back') {
+    const dirty = this._computeFormDirty();
+    if (dirty) {
+      return {
+        title: '⚠️ Biểu mẫu có thay đổi chưa lưu',
+        message: 'Các điều chỉnh lương, phí hoặc điều khoản bạn vừa nhập sẽ bị mất nếu rời khỏi màn hình này. Bạn có chắc muốn tiếp tục?',
+        confirmLabel: 'Bỏ thay đổi & Rời đi'
+      };
+    }
+    const reason = this._dirtyTracker.activeLockReason;
+    if (reason === 'incoming_call' && this.state.incomingCall) {
+      return {
+        title: '📞 Cuộc gọi khẩn chưa xử lý',
+        message: 'Chủ tịch vẫn chưa phản hồi cuộc gọi khẩn cấp hiện tại. Bạn có chắc muốn tạm thoát?',
+        confirmLabel: 'Thoát cuộc gọi'
+      };
+    }
+    if (reason === 'ctx_press_active' && this.state.contextPressConference?.activeSession && this.activeTab === 'media' && this.mediaSubTab === 'press') {
+      return {
+        title: '🎙️ Buổi họp báo đang diễn ra',
+        message: 'Phiên họp báo bối cảnh chưa hoàn tất câu trả lời. Rời khỏi bây giờ có thể làm gián đoạn phát biểu của Chủ tịch.',
+        confirmLabel: targetAction === 'close' ? 'Đóng cửa sổ' : 'Rời khỏi'
+      };
+    }
+    return null;
+  }
+
+  _freezeOutgoingSnapshot(opts = {}) {
+    if (opts?.skipHistory || this._navRestoring || !this.navHistory.current || this._outgoingSnapshotFrozen) return;
+    this.navHistory.updateCurrentSnapshot(this._captureCurrentUiSnapshot());
+    this._outgoingSnapshotFrozen = true;
+  }
+
+  _recordNavigation(entry, opts = {}) {
+    const skipHistory = !!opts.skipHistory || !!this._navRestoring;
+    if (!skipHistory && this.navHistory.current && !this._outgoingSnapshotFrozen) {
+      this.navHistory.updateCurrentSnapshot(this._captureCurrentUiSnapshot());
+    }
+    this._outgoingSnapshotFrozen = false;
+    this.navHistory.navigate({
+      ...entry,
+      uiSnapshot: opts.restoredSnapshot || this._captureCurrentUiSnapshot()
+    }, { skipHistory, replace: !!opts.replace });
+    this.refreshSmartBackButton();
+  }
+
+  refreshSmartBackButton() {
+    if (typeof document === 'undefined') return;
+    const canBack = this.navHistory.canGoBack();
+    const backTargetLabel = this.navHistory.peekBackLabel();
+    const btnText = canBack ? 'Quay lại' : 'Thoát';
+    const titleAttr = canBack ? `Quay lại: ${backTargetLabel}` : 'Đóng về Desktop 3D PSG';
+
+    const modalBack = document.getElementById('modal-smart-back');
+    if (modalBack) {
+      modalBack.classList.toggle('is-root', !canBack);
+      modalBack.title = titleAttr;
+      const lbl = modalBack.querySelector('.smart-back-label');
+      if (lbl) lbl.textContent = btnText;
+    }
+    const pcBack = document.getElementById('pc-smart-back');
+    if (pcBack) {
+      pcBack.classList.toggle('is-root', !canBack);
+      pcBack.title = titleAttr;
+      const lbl = pcBack.querySelector('.smart-back-label');
+      if (lbl) lbl.textContent = btnText;
+    }
+  }
+
+  _restoreRoute(entry) {
+    if (!entry) {
+      this.closeModal(true);
+      return;
+    }
+    this._navRestoring = true;
+    try {
+      const snap = entry.uiSnapshot || {};
+      this._restoreUiFieldsFromSnapshot(snap);
+      const opts = { skipHistory: true, restoredSnapshot: snap };
+      const p = entry.params || {};
+
+      switch (entry.screen) {
+        case 'computer':
+          if (entry.routeKey === 'pc:media') this.activeArticleId = null;
+          this.openComputer(p.tab || snap.activeTab || 'overview', opts);
+          break;
+        case 'phone':
+          this.openPhone(opts);
+          break;
+        case 'tv':
+          this.openTelevisionModal(false, opts);
+          break;
+        case 'player_profile':
+          this.openPlayerProfileModal(p.playerId, p.tab || 'overview', opts);
+          break;
+        case 'transfer_neg': {
+          const exists = this.state.transferSystem?.activeNegotiations?.some((n) => n.id === p.negId);
+          if (exists) this.openTwoStageTransferModal(p.negId, null, opts);
+          else this.openComputer('transfers', opts);
+          break;
+        }
+        case 'role_candidates':
+          this.openRoleCandidatesModal(p.roleKey, opts);
+          break;
+        case 'staff_neg':
+          this.openStaffNegotiationModal(p.staffId, null, null, opts);
+          break;
+        case 'fire_staff':
+          this.openFireStaffModal(p.roleKey, opts);
+          break;
+        case 'board_meeting':
+          this.openBoardMeeting(p.topicIdx || 0, opts);
+          break;
+        case 'player_meeting':
+          this.openPlayerMeetingSelector(p.playerId, opts);
+          break;
+        case 'fast_travel':
+          this.openFastTravel(opts);
+          break;
+        case 'matchday_flow':
+          this.openMatchdayFlow(opts);
+          break;
+        case 'match_result':
+          if (p.res) this.openMatchResultModal(p.res, opts);
+          else this.openComputer('leagues', opts);
+          break;
+        case 'trophy_detail':
+          this.openTrophyDetail(p.trophyId, opts);
+          break;
+        case 'legend_detail':
+          this.openLegendDetail(p.legendId, opts);
+          break;
+        case 'season_archive':
+          this.openSeasonArchive(p.seasonName, opts);
+          break;
+        case 'coronation':
+          if (p.trophy) this.openCoronationCelebration(p.trophy, opts);
+          else this.closeModal(true);
+          break;
+        case 'npc_dialogue': {
+          const npc = this.state.npcs?.find((n) => n.id === p.npcId);
+          if (npc) this.openNpcDialogue(npc, null, opts);
+          else this.closeModal(true);
+          break;
+        }
+        default:
+          this.openComputer('overview', opts);
+          break;
+      }
+    } finally {
+      this._navRestoring = false;
+      this.refreshSmartBackButton();
+    }
+  }
+
+  handleSmartBack() {
+    this.audio?.playClick?.();
+    // 1. Nếu đang mở popup xác nhận -> đóng popup xác nhận trước
+    if (this.isSmartConfirmOpen()) {
+      this.hideSmartConfirmDialog();
+      return;
+    }
+    // 2. Nếu đang mở hộp thoại xác nhận sơ đồ chiến thuật con trong Chiến thuật -> đóng popup con trước
+    if (this.activeTab === 'formation' && (this.pendingFormationPreview || this.confirmOptimalXI)) {
+      this.pendingFormationPreview = null;
+      this.confirmOptimalXI = false;
+      this.openComputer('formation', { skipHistory: true, preserveScroll: true });
+      return;
+    }
+
+    const executeBack = () => {
+      if (this.navHistory.canGoBack()) {
+        const prev = this.navHistory.pop();
+        this._restoreRoute(prev);
+      } else {
+        this.closeModal(true);
+      }
+    };
+
+    const guard = this._getNavigationBlockReason('back');
+    if (guard) {
+      this.showSmartConfirmDialog({
+        ...guard,
+        onConfirm: executeBack
+      });
+      return;
+    }
+    executeBack();
+  }
+
+  requestCloseModal() {
+    if (this.isSmartConfirmOpen()) {
+      this.hideSmartConfirmDialog();
+      return;
+    }
+    const guard = this._getNavigationBlockReason('close');
+    if (guard) {
+      this.showSmartConfirmDialog({
+        ...guard,
+        onConfirm: () => this.closeModal(true)
+      });
+      return;
+    }
+    this.closeModal(true);
+  }
+
+  openModal(title, html, mode = 'normal', opts = {}) {
     const wrap = document.getElementById('modal-backdrop');
     const box = document.getElementById('modal-box');
     const head = document.getElementById('modal-head-bar');
     const tEl = document.getElementById('modal-title');
     const body = document.getElementById('modal-body');
     if (!wrap || !box || !body) return;
+    this._freezeOutgoingSnapshot(opts);
+    this.hideSmartConfirmDialog();
     tEl.textContent = title;
     body.innerHTML = html;
     if (mode === 'macos') {
@@ -348,16 +819,28 @@ export class UIManager {
       body.style.padding = '12px 14px';
     }
     wrap.classList.add('open');
+    if (!opts.skipRefreshBack) this.refreshSmartBackButton();
   }
 
-  closeModal() {
+  closeModal(clearNav = true) {
+    this.hideSmartConfirmDialog();
+    this._outgoingSnapshotFrozen = false;
+    if (typeof this._dockDragCleanup === 'function') {
+      this._dockDragCleanup();
+      this._dockDragCleanup = null;
+    }
+    this._dockPopoverOpen = false;
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    if (clearNav) {
+      this.navHistory.clear();
+    }
     const wrap = document.getElementById('modal-backdrop');
     if (wrap) wrap.classList.remove('open');
     const body = document.getElementById('modal-body');
     if (body && body.innerHTML !== '') body.innerHTML = '';
     this.state.timeSystem?.clearAutoPause();
-    this.cb.endBoard();
-    this.cb.dismissPlayer();
+    this.cb.endBoard?.();
+    this.cb.dismissPlayer?.();
   }
 
   // --- 1. ĐIỆN THOẠI CHỦ TỊCH ---
@@ -373,22 +856,31 @@ export class UIManager {
           <button class="btn-danger" id="call-reject">❌ ${call.rejectLabel}</button>
         </div>
       </div>`;
-    this.openModal('📱 CUỘC GỌI KHẨN ĐẾN CHỦ TỊCH PHẠM MINH CHIÊU', html, 'normal');
+    this.openModal('📱 CUỘC GỌI KHẨN ĐẾN CHỦ TỊCH PHẠM MINH CHIÊU', html, 'normal', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: 'incoming_call' };
+    this._recordNavigation({ routeKey: 'incoming_call', screen: 'incoming_call', label: 'Cuộc gọi khẩn' }, { skipHistory: true });
     document.getElementById('call-accept')?.addEventListener('click', () => {
       call.onAccept(); this.state.incomingCall = null; this.audio.playSuccess();
-      this.toast('Đã phê duyệt qua điện thoại.', 'success'); this.closeModal();
+      this.toast('Đã phê duyệt qua điện thoại.', 'success'); this.closeModal(true);
     });
     document.getElementById('call-reject')?.addEventListener('click', () => {
       call.onReject(); this.state.incomingCall = null; this.audio.playClick();
-      this.toast('Đã từ chối và kết thúc cuộc gọi.', 'info'); this.closeModal();
+      this.toast('Đã từ chối và kết thúc cuộc gọi.', 'info'); this.closeModal(true);
     });
   }
 
-  openPhone() {
+  openPhone(opts = {}) {
     if (this.state.incomingCall) { this.showIncomingCall(this.state.incomingCall); return; }
+    const prevScroll = opts.preserveScroll ? this._captureCurrentUiSnapshot() : null;
     this.state.phoneInbox.forEach((m) => (m.read = true));
     const weekFx = this.state.getCurrentWeekFixture();
-    const msgsHtml = this.state.phoneInbox.map((m) => `
+    const s = this.state;
+    const topBid = s.transferSystem?.incomingBids?.[0] || null;
+    const topRumor = (s.rumorCrisisSystem?.rumors || []).find((r) => !r.handled) || null;
+    const activeCrises = (s.rumorCrisisSystem?.crises || []).filter((c) => c.status === 'active');
+    const pendingTotal = s.getTotalPendingApprovalsCount?.() ?? s.pendingReports.length;
+
+    const msgsHtml = s.phoneInbox.map((m) => `
       <div class="card-item ${m.urgent ? 'urgent' : ''}">
         <div class="card-head"><strong>${m.from}</strong><span class="tag">${m.urgent ? 'KHẨN' : 'Tin nhắn'}</span></div>
         <div class="card-sub">${m.title}</div>
@@ -396,43 +888,161 @@ export class UIManager {
       </div>`).join('');
 
     const html = `
+      <div class="kpi-grid" style="margin-bottom:8px;">
+        <div class="kpi-card"><span>Chờ phê duyệt</span><strong class="tabular-nums">${pendingTotal} việc</strong></div>
+        <div class="kpi-card"><span>Khủng hoảng</span><strong class="tabular-nums">${activeCrises.length} ca</strong></div>
+        <div class="kpi-card"><span>Hỏi mua PSG</span><strong class="tabular-nums">${s.transferSystem?.incomingBids?.length || 0} đề nghị</strong></div>
+        <div class="kpi-card"><span>Tin mật mới</span><strong class="tabular-nums">${(s.rumorCrisisSystem?.rumors || []).filter((r) => !r.handled).length} tin</strong></div>
+      </div>
+
+      ${activeCrises.length > 0 ? `
+        <div class="card-item urgent">
+          <div class="card-head"><strong>🚨 ${activeCrises[0].title}</strong><span class="tag bad">${activeCrises[0].severity}</span></div>
+          <p class="muted">${activeCrises[0].summary}</p>
+          <button class="btn-xs btn-danger" id="ph-open-crisis">🏛️ Họp xử lý khủng hoảng ngay</button>
+        </div>` : ''}
+
+      ${topBid ? `
+        <div class="card-item urgent">
+          <div class="card-head"><strong>📩 ${topBid.buyerClub} hỏi ${topBid.dealType === 'loan' ? 'MƯỢN' : 'MUA'} ${topBid.playerName}</strong><span class="tag ok">€${topBid.fee}M</span></div>
+          <div class="btn-row">
+            <button class="btn-xs btn-primary" id="ph-bid-acc" data-bid="${topBid.id}">✅ Chấp nhận</button>
+            <button class="btn-xs btn-accent" id="ph-bid-cnt" data-bid="${topBid.id}" data-fee="${Math.round(topBid.fee * 1.15)}">💬 Ép giá €${Math.round(topBid.fee * 1.15)}M</button>
+            <button class="btn-xs btn-danger" id="ph-bid-rej" data-bid="${topBid.id}">❌ Từ chối</button>
+          </div>
+        </div>` : ''}
+
+      ${topRumor ? `
+        <div class="card-item">
+          <div class="card-head"><strong>🕵️ ${topRumor.title}</strong><span class="tag">${topRumor.verificationStatus}</span></div>
+          <p class="muted">${topRumor.detail}</p>
+          <div class="btn-row">
+            <button class="btn-xs btn-secondary ph-rum-act" data-rid="${topRumor.id}" data-act="verify">🔍 Xác minh</button>
+            <button class="btn-xs btn-secondary ph-rum-act" data-rid="${topRumor.id}" data-act="silence">🤫 Giữ im lặng</button>
+            <button class="btn-xs btn-danger ph-rum-act" data-rid="${topRumor.id}" data-act="deny">🚫 Phủ nhận</button>
+            <button class="btn-xs btn-accent ph-rum-act" data-rid="${topRumor.id}" data-act="delegate_media">🏛️ Giao Truyền thông</button>
+          </div>
+        </div>` : ''}
+
       <div class="phone-quick-actions">
+        <button class="btn-primary" id="ph-tv">📺 TV Truyền Thông PSG</button>
+        <button class="btn-primary" id="ph-pc">💻 Máy tính (17 App)</button>
+        <button class="btn-accent" id="ph-approvals">📥 Việc chờ duyệt (${pendingTotal})</button>
         <button class="btn-primary" id="ph-board">🏛️ Họp Ban Lãnh Đạo</button>
         <button class="btn-accent" id="ph-player">🗣️ Họp Riêng Cầu Thủ</button>
-        <button class="btn-primary" id="ph-profiles">👤 Hồ sơ cầu thủ</button>
-        <button class="btn-secondary" id="ph-training">🏃 Lịch tập 3D</button>
-        <button class="btn-secondary" id="ph-staff">👔 BHL & Nhân sự</button>
-        <button class="btn-danger" id="ph-events">📺 Sự kiện & PSG TV${(this.state.signingEventSystem?.pendingEvents?.length || 0) > 0 ? ` (${this.state.signingEventSystem.pendingEvents.length})` : ''}</button>
-        <button class="btn-secondary" id="ph-archive">🗄️ Event Archive</button>
-        <button class="btn-accent" id="ph-cctv">📹 Camera SVĐ Parc des Princes</button>
+        <button class="btn-danger" id="ph-events">🎬 Sự kiện & Ký kết${(s.signingEventSystem?.pendingEvents?.length || 0) > 0 ? ` (${s.signingEventSystem.pendingEvents.length})` : ''}</button>
+        <button class="btn-accent" id="ph-cctv">📹 Camera SVĐ</button>
         <button class="btn-secondary" id="ph-map">🗺️ Đi nhanh khuôn viên</button>
-        <button class="btn-primary" id="ph-museum">🏛️ Bảo tàng PSG (${this.state.trophySystem?.getTotalClubTrophies?.() || 53})</button>
-        <button class="btn-danger" id="ph-match">⚽ ${weekFx ? `Ngày thi đấu Tuần ${this.state.week}` : 'Lịch thi đấu'}</button>
-        <button class="btn-secondary" id="ph-press">📰 Báo chí</button>
-        <button class="btn-primary" id="ph-form">👕 Sơ đồ đội hình</button>
+        <button class="btn-primary" id="ph-museum">🏛️ Bảo tàng PSG (${s.trophySystem?.getTotalClubTrophies?.() || 53})</button>
+        <button class="btn-danger" id="ph-match">⚽ ${weekFx ? `Ngày thi đấu Tuần ${s.week}` : 'Lịch thi đấu'}</button>
       </div>
-      <div class="section-label">Hộp thư & Thông báo Chủ tịch</div>
-      <div class="scroll-list">${msgsHtml}</div>`;
-    this.openModal('📱 ĐIỆN THOẠI CHỦ TỊCH PHẠM MINH CHIÊU', html, 'normal');
+      <div class="section-label">Hộp thư & Thông báo Nhanh</div>
+      <div class="scroll-list" style="max-height:30vh;">${msgsHtml}</div>`;
+
+    this.openModal('📱 ĐIỆN THOẠI CHỦ TỊCH PHẠM MINH CHIÊU', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: 'phone', screen: 'phone', label: 'Điện thoại Chủ tịch' }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot || prevScroll);
+
+    document.getElementById('ph-tv')?.addEventListener('click', () => this.openTelevisionModal());
+    document.getElementById('ph-pc')?.addEventListener('click', () => this.openComputer('overview'));
+    document.getElementById('ph-approvals')?.addEventListener('click', () => this.openComputer('approvals'));
+    document.getElementById('ph-open-crisis')?.addEventListener('click', () => { this.mediaSubTab = 'crises'; this.openComputer('media'); });
     document.getElementById('ph-board')?.addEventListener('click', () => this.openBoardMeeting());
     document.getElementById('ph-player')?.addEventListener('click', () => this.openPlayerMeetingSelector());
-    document.getElementById('ph-profiles')?.addEventListener('click', () => {
-      const first = this.state.getPsgSquad()[0];
-      if (first) this.openPlayerProfileModal(first.id, 'overview');
-    });
-    document.getElementById('ph-training')?.addEventListener('click', () => { this.openComputer('training'); });
-    document.getElementById('ph-staff')?.addEventListener('click', () => { this.openComputer('coach'); });
-    document.getElementById('ph-events')?.addEventListener('click', () => { this.eventSubTab = this.state.signingEventSystem?.broadcast?.isLive ? 'psgtv' : 'pending'; this.openComputer('events'); });
-    document.getElementById('ph-archive')?.addEventListener('click', () => { this.eventSubTab = 'archive'; this.openComputer('events'); });
-    document.getElementById('ph-cctv')?.addEventListener('click', () => { this.closeModal(); this.openStadiumCctvOverlay('overview_gate'); });
+    document.getElementById('ph-events')?.addEventListener('click', () => { this.mediaSubTab = 'ceremony'; this.eventSubTab = s.signingEventSystem?.broadcast?.isLive ? 'psgtv' : 'pending'; this.openComputer('media'); });
+    document.getElementById('ph-cctv')?.addEventListener('click', () => { this.closeModal(true); this.openStadiumCctvOverlay('overview_gate'); });
     document.getElementById('ph-map')?.addEventListener('click', () => this.openFastTravel());
-    document.getElementById('ph-museum')?.addEventListener('click', () => { this.openComputer('museum'); });
-    document.getElementById('ph-match')?.addEventListener('click', () => { this.openMatchdayFlow(); });
-    document.getElementById('ph-press')?.addEventListener('click', () => { this.openComputer('media'); });
-    document.getElementById('ph-form')?.addEventListener('click', () => { this.openComputer('formation'); });
+    document.getElementById('ph-museum')?.addEventListener('click', () => this.openComputer('museum'));
+    document.getElementById('ph-match')?.addEventListener('click', () => this.openMatchdayFlow());
+
+    document.getElementById('ph-bid-acc')?.addEventListener('click', (e) => {
+      const res = s.transferSystem.acceptIncomingBid(e.currentTarget.dataset.bid);
+      if (res.ok) { this.audio.playSuccess(); this.toast(`✅ Đã chấp nhận đề nghị cho ${res.deal.playerName} (+€${res.deal.fee}M)!`, 'success'); }
+      else { this.audio.playAlert(); this.toast(res.error, 'error'); }
+      this.openPhone({ skipHistory: true, preserveScroll: true });
+    });
+    document.getElementById('ph-bid-cnt')?.addEventListener('click', (e) => {
+      const res = s.transferSystem.counterIncomingBid(e.currentTarget.dataset.bid, Number(e.currentTarget.dataset.fee));
+      if (res.ok) { this.audio.playSuccess(); this.toast(res.message, res.outcome === 'rejected' ? 'warn' : 'info'); }
+      this.openPhone({ skipHistory: true, preserveScroll: true });
+    });
+    document.getElementById('ph-bid-rej')?.addEventListener('click', (e) => {
+      s.transferSystem.rejectIncomingBid(e.currentTarget.dataset.bid);
+      this.audio.playClick();
+      this.toast('Đã từ chối lời đề nghị.', 'info');
+      this.openPhone({ skipHistory: true, preserveScroll: true });
+    });
+    document.querySelectorAll('.ph-rum-act').forEach((b) => {
+      b.addEventListener('click', () => {
+        const res = s.rumorCrisisSystem.resolveRumor(b.dataset.rid, b.dataset.act);
+        if (res.ok) { this.audio.playSuccess(); this.toast(res.message, 'info'); }
+        else { this.audio.playAlert(); this.toast(res.error, 'error'); }
+        this.openPhone({ skipHistory: true, preserveScroll: true });
+      });
+    });
   }
 
-  openFastTravel() {
+  openTelevisionModal(switching = false, opts = {}) {
+    const tv = this.state.televisionSystem;
+    if (!tv) return;
+    const prevScroll = opts.preserveScroll ? this._captureCurrentUiSnapshot() : null;
+    if (tv.isOn && tv.programMode === 'morning_news') {
+      this.state.morningNewsSystem?.generateDigest(false);
+    }
+    const html = renderTelevisionModalHTML(this.state, switching);
+    this.openModal('📺 TV TRUYỀN THÔNG PHÒNG CHỦ TỊCH — PARIS SAINT-GERMAIN', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: 'tv', screen: 'tv', label: 'TV Truyền Thông PSG' }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot || prevScroll);
+
+    document.querySelectorAll('.tv-power-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const nextOn = tv.togglePower();
+        this.audio.playTvPower?.(nextOn);
+        this.cb.refreshTv3D?.();
+        this.toast(nextOn ? '📺 Đã bật TV Truyền Thông.' : '📺 Đã tắt TV Truyền Thông.', 'info');
+        this.openTelevisionModal(nextOn, { skipHistory: true, preserveScroll: true });
+      });
+    });
+    document.querySelector('.tv-mute-btn')?.addEventListener('click', () => {
+      const muted = tv.toggleMute();
+      this.audio.playClick();
+      this.toast(muted ? '🔇 Đã tắt tiếng TV.' : '🔊 Đã bật âm thanh TV.', 'info');
+      this.openTelevisionModal(false, { skipHistory: true, preserveScroll: true });
+    });
+    document.querySelector('.tv-morning-btn')?.addEventListener('click', () => {
+      tv.openMorningNews();
+      if (!tv.muted) this.audio.playNewsJingle?.();
+      this.cb.refreshTv3D?.();
+      this.openTelevisionModal(true, { skipHistory: true, preserveScroll: true });
+    });
+    document.querySelector('.tv-refresh-morning')?.addEventListener('click', () => {
+      this.state.morningNewsSystem?.generateDigest(true);
+      this.audio.playSuccess();
+      this.cb.refreshTv3D?.();
+      this.toast('🔄 Đã làm mới Bản Tin Sáng & Dữ liệu kênh TV theo trạng thái CLB!', 'success');
+      this.openTelevisionModal(true, { skipHistory: true, preserveScroll: true });
+    });
+    document.querySelector('.tv-goto-media')?.addEventListener('click', () => {
+      this.mediaSubTab = 'news';
+      this.openComputer('media');
+    });
+    document.querySelectorAll('.tv-ch-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const res = tv.switchChannel(b.dataset.tvch);
+        if (res.ok) {
+          if (!tv.muted) this.audio.playTvChannelSwitch?.();
+          this.cb.refreshTv3D?.();
+          this.openTelevisionModal(true, { skipHistory: true, preserveScroll: true });
+        }
+      });
+    });
+  }
+
+  openFastTravel(opts = {}) {
     const places = [
       ['president', '🏢 Phòng Chủ tịch Phạm Minh Chiêu'],
       ['boardroom', '🏛️ Phòng Họp Ban Lãnh Đạo'],
@@ -459,18 +1069,22 @@ export class UIManager {
       <div class="btn-row" style="margin-top:8px;">
         <button class="btn-accent" id="nav-open-cctv" style="width:100%;">📹 Xem Camera Giám Sát SVĐ Parc des Princes từ xa (Không cần tải LOD Cao)</button>
       </div>`;
-    this.openModal('🗺️ BẢN ĐỒ KHUÔN VIÊN TỔNG THỂ PSG (6 KHU VỰC)', html, 'normal');
-    document.getElementById('nav-open-cctv')?.addEventListener('click', () => { this.closeModal(); this.openStadiumCctvOverlay('overview_gate'); });
+    this.openModal('🗺️ BẢN ĐỒ KHUÔN VIÊN TỔNG THỂ PSG (6 KHU VỰC)', html, 'normal', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: 'fast_travel', screen: 'fast_travel', label: 'Bản đồ Khuôn viên PSG' }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
+    document.getElementById('nav-open-cctv')?.addEventListener('click', () => { this.closeModal(true); this.openStadiumCctvOverlay('overview_gate'); });
     document.querySelectorAll('.nav-jump').forEach((b) => {
       b.addEventListener('click', () => {
-        this.audio.playDoor(); this.cb.teleport(b.dataset.room); this.closeModal();
+        this.audio.playDoor(); this.cb.teleport(b.dataset.room); this.closeModal(true);
         this.toast(`Đã di chuyển đến ${b.textContent}`, 'info');
       });
     });
   }
 
   // --- 2. HỘI THOẠI CHUYÊN SÂU THEO TỪNG CHỨC VỤ, TÍNH CÁCH & GIAO NHIỆM VỤ THỰC TẾ ---
-  openNpcDialogue(npc, lastReply = null) {
+  openNpcDialogue(npc, lastReply = null, opts = {}) {
     const menu = RoleDialogueDatabase.buildMenu(npc, this.state);
     const quote = lastReply || menu.greeting;
     const npcTasks = (this.state.assignedTasks || []).filter((t) => t.ownerId === npc.id);
@@ -510,7 +1124,12 @@ export class UIManager {
       <div class="section-label">Ký ức hội thoại gần đây</div>
       <ul class="mem-list">${memHtml}</ul>`;
 
-    this.openModal(`💬 ${npc.name.toUpperCase()} · ${npc.role.toUpperCase()}`, html, 'wide');
+    const prevScroll = opts.preserveScroll ? this._captureCurrentUiSnapshot() : null;
+    this.openModal(`💬 ${npc.name.toUpperCase()} · ${npc.role.toUpperCase()}`, html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: `npc:${npc.id}`, screen: 'npc_dialogue', label: npc.name, params: { npcId: npc.id } }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot || prevScroll);
 
     document.querySelectorAll('.role-opt').forEach((b) => {
       b.addEventListener('click', () => {
@@ -524,30 +1143,30 @@ export class UIManager {
           npc.memory.unshift(`Tuần ${this.state.week}: Tiếp nhận nhiệm vụ "${task.title}" (${task.collaborators}).`);
           this.audio.playSuccess();
           this.toast(`📌 ${npc.name} đang tự tìm đường đến ${destInfo ? destInfo.label : "phòng phối hợp"} để thực hiện nhiệm vụ!`, 'success');
-          this.openNpcDialogue(npc, `${reaction} (Đã tạo nhiệm vụ: "${task.title}" · Phối hợp: ${task.collaborators})`);
+          this.openNpcDialogue(npc, `${reaction} (Đã tạo nhiệm vụ: "${task.title}" · Phối hợp: ${task.collaborators})`, { skipHistory: true, preserveScroll: true });
         } else if (opt.type === 'challenge') {
           npc.morale = Math.max(25, npc.morale - 4);
           npc.memory.unshift(`Tuần ${this.state.week}: Chủ tịch chất vấn thẳng thắn về tiến độ.`);
           this.audio.playAlert();
           const react = opt.reply || NPCPersonalitySystem.getReaction(npc.personality, 'challenge');
-          this.openNpcDialogue(npc, react);
+          this.openNpcDialogue(npc, react, { skipHistory: true, preserveScroll: true });
         } else if (opt.type === 'praise') {
           npc.morale = Math.min(100, npc.morale + 7);
           npc.relation = Math.min(100, npc.relation + 6);
           npc.memory.unshift(`Tuần ${this.state.week}: Chủ tịch khen ngợi đóng góp.`);
           this.audio.playSuccess();
-          this.openNpcDialogue(npc, opt.reply);
+          this.openNpcDialogue(npc, opt.reply, { skipHistory: true, preserveScroll: true });
         } else {
           npc.relation = Math.min(100, npc.relation + 2);
           this.audio.playClick();
-          this.openNpcDialogue(npc, opt.reply);
+          this.openNpcDialogue(npc, opt.reply, { skipHistory: true, preserveScroll: true });
         }
       });
     });
   }
 
   // --- 3. HỌP BAN LÃNH ĐẠO & HỌP RIÊNG CẦU THỦ ---
-  openBoardMeeting(topicIdx = 0) {
+  openBoardMeeting(topicIdx = 0, opts = {}) {
     this.state.timeSystem?.pushAutoPause('board_meeting');
     this.cb.summonBoard();
     const agendas = [
@@ -595,21 +1214,26 @@ export class UIManager {
         <button class="btn-primary" id="bm-approve">✅ Chủ tịch Phê duyệt</button>
         <button class="btn-danger" id="bm-reject">❌ Chủ tịch Bác bỏ</button>
       </div>`;
-    this.openModal('🏛️ HỌP BAN LÃNH ĐẠO PARIS SAINT-GERMAIN', html, 'wide');
-    document.querySelectorAll('[data-ag]').forEach((b) => b.addEventListener('click', () => this.openBoardMeeting(Number(b.dataset.ag))));
+    this.openModal('🏛️ HỌP BAN LÃNH ĐẠO PARIS SAINT-GERMAIN', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: 'board_meeting', screen: 'board_meeting', label: 'Họp Ban Lãnh Đạo', params: { topicIdx } }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
+    document.querySelectorAll('[data-ag]').forEach((b) => b.addEventListener('click', () => this.openBoardMeeting(Number(b.dataset.ag), { skipHistory: true })));
     const done = (label, ok) => {
       if (ok) ag.applyApprove(); else ag.applyReject();
       this.state.meetingMinutes.unshift({ id: `mm_${Date.now()}`, date: `Tuần ${this.state.week} · ${this.state.season}`, topic: ag.title, attendees: ag.opinions.map((o) => o[0]), votes: { approve: approveCnt, reject: rejectCnt, abstain: absCnt }, decision: `${label} (Chủ tịch Phạm Minh Chiêu)`, owner: 'Ban Điều Hành PSG' });
-      this.audio.playSuccess(); this.toast(`Đã lưu Biên bản họp: ${label}`, 'success'); this.closeModal();
+      this.audio.playSuccess(); this.toast(`Đã lưu Biên bản họp: ${label}`, 'success'); this.closeModal(true);
     };
     document.getElementById('bm-approve')?.addEventListener('click', () => done('PHÊ DUYỆT', true));
     document.getElementById('bm-reject')?.addEventListener('click', () => done('BÁC BỎ', false));
   }
 
-  openPlayerMeetingSelector(preselectedId = null) {
+  openPlayerMeetingSelector(preselectedId = null, opts = {}) {
     const squad = this.state.getPsgSquad();
     const chosen = squad.find((p) => p.id === preselectedId) || squad[0];
     if (!chosen) return;
+    this.selectedPlayerId = chosen.id;
     this.cb.summonPlayer(chosen.name);
     const topics = [
       ['motivate', '🔥 Động viên tinh thần (+8 Tinh thần, +4 Trung thành)'],
@@ -624,8 +1248,12 @@ export class UIManager {
         <div class="kpi-mini" style="margin-top:8px;"><span>Lương: <b>€${chosen.wage}k</b></span><span>HĐ: <b>${chosen.contractYears} năm</b></span><span>Hài lòng: <b>${chosen.satisfaction}%</b></span></div>
       </div>
       <div class="scroll-list">${topics.map(([k, txt]) => `<button class="btn-secondary pm-topic" data-topic="${k}" style="width:100%;text-align:left;margin-bottom:5px;">${txt}</button>`).join('')}</div>`;
-    this.openModal(`🗣️ HỌP RIÊNG CẦU THỦ · ${chosen.name.toUpperCase()}`, html, 'normal');
-    document.getElementById('pm-select')?.addEventListener('change', (e) => this.openPlayerMeetingSelector(e.target.value));
+    this.openModal(`🗣️ HỌP RIÊNG CẦU THỦ · ${chosen.name.toUpperCase()}`, html, 'normal', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: `player_meeting:${chosen.id}`, screen: 'player_meeting', label: `Họp riêng ${chosen.name}`, params: { playerId: chosen.id } }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
+    document.getElementById('pm-select')?.addEventListener('change', (e) => this.openPlayerMeetingSelector(e.target.value, { skipHistory: true }));
     document.querySelectorAll('.pm-topic').forEach((b) => {
       b.addEventListener('click', () => {
         const t = b.dataset.topic;
@@ -636,133 +1264,503 @@ export class UIManager {
         else chosen.form = Math.min(99, chosen.form + 5);
         this.audio.playSuccess();
         this.toast(`${chosen.name} đã ghi nhận trao đổi riêng với Chủ tịch!`, 'success');
-        this.closeModal();
+        this.closeModal(true);
       });
     });
   }
 
-  // --- 4. MÁY TÍNH macOS (CÓ MỤC BÁO CÁO HẰNG NGÀY & BÁO CÁO CHỜ DUYỆT TỰ BIẾN MẤT) ---
-  openComputer(tab = this.activeTab) {
-    this.activeTab = tab;
-    const pendingCnt = this.state.pendingReports.length;
-    const apps = [
-      { id: 'reports', icon: '📋', name: `Báo cáo${pendingCnt > 0 ? ` (${pendingCnt})` : ''}`, bg: 'linear-gradient(135deg,#e11d48,#881337)' },
-      { id: 'overview', icon: '🏢', name: 'Tổng quan', bg: 'linear-gradient(135deg,#2563eb,#1e3a8a)' },
-      { id: 'departments', icon: '🏛️', name: '12 Phòng ban', bg: 'linear-gradient(135deg,#7c3aed,#4c1d95)' },
-      { id: 'formation', icon: '👕', name: 'Sơ đồ đội hình', bg: 'linear-gradient(135deg,#0284c7,#00205b)' },
-      { id: 'squad', icon: '⚽', name: 'Đội hình & Hồ sơ', bg: 'linear-gradient(135deg,#1d4ed8,#0f172a)' },
-      { id: 'training', icon: '🏃', name: 'Huấn luyện 3D', bg: 'linear-gradient(135deg,#059669,#064e3b)' },
-      { id: 'coach', icon: '🎯', name: 'Nhân sự & BHL (12)', bg: 'linear-gradient(135deg,#0891b2,#164e63)' },
-      { id: 'academy', icon: '🎓', name: 'Học viện', bg: 'linear-gradient(135deg,#16a34a,#14532d)' },
-      { id: 'transfers', icon: '🤝', name: 'Chuyển nhượng', bg: 'linear-gradient(135deg,#ea580c,#9a3412)' },
-      { id: 'events', icon: '📺', name: `Sự kiện & PSG TV${(this.state.signingEventSystem?.pendingEvents?.length || 0) > 0 ? ` (${this.state.signingEventSystem.pendingEvents.length})` : ''}`, bg: 'linear-gradient(135deg,#dc2626,#7f1d1d)' },
-      { id: 'finance', icon: '💶', name: 'Tài chính', bg: 'linear-gradient(135deg,#ca8a04,#713f12)' },
-      { id: 'leagues', icon: '🏆', name: 'Lịch & BXH', bg: 'linear-gradient(135deg,#dc2626,#7f1d1d)' },
-      { id: 'museum', icon: '🏛️', name: 'Bảo tàng PSG', bg: 'linear-gradient(135deg,#b45309,#1e293b)' },
-      { id: 'media', icon: '📰', name: 'Truyền thông', bg: 'linear-gradient(135deg,#db2777,#831843)' },
-      { id: 'history', icon: '💾', name: 'Lưu & Biên bản', bg: 'linear-gradient(135deg,#475569,#1e293b)' }
-    ];
-    const currentApp = apps.find((a) => a.id === tab) || apps[0];
-
-    let content = '';
-    if (tab === 'reports') content = this.renderReportsTab();
-    else if (tab === 'overview') content = this.renderOverviewTab();
-    else if (tab === 'departments') content = this.renderDepartmentsTab();
-    else if (tab === 'formation') content = this.renderFormationTab();
-    else if (tab === 'squad') content = this.renderSquadTab();
-    else if (tab === 'training') content = renderTrainingTabHTML(this.state, this.trainingSubTab);
-    else if (tab === 'academy') content = this.renderAcademyTab();
-    else if (tab === 'transfers') content = renderTransferMarketHTML(this.state, this);
-    else if (tab === 'events') content = renderSigningEventHubHTML(this.state, this.eventSubTab);
-    else if (tab === 'coach') content = renderStaffCoachTabHTML(this.state, this.staffSubTab);
-    else if (tab === 'finance') content = this.renderFinanceTab();
-    else if (tab === 'leagues') content = this.renderLeaguesTab();
-    else if (tab === 'museum') content = renderMuseumHubHTML(this.state, this.museumSubTab);
-    else if (tab === 'media') content = this.renderMediaTab();
-    else content = this.renderHistorySaveTab();
-
-    const html = `
-      <div class="macos-desktop ${this.macMaximized ? 'maximized' : ''}">
-        <div class="macos-menubar">
-          <div class="mac-menu-left">
-            <span class="mac-apple"></span>
-            <b>${currentApp.name}</b>
-            <span class="mac-menu-item">PSG OS</span>
-            <span class="mac-menu-item">Hồ sơ</span>
-          </div>
-          <div class="mac-menu-right">
-            <span>€${this.state.finance.budget.toFixed(1)}M</span>
-            <span>${this.formatClock(this.state.clockHour)}</span>
-            <button class="mac-exit-btn" id="mac-top-exit">Thoát</button>
-          </div>
-        </div>
-        <div class="macos-workspace">
-          ${this.macMinimized ? `
-            <div class="macos-desktop-hint">
-              <div class="mac-desktop-badge">PARIS SAINT-GERMAIN · macOS EXECUTIVE</div>
-              <p>Chọn biểu tượng trên thanh Dock bên dưới để mở ứng dụng quản lý.</p>
+  // --- 4. MÁY TÍNH QUẢN LÝ PSG (17 ỨNG DỤNG CHUYÊN NGHIỆP ĐỒNG BỘ TOÀN HỆ THỐNG) ---
+  _renderComputerWorkspaceInnerHTML(resolvedTab, currentApp, apps, content) {
+    if (this.macMinimized) {
+      return `
+        <div class="macos-desktop-hint">
+          <div class="mac-desktop-badge">PARIS SAINT-GERMAIN · EXECUTIVE WORKSTATION</div>
+          <p>Chọn biểu tượng trên thanh Dock để mở ứng dụng quản lý.</p>
+        </div>`;
+    }
+    return `
+      <div class="macos-window">
+        <div class="macos-titlebar">
+          <div class="mac-title-left">
+            <div class="traffic-lights">
+              <button type="button" class="tl red" id="mac-close" title="Đóng máy tính"></button>
+              <button type="button" class="tl yellow" id="mac-min" title="Thu nhỏ xuống Desktop"></button>
+              <button type="button" class="tl green" id="mac-max" title="Phóng to / Thu gọn"></button>
             </div>
-          ` : `
-            <div class="macos-window">
-              <div class="macos-titlebar">
-                <div class="traffic-lights">
-                  <button class="tl red" id="mac-close" title="Đóng máy tính"></button>
-                  <button class="tl yellow" id="mac-min" title="Thu nhỏ xuống Desktop"></button>
-                  <button class="tl green" id="mac-max" title="Phóng to / Thu gọn"></button>
-                </div>
-                <div class="macos-win-title">${currentApp.icon} ${currentApp.name} — Paris Saint-Germain</div>
-                <div style="width:48px;"></div>
-              </div>
-              <div class="macos-body">
-                <aside class="macos-sidebar">
-                  ${apps.map((a) => `<button class="mac-side-item ${a.id === tab ? 'active' : ''}" data-pctab="${a.id}"><span>${a.icon}</span><span>${a.name}</span></button>`).join('')}
-                </aside>
-                <main class="macos-main">${content}</main>
-              </div>
-            </div>
-          `}
-        </div>
-        <div class="macos-dock-wrap">
-          <div class="macos-dock">
-            ${apps.map((a) => `
-              <button class="dock-item ${a.id === tab && !this.macMinimized ? 'active' : ''}" data-pctab="${a.id}" title="${a.name}">
-                <span class="dock-icon" style="background:${a.bg}">${a.icon}</span>
-                <span class="dock-dot"></span>
-              </button>`).join('')}
+            <button type="button" class="smart-back-btn" id="pc-smart-back" aria-label="Quay lại">
+              <span class="smart-back-arrow">←</span>
+              <span class="smart-back-label">Quay lại</span>
+            </button>
           </div>
+          <div class="macos-win-title">${currentApp.icon} ${currentApp.name} — Paris Saint-Germain</div>
+          <div style="width:28px;flex-shrink:0;"></div>
+        </div>
+        <div class="macos-body">
+          <aside class="macos-sidebar">
+            ${apps.map((a) => `<button type="button" class="mac-side-item ${a.id === resolvedTab ? 'active' : ''}" data-pctab="${a.id}"><span>${a.icon}</span><span>${a.name}</span></button>`).join('')}
+          </aside>
+          <main class="macos-main">${content}</main>
         </div>
       </div>`;
+  }
 
-    this.openModal('', html, 'macos');
+  _renderDockSettingsPopoverHTML() {
+    const ds = this.dockManager.getState();
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="color:#fde68a;">⚓ Cấu hình Thanh Dock</strong>
+        <button type="button" class="btn-xs btn-secondary" id="dock-pop-close">✕</button>
+      </div>
+      <div class="muted">Vị trí neo:</div>
+      <div class="dock-pop-row">
+        <button type="button" class="btn-xs ${ds.position === 'bottom' ? 'btn-primary' : 'btn-secondary'}" data-dock-pos="bottom">⬇️ Đáy</button>
+        <button type="button" class="btn-xs ${ds.position === 'left' ? 'btn-primary' : 'btn-secondary'}" data-dock-pos="left">⬅️ Trái</button>
+        <button type="button" class="btn-xs ${ds.position === 'right' ? 'btn-primary' : 'btn-secondary'}" data-dock-pos="right">➡️ Phải</button>
+      </div>
+      <div class="muted">Hướng & Kích thước:</div>
+      <div class="dock-pop-row">
+        <button type="button" class="btn-xs ${ds.orientation === 'horizontal' ? 'btn-primary' : 'btn-secondary'}" data-dock-orient="horizontal">Ngang</button>
+        <button type="button" class="btn-xs ${ds.orientation === 'vertical' ? 'btn-primary' : 'btn-secondary'}" data-dock-orient="vertical">Dọc</button>
+        <button type="button" class="btn-xs ${ds.size === 'small' ? 'btn-primary' : 'btn-secondary'}" data-dock-size="small">S</button>
+        <button type="button" class="btn-xs ${ds.size === 'medium' ? 'btn-primary' : 'btn-secondary'}" data-dock-size="medium">M</button>
+        <button type="button" class="btn-xs ${ds.size === 'large' ? 'btn-primary' : 'btn-secondary'}" data-dock-size="large">L</button>
+      </div>
+      <div class="dock-pop-row">
+        <button type="button" class="btn-xs btn-secondary" id="dock-pop-collapse">${ds.collapsed ? '⤢ Mở rộng Dock' : '⤡ Thu gọn Dock'}</button>
+        <button type="button" class="btn-xs btn-secondary" id="dock-pop-visible">${ds.visible ? '👁️ Ẩn Dock' : '👁️ Hiện Dock'}</button>
+        <button type="button" class="btn-xs btn-danger" id="dock-pop-reset">↺ Đặt lại mặc định</button>
+      </div>`;
+  }
 
-    document.getElementById('mac-close')?.addEventListener('click', () => { this.audio.playClick(); this.closeModal(); });
-    document.getElementById('mac-top-exit')?.addEventListener('click', () => { this.audio.playClick(); this.closeModal(); });
-    document.getElementById('mac-min')?.addEventListener('click', () => { this.audio.playClick(); this.macMinimized = true; this.openComputer(this.activeTab); });
-    document.getElementById('mac-max')?.addEventListener('click', () => { this.audio.playClick(); this.macMaximized = !this.macMaximized; this.openComputer(this.activeTab); });
-    document.querySelectorAll('[data-pctab]').forEach((b) => {
-      b.addEventListener('click', () => { this.audio.playClick(); this.macMinimized = false; this.openComputer(b.dataset.pctab); });
+  applyDockVisualState({ preserveScroll = true } = {}) {
+    if (typeof document === 'undefined') return;
+    const ds = this.dockManager.getState();
+    const stage = document.getElementById('macos-stage');
+    const shell = document.getElementById('macos-dock-shell');
+    const scrollEl = document.getElementById('dock-items-scroll');
+    const collapseBtn = document.getElementById('dock-collapse-btn');
+    const popover = document.getElementById('dock-settings-popover');
+
+    if (stage) {
+      stage.classList.remove('dock-pos-left', 'dock-pos-right');
+      if (ds.position === 'left') stage.classList.add('dock-pos-left');
+      else if (ds.position === 'right') stage.classList.add('dock-pos-right');
+    }
+    if (shell) {
+      shell.className = `macos-dock-shell pos-${ds.position} orient-${ds.orientation} size-${ds.size}${ds.collapsed ? ' collapsed' : ''}${ds.visible ? '' : ' dock-hidden'}`;
+      if (ds.position === 'floating' && ds.x !== null && ds.y !== null) {
+        shell.style.left = `${ds.x}px`;
+        shell.style.top = `${ds.y}px`;
+      } else {
+        shell.style.left = '';
+        shell.style.top = '';
+      }
+    }
+    if (collapseBtn) {
+      collapseBtn.textContent = ds.collapsed ? '⤢' : '⤡';
+    }
+    if (popover && popover.classList.contains('open')) {
+      popover.innerHTML = this._renderDockSettingsPopoverHTML();
+      this._bindDockPopoverEvents();
+    }
+    if (preserveScroll && scrollEl) {
+      const applyScroll = () => {
+        this._restoringDockScroll = true;
+        try {
+          if (typeof scrollEl.scrollLeft === 'number') scrollEl.scrollLeft = ds.scrollLeft || 0;
+          if (typeof scrollEl.scrollTop === 'number') scrollEl.scrollTop = ds.scrollTop || 0;
+        } finally {
+          this._restoringDockScroll = false;
+        }
+      };
+      applyScroll();
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(applyScroll);
+      }
+    }
+  }
+
+  _bindDockPopoverEvents() {
+    if (typeof document === 'undefined') return;
+    const popover = document.getElementById('dock-settings-popover');
+    if (!popover) return;
+    document.getElementById('dock-pop-close')?.addEventListener('click', () => {
+      this._dockPopoverOpen = false;
+      popover.classList.remove('open');
     });
-    if (!this.macMinimized) this.bindComputerTabEvents(tab);
+    popover.querySelectorAll('[data-dock-pos]').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.audio?.playClick?.();
+        this.dockManager.setPosition(b.dataset.dockPos);
+        this._saveDockState();
+        this.applyDockVisualState({ preserveScroll: true });
+      });
+    });
+    popover.querySelectorAll('[data-dock-orient]').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.audio?.playClick?.();
+        this.dockManager.setOrientation(b.dataset.dockOrient);
+        this._saveDockState();
+        this.applyDockVisualState({ preserveScroll: true });
+      });
+    });
+    popover.querySelectorAll('[data-dock-size]').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.audio?.playClick?.();
+        this.dockManager.setSize(b.dataset.dockSize);
+        this._saveDockState();
+        this.applyDockVisualState({ preserveScroll: true });
+      });
+    });
+    document.getElementById('dock-pop-collapse')?.addEventListener('click', () => {
+      this.audio?.playClick?.();
+      this.dockManager.toggleCollapsed();
+      this._saveDockState();
+      this.applyDockVisualState({ preserveScroll: true });
+    });
+    document.getElementById('dock-pop-visible')?.addEventListener('click', () => {
+      this.audio?.playClick?.();
+      this.dockManager.setVisible(!this.dockManager.state.visible);
+      this._saveDockState();
+      this.applyDockVisualState({ preserveScroll: true });
+    });
+    document.getElementById('dock-pop-reset')?.addEventListener('click', () => {
+      this.audio?.playClick?.();
+      this.dockManager.resetToDefault();
+      this._saveDockState();
+      this.applyDockVisualState({ preserveScroll: true });
+      this.toast('⚓ Đã đặt lại thanh Dock về mặc định.', 'info');
+    });
+  }
+
+  _bindComputerShellAndDockEvents() {
+    if (typeof document === 'undefined') return;
+    document.getElementById('mac-top-exit')?.addEventListener('click', () => {
+      this.audio?.playClick?.();
+      this.requestCloseModal();
+    });
+
+    const popover = document.getElementById('dock-settings-popover');
+    const togglePopover = () => {
+      if (!popover) return;
+      this._dockPopoverOpen = !popover.classList.contains('open');
+      popover.classList.toggle('open', this._dockPopoverOpen);
+      if (this._dockPopoverOpen) {
+        popover.innerHTML = this._renderDockSettingsPopoverHTML();
+        this._bindDockPopoverEvents();
+      }
+    };
+    document.getElementById('mac-dock-menu-btn')?.addEventListener('click', togglePopover);
+    document.getElementById('dock-gear-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePopover();
+    });
+    document.getElementById('dock-collapse-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.audio?.playClick?.();
+      this.dockManager.toggleCollapsed();
+      this._saveDockState();
+      this.applyDockVisualState({ preserveScroll: true });
+    });
+
+    // Lưu vị trí cuộn dải icon Dock nhưng không reset khi bấm app
+    const scrollEl = document.getElementById('dock-items-scroll');
+    scrollEl?.addEventListener('scroll', () => {
+      if (this._restoringDockScroll) return;
+      this.dockManager.updateScroll(scrollEl.scrollLeft || 0, scrollEl.scrollTop || 0);
+      this._saveDockState();
+    }, { passive: true });
+
+    // Bấm icon ứng dụng trên Dock: KHÔNG thay đổi vị trí / scroll Dock!
+    document.querySelectorAll('#macos-dock-shell .dock-item[data-pctab]').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.audio?.playClick?.();
+        this.macMinimized = false;
+        this.openComputer(b.dataset.pctab);
+      });
+    });
+
+    // Kéo thả tự do thanh Dock bằng tay cầm riêng #dock-drag-handle (chỉ đổi vị trí khi chủ động kéo!)
+    const handle = document.getElementById('dock-drag-handle');
+    const stage = document.getElementById('macos-stage');
+    const shell = document.getElementById('macos-dock-shell');
+    if (handle && stage && shell) {
+      if (typeof this._dockDragCleanup === 'function') this._dockDragCleanup();
+      let dragCtx = null;
+      const onMove = (mv) => {
+        if (!dragCtx || mv.pointerId !== dragCtx.pointerId) return;
+        const dx = mv.clientX - dragCtx.startX;
+        const dy = mv.clientY - dragCtx.startY;
+        if (!dragCtx.moved && Math.hypot(dx, dy) < 5) return;
+        dragCtx.moved = true;
+        mv.preventDefault?.();
+        const stRect = stage.getBoundingClientRect ? stage.getBoundingClientRect() : { width: 960, height: 600 };
+        const shRect = shell.getBoundingClientRect ? shell.getBoundingClientRect() : { width: 220, height: 54 };
+        this.dockManager.setFloatingCoordinates(dragCtx.origX + dx, dragCtx.origY + dy, {
+          containerWidth: stRect.width || 960,
+          containerHeight: stRect.height || 600,
+          dockWidth: shRect.width || 220,
+          dockHeight: shRect.height || 54
+        });
+        this.applyDockVisualState({ preserveScroll: true });
+      };
+      const onUp = (up) => {
+        if (!dragCtx || up.pointerId !== dragCtx.pointerId) return;
+        const didMove = dragCtx.moved;
+        dragCtx = null;
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          window.removeEventListener('pointercancel', onUp);
+        }
+        if (didMove) {
+          this._saveDockState();
+        }
+      };
+      const onDown = (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.stopPropagation();
+        const stRect = stage.getBoundingClientRect ? stage.getBoundingClientRect() : { left: 0, top: 0 };
+        const shRect = shell.getBoundingClientRect ? shell.getBoundingClientRect() : { left: 100, top: 480 };
+        dragCtx = {
+          pointerId: e.pointerId ?? 1,
+          startX: e.clientX || 0,
+          startY: e.clientY || 0,
+          origX: Math.round((shRect.left || 0) - (stRect.left || 0)),
+          origY: Math.round((shRect.top || 0) - (stRect.top || 0)),
+          moved: false
+        };
+        if (typeof window !== 'undefined') {
+          window.addEventListener('pointermove', onMove, { passive: false });
+          window.addEventListener('pointerup', onUp);
+          window.addEventListener('pointercancel', onUp);
+        }
+      };
+      handle.addEventListener('pointerdown', onDown);
+      this._dockDragCleanup = () => {
+        handle.removeEventListener('pointerdown', onDown);
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          window.removeEventListener('pointercancel', onUp);
+        }
+      };
+    }
+  }
+
+  _bindComputerWorkspaceEvents(resolvedTab) {
+    if (typeof document === 'undefined') return;
+    document.getElementById('mac-close')?.addEventListener('click', () => { this.audio?.playClick?.(); this.requestCloseModal(); });
+    document.getElementById('pc-smart-back')?.addEventListener('click', () => this.handleSmartBack());
+    document.getElementById('mac-min')?.addEventListener('click', () => {
+      this.audio?.playClick?.();
+      this.macMinimized = true;
+      this.openComputer(this.activeTab, { skipHistory: true });
+    });
+    document.getElementById('mac-max')?.addEventListener('click', () => {
+      this.audio?.playClick?.();
+      this.macMaximized = !this.macMaximized;
+      this.openComputer(this.activeTab, { skipHistory: true, preserveScroll: true });
+    });
+    document.querySelectorAll('#macos-workspace [data-pctab]').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.audio?.playClick?.();
+        this.macMinimized = false;
+        this.openComputer(b.dataset.pctab);
+      });
+    });
+    if (!this.macMinimized) this.bindComputerTabEvents(resolvedTab);
+  }
+
+  openComputer(tab = this.activeTab, opts = {}) {
+    this._freezeOutgoingSnapshot(opts);
+    let resolvedTab = tab;
+    if (tab === 'departments') resolvedTab = 'hr';
+    else if (tab === 'events') { resolvedTab = 'media'; this.mediaSubTab = 'ceremony'; }
+    else if (tab === 'history') { resolvedTab = 'reports'; this.reportsSubTab = 'save'; }
+
+    const prevSnap = opts.preserveScroll ? this._captureCurrentUiSnapshot() : null;
+    this.activeTab = resolvedTab;
+    const pendingTotal = this.state.getTotalPendingApprovalsCount?.() ?? this.state.pendingReports.length;
+    const activeCrisisCnt = (this.state.rumorCrisisSystem?.crises || []).filter((c) => c.status === 'active').length;
+    const bidsCnt = this.state.transferSystem?.incomingBids?.length || 0;
+
+    const apps = [
+      { id: 'overview', icon: '🏢', name: 'Tổng quan', bg: 'linear-gradient(135deg,#2563eb,#1e3a8a)' },
+      { id: 'squad', icon: '⚽', name: 'Đội một PSG', bg: 'linear-gradient(135deg,#1d4ed8,#0f172a)' },
+      { id: 'academy', icon: '🎓', name: 'Đội trẻ', bg: 'linear-gradient(135deg,#16a34a,#14532d)' },
+      { id: 'coach', icon: '👔', name: 'Ban huấn luyện', bg: 'linear-gradient(135deg,#0891b2,#164e63)' },
+      { id: 'hr', icon: '🏛️', name: 'Nhân sự (12 PB)', bg: 'linear-gradient(135deg,#7c3aed,#4c1d95)' },
+      { id: 'transfers', icon: '🤝', name: `Chuyển nhượng${bidsCnt > 0 ? ` (${bidsCnt})` : ''}`, bg: 'linear-gradient(135deg,#ea580c,#9a3412)' },
+      { id: 'contracts', icon: '✍️', name: 'Đàm phán HĐ', bg: 'linear-gradient(135deg,#0369a1,#0c4a6e)' },
+      { id: 'finance', icon: '💶', name: 'Tài chính', bg: 'linear-gradient(135deg,#ca8a04,#713f12)' },
+      { id: 'sponsors', icon: '🏅', name: 'Nhà tài trợ', bg: 'linear-gradient(135deg,#d97706,#78350f)' },
+      { id: 'leagues', icon: '🏆', name: 'Lịch thi đấu', bg: 'linear-gradient(135deg,#dc2626,#7f1d1d)' },
+      { id: 'formation', icon: '👕', name: 'Chiến thuật', bg: 'linear-gradient(135deg,#0284c7,#00205b)' },
+      { id: 'training', icon: '🏃', name: 'Đào tạo cầu thủ', bg: 'linear-gradient(135deg,#059669,#064e3b)' },
+      { id: 'facilities', icon: '🏟️', name: 'Cơ sở vật chất', bg: 'linear-gradient(135deg,#4f46e5,#1e1b4b)' },
+      { id: 'media', icon: '📰', name: `Truyền thông${activeCrisisCnt > 0 ? ` (${activeCrisisCnt})` : ''}`, bg: 'linear-gradient(135deg,#db2777,#831843)' },
+      { id: 'commercial', icon: '🛍️', name: 'Thương mại', bg: 'linear-gradient(135deg,#be185d,#500724)' },
+      { id: 'reports', icon: '📊', name: 'Báo cáo & Lưu', bg: 'linear-gradient(135deg,#475569,#1e293b)' },
+      { id: 'approvals', icon: '📥', name: `Chờ duyệt${pendingTotal > 0 ? ` (${pendingTotal})` : ''}`, bg: 'linear-gradient(135deg,#e11d48,#881337)' }
+    ];
+
+    const museumAppMeta = { id: 'museum', icon: '🏛️', name: 'Bảo tàng PSG', bg: 'linear-gradient(135deg,#b45309,#1e293b)' };
+    const currentApp = resolvedTab === 'museum' ? museumAppMeta : (apps.find((a) => a.id === resolvedTab) || apps[0]);
+
+    let content = '';
+    if (resolvedTab === 'overview') content = renderExecutiveOverviewHTML(this.state, apps);
+    else if (resolvedTab === 'squad') content = this.renderSquadTab();
+    else if (resolvedTab === 'academy') content = this.renderAcademyTab();
+    else if (resolvedTab === 'coach') content = renderStaffCoachTabHTML(this.state, this.staffSubTab);
+    else if (resolvedTab === 'hr') content = this.renderDepartmentsTab();
+    else if (resolvedTab === 'transfers') content = renderTransferMarketHTML(this.state, this);
+    else if (resolvedTab === 'contracts') content = renderContractsNegotiationHTML(this.state);
+    else if (resolvedTab === 'finance') content = this.renderFinanceTab();
+    else if (resolvedTab === 'sponsors') content = renderSponsorsHTML(this.state);
+    else if (resolvedTab === 'leagues') content = this.renderLeaguesTab();
+    else if (resolvedTab === 'formation') content = this.renderFormationTab();
+    else if (resolvedTab === 'training') content = renderTrainingTabHTML(this.state, this.trainingSubTab);
+    else if (resolvedTab === 'facilities') content = renderFacilitiesHTML(this.state);
+    else if (resolvedTab === 'media') content = renderMediaCenterHTML(this.state, this);
+    else if (resolvedTab === 'commercial') content = renderCommercialHTML(this.state);
+    else if (resolvedTab === 'reports') content = this.renderReportsTab();
+    else if (resolvedTab === 'approvals') content = renderApprovalsQueueHTML(this.state);
+    else if (resolvedTab === 'museum') content = renderMuseumHubHTML(this.state, this.museumSubTab);
+    else content = renderExecutiveOverviewHTML(this.state, apps);
+
+    const workspaceInnerHTML = this._renderComputerWorkspaceInnerHTML(resolvedTab, currentApp, apps, content);
+    const hasDoc = typeof document !== 'undefined';
+    const existingDesktop = hasDoc ? document.getElementById('macos-desktop') : null;
+    const existingWorkspace = hasDoc ? document.getElementById('macos-workspace') : null;
+    const existingDockShell = hasDoc ? document.getElementById('macos-dock-shell') : null;
+    const modalWrap = hasDoc ? document.getElementById('modal-backdrop') : null;
+
+    if (existingDesktop && existingWorkspace && existingDockShell && modalWrap?.classList.contains('open')) {
+      // CẬP NHẬT TẠI CHỖ: Không phá hủy & dựng lại DOM thanh Dock -> giữ nguyên tuyệt đối vị trí, hướng, scrollLeft/scrollTop & trạng thái Dock!
+      existingDesktop.classList.toggle('maximized', !!this.macMaximized);
+      const tEl = document.getElementById('mac-app-title');
+      if (tEl) tEl.textContent = currentApp.name;
+      const bEl = document.getElementById('mac-hud-budget');
+      if (bEl) bEl.textContent = `€${this.state.finance.budget.toFixed(1)}M`;
+      const cEl = document.getElementById('mac-hud-clock');
+      if (cEl) cEl.textContent = this.formatClock(this.state.clockHour);
+
+      existingWorkspace.innerHTML = workspaceInnerHTML;
+      existingDockShell.querySelectorAll('.dock-item[data-dockapp]').forEach((btn) => {
+        const appId = btn.dataset.dockapp;
+        btn.classList.toggle('active', appId === resolvedTab && !this.macMinimized);
+        const appMeta = apps.find((a) => a.id === appId);
+        if (appMeta) btn.title = appMeta.name;
+      });
+      this.applyDockVisualState({ preserveScroll: true });
+    } else {
+      const ds = this.dockManager.getState();
+      const html = `
+        <div class="macos-desktop ${this.macMaximized ? 'maximized' : ''}" id="macos-desktop">
+          <div class="macos-menubar">
+            <div class="mac-menu-left">
+              <span class="mac-apple"></span>
+              <b id="mac-app-title">${currentApp.name}</b>
+              <span class="mac-menu-item">PSG OS</span>
+              <span class="mac-menu-item">Chủ tịch Phạm Minh Chiêu</span>
+            </div>
+            <div class="mac-menu-right">
+              <span id="mac-hud-budget">€${this.state.finance.budget.toFixed(1)}M</span>
+              <span id="mac-hud-clock">${this.formatClock(this.state.clockHour)}</span>
+              <button type="button" class="mac-dock-menu-btn" id="mac-dock-menu-btn" title="Tùy chỉnh vị trí thanh Dock">⚓ Dock</button>
+              <button type="button" class="mac-exit-btn" id="mac-top-exit">Thoát</button>
+            </div>
+          </div>
+          <div id="dock-settings-popover" class="dock-settings-popover"></div>
+          <div class="macos-stage ${ds.position === 'left' ? 'dock-pos-left' : ds.position === 'right' ? 'dock-pos-right' : ''}" id="macos-stage">
+            <div class="macos-workspace" id="macos-workspace">${workspaceInnerHTML}</div>
+            <div class="macos-dock-shell pos-${ds.position} orient-${ds.orientation} size-${ds.size}${ds.collapsed ? ' collapsed' : ''}${ds.visible ? '' : ' dock-hidden'}" id="macos-dock-shell">
+              <div class="macos-dock" id="macos-dock">
+                <div class="dock-controls-rail">
+                  <button type="button" class="dock-drag-handle" id="dock-drag-handle" title="Kéo để di chuyển thanh Dock">⋮⋮</button>
+                  <button type="button" class="dock-mini-btn" id="dock-collapse-btn" title="Thu gọn / Mở rộng Dock">${ds.collapsed ? '⤢' : '⤡'}</button>
+                  <button type="button" class="dock-mini-btn" id="dock-gear-btn" title="Cài đặt thanh Dock">⚙️</button>
+                </div>
+                <div class="dock-items-scroll" id="dock-items-scroll">
+                  ${apps.map((a) => `
+                    <button type="button" class="dock-item ${a.id === resolvedTab && !this.macMinimized ? 'active' : ''}" data-pctab="${a.id}" data-dockapp="${a.id}" title="${a.name}">
+                      <span class="dock-icon" style="background:${a.bg}">${a.icon}</span>
+                      <span class="dock-dot"></span>
+                    </button>`).join('')}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>`;
+
+      this.openModal('', html, 'macos', { skipRefreshBack: true, skipHistory: !!opts.skipHistory });
+      this._bindComputerShellAndDockEvents();
+      this.applyDockVisualState({ preserveScroll: true });
+    }
+
+    const activePressLock = resolvedTab === 'media' && this.mediaSubTab === 'press' && this.state.contextPressConference?.activeSession
+      ? 'ctx_press_active'
+      : null;
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: activePressLock };
+
+    const routeKey = resolvedTab === 'media' && this.mediaSubTab === 'news' && this.activeArticleId
+      ? `pc:media:article:${this.activeArticleId}`
+      : `pc:${resolvedTab}`;
+    const routeLabel = resolvedTab === 'media' && this.mediaSubTab === 'news' && this.activeArticleId
+      ? 'Bài báo PSG'
+      : currentApp.name;
+    this._recordNavigation({
+      routeKey,
+      screen: 'computer',
+      label: routeLabel,
+      params: { tab: resolvedTab }
+    }, opts);
+
+    this._bindComputerWorkspaceEvents(resolvedTab);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot || prevSnap, opts.focusId || null);
   }
 
   renderReportsTab() {
+    const sub = this.reportsSubTab || 'daily';
     const pending = this.state.pendingReports;
     const briefings = this.state.dailyBriefings;
+    const headerTabs = `
+      <div class="tab-strip">
+        <button class="tab-btn ${sub === 'daily' ? 'active' : ''}" data-rpsub="daily">📊 Báo cáo Hoạt động & Nhiệm vụ</button>
+        <button class="tab-btn ${sub === 'save' ? 'active' : ''}" data-rpsub="save">💾 Lưu Game & Biên bản Họp (${this.state.meetingMinutes.length})</button>
+      </div>`;
+    if (sub === 'save') {
+      return `${headerTabs}${this.renderHistorySaveTab()}`;
+    }
+    const tasksHtml = (this.state.assignedTasks || []).length === 0
+      ? `<div class="card-item"><p class="muted">Chưa có nhiệm vụ nào được giao. Hãy gặp trực tiếp các giám đốc/trưởng phòng để giao nhiệm vụ!</p></div>`
+      : `<div class="scroll-list" style="max-height:170px;">
+          ${this.state.assignedTasks.map((t) => `
+            <div class="card-item">
+              <div class="card-head"><strong>${t.title}</strong><span class="tag ${t.status === 'Hoàn thành' ? 'ok' : ''}">${t.status} (${t.progress}%)</span></div>
+              <div class="muted">Phụ trách: <b>${t.owner}</b> · Phối hợp: ${t.collaborators} · Hạn: Tuần ${t.deadlineWeek}</div>
+              ${t.finalReport ? `<p style="color:#86efac;">✅ Kết quả: ${t.finalReport}</p>` : ''}
+            </div>`).join('')}
+        </div>`;
     return `
-      <div class="section-label">📅 Thông báo tình hình mỗi ngày cho Giám đốc / Chủ tịch</div>
+      ${headerTabs}
+      <div class="section-label">📅 Bản tin & Báo cáo Hoạt động Hàng ngày</div>
       <div class="scroll-list" style="max-height:190px;margin-bottom:10px;">
         ${briefings.map((b) => `
           <div class="card-item">
-            <div class="card-head"><strong>🗓️ ${b.date}</strong><span class="tag ok">Bản tin ngày</span></div>
+            <div class="card-head"><strong>🗓️ ${b.date}</strong><span class="tag ok">Báo cáo ngày</span></div>
             <p>${b.matchAlert}</p>
             <p>${b.trainingNote}</p>
             <p>${b.healthNote}</p>
             <p class="muted">${b.financeNote}</p>
           </div>`).join('')}
       </div>
-      <div class="section-label">📨 Báo cáo & Đề xuất chờ duyệt (${pending.length}) — Sẽ biến mất sau khi duyệt</div>
+      <div class="section-label">📨 Đề xuất phòng ban chờ duyệt (${pending.length})</div>
       ${pending.length === 0 ? `<div class="card-item"><p class="muted">✅ Tất cả báo cáo phòng ban đã được Chủ tịch xử lý xong!</p></div>` : `
-        <div class="scroll-list" style="max-height:220px;">
+        <div class="scroll-list" style="max-height:200px;">
           ${pending.map((r) => `
             <div class="card-item urgent">
               <div class="card-head"><strong>${r.title}</strong><span class="tag">${r.dept}</span></div>
@@ -775,38 +1773,7 @@ export class UIManager {
             </div>`).join('')}
         </div>`}
       <div class="section-label">📌 Theo dõi Nhiệm vụ Chủ tịch đã giao (${(this.state.assignedTasks || []).length})</div>
-      ${(this.state.assignedTasks || []).length === 0 ? `<div class="card-item"><p class="muted">Chưa có nhiệm vụ nào được giao. Hãy gặp trực tiếp các giám đốc/trưởng phòng để giao nhiệm vụ!</p></div>` : `
-        <div class="scroll-list" style="max-height:180px;">
-          ${this.state.assignedTasks.map((t) => `
-            <div class="card-item">
-              <div class="card-head"><strong>${t.title}</strong><span class="tag ${t.status === 'Hoàn thành' ? 'ok' : ''}">${t.status} (${t.progress}%)</span></div>
-              <div class="muted">Phụ trách: <b>${t.owner}</b> · Phối hợp: ${t.collaborators} · Hạn: Tuần ${t.deadlineWeek}</div>
-              ${t.finalReport ? `<p style="color:#86efac;">✅ Kết quả: ${t.finalReport}</p>` : ''}
-            </div>`).join('')}
-        </div>`}`;
-  }
-
-  renderOverviewTab() {
-    const s = this.state;
-    const weekFx = s.getCurrentWeekFixture();
-    const ligue1 = s.clubs.filter((c) => c.league === 'Ligue 1').sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
-    const rank = ligue1.findIndex((c) => c.name === 'Paris Saint-Germain') + 1;
-    return `
-      <div class="kpi-grid">
-        <div class="kpi-card"><span>Ngân sách CLB</span><strong>€${s.finance.budget.toFixed(1)}M</strong></div>
-        <div class="kpi-card"><span>Quỹ chuyển nhượng</span><strong>€${s.finance.transferBudget.toFixed(1)}M</strong></div>
-        <div class="kpi-card"><span>Ligue 1</span><strong>Hạng ${rank || 1}</strong></div>
-        <div class="kpi-card"><span>Uy tín / CĐV</span><strong>${s.president.prestige} / ${s.president.fanSupport}%</strong></div>
-      </div>
-      <div class="card-item ${weekFx ? 'urgent' : ''}">
-        <div class="card-head"><strong>⚽ Lịch thi đấu Tuần ${s.week}</strong><span class="tag">${weekFx ? weekFx.comp : 'Đã hoàn thành'}</span></div>
-        <p>${weekFx ? `${weekFx.round}: <b>${weekFx.home}</b> vs <b>${weekFx.away}</b> (Chưa thi đấu — không thể tua qua tuần)` : 'Bạn đã hoàn thành trận đấu tuần này và có thể qua tuần mới.'}</p>
-        <div class="btn-row">
-          <button class="btn-primary" id="ov-play-match">🏟️ Ra SVĐ Parc des Princes · Thi đấu 3D</button>
-          <button class="btn-accent" id="ov-board">🏛️ Họp Ban Lãnh Đạo</button>
-          <button class="btn-secondary" id="ov-player-meet">🗣️ Họp riêng cầu thủ</button>
-        </div>
-      </div>`;
+      ${tasksHtml}`;
   }
 
   renderDepartmentsTab() {
@@ -832,7 +1799,7 @@ export class UIManager {
     const squad = this.state.getPsgSquad();
     return `<div class="table-wrap"><table class="data-table">
       <thead><tr><th>#</th><th>Cầu thủ</th><th>VT</th><th>Tuổi</th><th>OVR/POT</th><th>Thể lực</th><th>Giá trị</th><th>Lương</th><th>Thao tác</th></tr></thead>
-      <tbody>${squad.map((p) => `<tr>
+      <tbody>${squad.map((p) => `<tr class="${this.selectedPlayerId === p.id ? 'highlight-row' : ''}" data-rowid="${p.id}">
         <td><b>${p.shirtNumber || '-'}</b></td>
         <td><button class="btn-xs btn-secondary open-profile-btn" data-pid="${p.id}">👤 ${p.name}</button> ${p.injuryDays > 0 ? `<span class="tag bad">🏥 ${p.injuryDays}n</span>` : ''}</td>
         <td>${p.position}</td><td>${p.age}</td><td><b>${p.ovr}</b>/${p.pot}</td>
@@ -867,7 +1834,7 @@ export class UIManager {
       <div class="btn-row" style="margin-bottom:8px;">${groups.map((g) => `<button class="tab-btn ${this.academyFilter === g ? 'active' : ''}" data-acgrp="${g}">${g} (${this.state.academy.filter((y) => y.squad === g && !y.promoted && !y.loanInfo).length})</button>`).join('')}</div>
       <div class="table-wrap" style="max-height:28vh;"><table class="data-table">
         <thead><tr><th>Cầu thủ trẻ</th><th>VT</th><th>Tuổi</th><th>OVR</th><th>POT</th><th>Tính cách</th><th>Quyết định</th></tr></thead>
-        <tbody>${list.map((y) => `<tr><td><button class="btn-xs btn-secondary open-profile-btn" data-pid="${y.id}">👤 ${y.name}</button></td><td>${y.position}</td><td>${y.age}</td><td>${y.ovr}</td><td><b style="color:${y.pot >= 85 ? '#4ade80' : '#cbd5e1'}">${y.pot}</b></td><td>${y.personality}</td><td><button class="btn-xs ac-promote" data-yid="${y.id}">⬆️ Đôn Đội 1</button> <button class="btn-xs ac-train" data-yid="${y.id}">⚡ Tập Đội 1</button></td></tr>`).join('')}</tbody>
+        <tbody>${list.map((y) => `<tr class="${this.selectedPlayerId === y.id ? 'highlight-row' : ''}" data-rowid="${y.id}"><td><button class="btn-xs btn-secondary open-profile-btn" data-pid="${y.id}">👤 ${y.name}</button></td><td>${y.position}</td><td>${y.age}</td><td>${y.ovr}</td><td><b style="color:${y.pot >= 85 ? '#4ade80' : '#cbd5e1'}">${y.pot}</b></td><td>${y.personality}</td><td><button class="btn-xs ac-promote" data-yid="${y.id}">⬆️ Đôn Đội 1</button> <button class="btn-xs ac-train" data-yid="${y.id}">⚡ Tập Đội 1</button></td></tr>`).join('')}</tbody>
       </table></div>`;
   }
 
@@ -891,9 +1858,10 @@ export class UIManager {
       </table></div>`;
   }
 
-  openTransferNegotiation(playerId) {
+  openTransferNegotiation(playerId, opts = {}) {
     const p = this.state.players.find((x) => x.id === playerId);
     if (!p) return;
+    this.selectedPlayerId = p.id;
     const askFee = Math.round(p.value * 1.12);
     const askWage = Math.round(p.wage * 1.15);
     const html = `
@@ -902,8 +1870,10 @@ export class UIManager {
       <div class="form-row"><label>Phí đề nghị (€M):</label><input id="neg-fee" type="number" class="input-ctrl" value="${askFee}" /></div>
       <div class="form-row"><label>Lương (k€/tuần):</label><input id="neg-wage" type="number" class="input-ctrl" value="${askWage}" /></div>
       <div class="btn-row" style="margin-top:10px;"><button class="btn-primary" id="neg-submit">✅ Phê duyệt & Ký</button><button class="btn-secondary" id="neg-back">↩️ Quay lại</button></div>`;
-    this.openModal(`🤝 ĐÀM PHÁN · ${p.name.toUpperCase()}`, html, 'normal');
-    document.getElementById('neg-back')?.addEventListener('click', () => this.openComputer('transfers'));
+    this.openModal(`🤝 ĐÀM PHÁN · ${p.name.toUpperCase()}`, html, 'normal', { skipRefreshBack: true });
+    this._recordNavigation({ routeKey: `transfer_quick:${p.id}`, screen: 'computer', label: `Đàm phán ${p.name}`, params: { tab: 'transfers' } }, opts);
+    this._snapshotFormBaselines(null, /^neg-/);
+    document.getElementById('neg-back')?.addEventListener('click', () => this.handleSmartBack());
     document.getElementById('neg-submit')?.addEventListener('click', () => {
       const type = document.getElementById('neg-type')?.value || 'buy';
       const rawFee = Number(document.getElementById('neg-fee')?.value || askFee);
@@ -916,6 +1886,7 @@ export class UIManager {
       this.state.addLedger(`${type === 'buy' ? 'Mua' : 'Mượn'} ${p.name} từ ${oldClub}`, -fee);
       PressNewsSystem.generateTransferNews(this.state, p.name, oldClub, fee, true);
       this.state.formationSystem.notify();
+      this._dirtyTracker.dirty = false;
       this.audio.playSuccess(); this.toast(`🎉 Chào mừng ${p.name} gia nhập PSG!`, 'success');
       this.openComputer('squad');
     });
@@ -936,14 +1907,27 @@ export class UIManager {
 
   renderFinanceTab() {
     const f = this.state.finance;
+    const comm = this.state.commercialSystem;
+    const sponsorAnnual = comm?.getTotalSponsorAnnualRevenue?.() ?? f.income?.sponsors ?? 145;
+    const weeklyUpkeep = comm?.getTotalWeeklyFacilityUpkeep?.() ?? 1.36;
     return `
       <div class="kpi-grid">
-        <div class="kpi-card"><span>Ngân sách</span><strong>€${f.budget.toFixed(1)}M</strong></div>
-        <div class="kpi-card"><span>Chuyển nhượng</span><strong>€${f.transferBudget.toFixed(1)}M</strong></div>
-        <div class="kpi-card"><span>Lương / tuần</span><strong>€${f.weeklyWages}M</strong></div>
+        <div class="kpi-card"><span>Ngân sách CLB</span><strong class="tabular-nums">€${f.budget.toFixed(1)}M</strong></div>
+        <div class="kpi-card"><span>Quỹ chuyển nhượng</span><strong class="tabular-nums">€${f.transferBudget.toFixed(1)}M</strong></div>
+        <div class="kpi-card"><span>Quỹ lương / tuần</span><strong class="tabular-nums">€${f.weeklyWages}M</strong></div>
         <div class="kpi-card"><span>FFP</span><strong>${f.ffpStatus}</strong></div>
       </div>
-      <div class="scroll-list">${f.ledger.map((l) => `<div class="card-item"><div class="card-head"><span>${l.date} — ${l.desc}</span><b style="color:${l.amount >= 0 ? '#4ade80' : '#f87171'}">${l.amount >= 0 ? '+' : ''}€${l.amount}M</b></div></div>`).join('')}</div>`;
+      <div class="card-item">
+        <div class="card-head"><strong>📊 Cơ cấu Thu – Chi Hiện Hành</strong><span class="tag ok">Tài trợ €${sponsorAnnual}M/năm</span></div>
+        <div class="kpi-mini">
+          <span>Bản quyền TV: <b>€${f.income?.tv ?? 110}M</b></span>
+          <span>Thương mại & Áo đấu: <b>€${comm?.commercial?.merchRevenueM ?? f.income?.merch ?? 54}M</b></span>
+          <span>Vé & VIP SVĐ: <b>€${f.income?.matchday ?? 95}M</b></span>
+          <span>Bảo trì CSVC: <b>€${weeklyUpkeep}M/tuần</b></span>
+        </div>
+      </div>
+      <div class="section-label">Sổ cái Giao dịch Tài chính PSG (${f.ledger.length})</div>
+      <div class="scroll-list">${f.ledger.map((l) => `<div class="card-item"><div class="card-head"><span>${l.date} — ${l.desc}</span><b class="tabular-nums" style="color:${l.amount >= 0 ? '#4ade80' : '#f87171'}">${l.amount >= 0 ? '+' : ''}€${l.amount}M</b></div></div>`).join('')}</div>`;
   }
 
   renderLeaguesTab() {
@@ -1024,13 +2008,17 @@ export class UIManager {
   }
 
   bindComputerTabEvents(tab) {
+    const stayOpts = { skipHistory: true, preserveScroll: true };
     if (tab === 'reports') {
+      document.querySelectorAll('[data-rpsub]').forEach((b) => {
+        b.addEventListener('click', () => { this.reportsSubTab = b.dataset.rpsub; this.openComputer('reports', { skipHistory: true }); });
+      });
       document.querySelectorAll('.rep-approve').forEach((b) => {
         b.addEventListener('click', () => {
           const rep = this.state.resolvePendingReport(b.dataset.rid, true);
           this.audio.playSuccess();
           if (rep) this.toast(`Đã phê duyệt "${rep.title}" — Báo cáo đã được xử lý xong!`, 'success');
-          this.openComputer('reports');
+          this.openComputer('reports', stayOpts);
         });
       });
       document.querySelectorAll('.rep-reject').forEach((b) => {
@@ -1038,25 +2026,36 @@ export class UIManager {
           const rep = this.state.resolvePendingReport(b.dataset.rid, false);
           this.audio.playClick();
           if (rep) this.toast(`Đã từ chối "${rep.title}".`, 'info');
-          this.openComputer('reports');
+          this.openComputer('reports', stayOpts);
         });
       });
+      if ((this.reportsSubTab || 'daily') === 'save') {
+        this._bindHistorySaveEvents('reports');
+      }
     } else if (tab === 'overview') {
-      document.getElementById('ov-play-match')?.addEventListener('click', () => { this.closeModal(); this.cb.startMatch(); });
+      document.getElementById('ov-play-match')?.addEventListener('click', () => { this.closeModal(true); this.cb.startMatch(); });
       document.getElementById('ov-board')?.addEventListener('click', () => this.openBoardMeeting());
       document.getElementById('ov-player-meet')?.addEventListener('click', () => this.openPlayerMeetingSelector());
-    } else if (tab === 'departments') {
+      document.getElementById('ov-open-tv')?.addEventListener('click', () => this.openTelevisionModal());
+      document.querySelectorAll('.ov-jump-app').forEach((b) => {
+        b.addEventListener('click', () => {
+          if (b.dataset.msub) this.mediaSubTab = b.dataset.msub;
+          this.openComputer(b.dataset.pctab || 'media');
+        });
+      });
+    } else if (tab === 'hr' || tab === 'departments') {
       document.querySelectorAll('.dept-approve').forEach((b) => {
         b.addEventListener('click', () => {
           const d = this.state.departments.find((x) => x.id === b.dataset.dept);
           if (!d) return;
-          d.proposalApproved = true; // Biến mất sau khi duyệt!
+          d.proposalApproved = true;
           d.performance = Math.min(100, d.performance + 5);
           d.morale = Math.min(100, d.morale + 5);
           this.state.addLedger(`Phê duyệt đề xuất của ${d.name}`, -1.2);
+          this.state.reputationSystem?.applyDelta({ governanceSkill: +2 }, `Duyệt đề xuất ${d.name}`);
           this.audio.playSuccess();
           this.toast(`Đã duyệt đề xuất của ${d.name}!`, 'success');
-          this.openComputer('departments');
+          this.openComputer('hr', stayOpts);
         });
       });
       document.querySelectorAll('.dept-boost').forEach((b) => {
@@ -1066,55 +2065,67 @@ export class UIManager {
           d.performance = Math.min(100, d.performance + 3);
           this.audio.playClick();
           this.toast(`Đã giao KPI mới cho ${d.name}.`, 'info');
-          this.openComputer('departments');
+          this.openComputer('hr', stayOpts);
         });
       });
     } else if (tab === 'formation') {
-      bindFormationPitchEvents(this.state, this, () => this.openComputer('formation'));
+      bindFormationPitchEvents(this.state, this, () => this.openComputer('formation', stayOpts));
     }
 
-    // Sự kiện dùng chung trên mọi tab macOS: bấm vào tên cầu thủ mở Hồ sơ 8 tab!
+    // Sự kiện dùng chung trên mọi tab macOS: bấm vào tên cầu thủ mở Hồ sơ 8 tab & ghi nhận selectedPlayerId!
     document.querySelectorAll('.open-profile-btn').forEach((b) => {
-      b.addEventListener('click', () => this.openPlayerProfileModal(b.dataset.pid, 'overview'));
+      b.addEventListener('click', () => {
+        this.selectedPlayerId = b.dataset.pid || null;
+        this.navHistory.updateCurrentSnapshot({ selectedPlayerId: this.selectedPlayerId });
+        this.openPlayerProfileModal(b.dataset.pid, 'overview');
+      });
     });
 
     if (tab === 'squad') {
-      document.querySelectorAll('.sq-meet').forEach((b) => b.addEventListener('click', () => this.openPlayerMeetingSelector(b.dataset.pid)));
+      document.querySelectorAll('.sq-meet').forEach((b) => b.addEventListener('click', () => {
+        this.selectedPlayerId = b.dataset.pid || null;
+        this.navHistory.updateCurrentSnapshot({ selectedPlayerId: this.selectedPlayerId });
+        this.openPlayerMeetingSelector(b.dataset.pid);
+      }));
     } else if (tab === 'training') {
-      document.querySelectorAll('[data-trtab]').forEach((b) => b.addEventListener('click', () => { this.trainingSubTab = b.dataset.trtab; this.openComputer('training'); }));
-      document.getElementById('tr-go-pitch')?.addEventListener('click', () => { this.cb.teleport('stadium_pitch'); this.closeModal(); this.toast('🏟️ Đã di chuyển vào SVĐ Parc des Princes quan sát toàn đội tập luyện 3D!', 'info'); });
+      document.querySelectorAll('[data-trtab]').forEach((b) => b.addEventListener('click', () => { this.trainingSubTab = b.dataset.trtab; this.openComputer('training', { skipHistory: true }); }));
+      document.getElementById('tr-go-pitch')?.addEventListener('click', () => { this.cb.teleport('stadium_pitch'); this.closeModal(true); this.toast('🏟️ Đã di chuyển vào SVĐ Parc des Princes quan sát toàn đội tập luyện 3D!', 'info'); });
       document.getElementById('tr-run-eval')?.addEventListener('click', () => {
         const rep = this.state.trainingSystem.concludeTrainingSession();
         this.audio.playSuccess();
         this.trainingSubTab = 'reports';
         this.toast(`📊 Đã hoàn tất đánh giá buổi tập (${rep.completionPct}%) · Có báo cáo mới từ BHL!`, 'success');
-        this.openComputer('training');
+        this.openComputer('training', stayOpts);
       });
       document.getElementById('tr-focus-sel')?.addEventListener('change', (e) => {
         this.state.trainingSystem.applyTrainingFocus(e.target.value);
         this.audio.playSuccess();
         this.toast(`Đã chuyển trọng tâm giáo án sang: ${e.target.value}`, 'success');
-        this.openComputer('training');
+        this.openComputer('training', stayOpts);
       });
       document.getElementById('tr-int-sel')?.addEventListener('change', (e) => {
         this.state.trainingSystem.setIntensity(e.target.value);
         this.audio.playSuccess();
         this.toast(`Đã đổi cường độ tập sang: ${e.target.value}`, 'info');
-        this.openComputer('training');
+        this.openComputer('training', stayOpts);
       });
       document.querySelectorAll('.ci-btn').forEach((b) => {
         b.addEventListener('click', () => {
           const res = this.state.trainingSystem.respondToCoachInteraction(b.dataset.ciid, b.dataset.act);
           this.audio.playSuccess();
           this.toast(res.message, 'info');
-          this.openComputer('training');
+          this.openComputer('training', stayOpts);
         });
       });
       document.querySelectorAll('.ci-inspect').forEach((b) => {
-        b.addEventListener('click', () => this.openPlayerProfileModal(b.dataset.pid, 'health'));
+        b.addEventListener('click', () => {
+          this.selectedPlayerId = b.dataset.pid || null;
+          this.navHistory.updateCurrentSnapshot({ selectedPlayerId: this.selectedPlayerId });
+          this.openPlayerProfileModal(b.dataset.pid, 'health');
+        });
       });
     } else if (tab === 'academy') {
-      document.querySelectorAll('[data-acgrp]').forEach((b) => b.addEventListener('click', () => { this.academyFilter = b.dataset.acgrp; this.openComputer('academy'); }));
+      document.querySelectorAll('[data-acgrp]').forEach((b) => b.addEventListener('click', () => { this.academyFilter = b.dataset.acgrp; this.openComputer('academy', { skipHistory: true }); }));
       document.querySelectorAll('.ac-prop-act').forEach((b) => {
         b.addEventListener('click', () => {
           const res = this.state.transferSystem.respondToAcademyProposal(b.dataset.yid, b.dataset.act);
@@ -1125,7 +2136,7 @@ export class UIManager {
             this.audio.playAlert();
             this.toast(res.error || 'Không thể thực hiện.', 'error');
           }
-          this.openComputer('academy');
+          this.openComputer('academy', stayOpts);
         });
       });
       document.querySelectorAll('.ac-promote').forEach((b) => {
@@ -1138,7 +2149,7 @@ export class UIManager {
             this.audio.playAlert();
             this.toast(res.error, 'error');
           }
-          this.openComputer('academy');
+          this.openComputer('academy', stayOpts);
         });
       });
       document.querySelectorAll('.ac-train').forEach((b) => {
@@ -1146,21 +2157,50 @@ export class UIManager {
           const y = this.state.academy.find((x) => x.id === b.dataset.yid);
           if (!y) return;
           y.trainingWithFirstTeam = true; y.ovr = Math.min(y.pot, y.ovr + 1);
-          this.audio.playClick(); this.toast(`${y.name} đã lên tập cùng Đội một!`, 'info'); this.openComputer('academy');
+          this.audio.playClick(); this.toast(`${y.name} đã lên tập cùng Đội một!`, 'info'); this.openComputer('academy', stayOpts);
         });
       });
     } else if (tab === 'transfers') {
-      document.querySelectorAll('[data-trsub]').forEach((b) => b.addEventListener('click', () => { this.transferSubTab = b.dataset.trsub; this.openComputer('transfers'); }));
+      document.querySelectorAll('[data-trsub]').forEach((b) => b.addEventListener('click', () => {
+        this.transferSubTab = b.dataset.trsub;
+        this.openComputer('transfers', { skipHistory: true });
+      }));
       const bindFilter = (id, key, evt = 'change') => {
-        document.getElementById(id)?.addEventListener(evt, (e) => { this.transferFilters[key] = e.target.value; this.openComputer('transfers'); });
+        document.getElementById(id)?.addEventListener(evt, (e) => {
+          this.transferFilters[key] = e.target.value;
+          this.transferPage = 1;
+          this.openComputer('transfers', { skipHistory: true, preserveScroll: true, focusId: id });
+        });
       };
       bindFilter('tf-search', 'search'); bindFilter('tf-club', 'club'); bindFilter('tf-nat', 'nat');
       bindFilter('tf-pos', 'pos'); bindFilter('tf-minovr', 'minOvr'); bindFilter('tf-minpot', 'minPot');
       bindFilter('tf-maxage', 'maxAge'); bindFilter('tf-maxval', 'maxVal'); bindFilter('tf-maxwage', 'maxWage'); bindFilter('tf-maxct', 'maxContract');
 
+      document.getElementById('tf-prev-page')?.addEventListener('click', () => {
+        this.transferPage = Math.max(1, (this.transferPage || 1) - 1);
+        this.audio.playClick();
+        this.openComputer('transfers', { skipHistory: true });
+      });
+      document.getElementById('tf-next-page')?.addEventListener('click', () => {
+        this.transferPage = (this.transferPage || 1) + 1;
+        this.audio.playClick();
+        this.openComputer('transfers', { skipHistory: true });
+      });
+
       document.querySelectorAll('.tr-start-neg').forEach((b) => {
         b.addEventListener('click', () => {
-          const res = this.state.transferSystem.startNegotiation(b.dataset.pid, 'buy');
+          this.selectedPlayerId = b.dataset.pid || null;
+          this.navHistory.updateCurrentSnapshot({ selectedPlayerId: this.selectedPlayerId });
+          const res = this.state.transferSystem.startNegotiation(b.dataset.pid, b.dataset.dealtype || 'buy');
+          if (!res.ok) { this.audio.playAlert(); this.toast(res.error, 'error'); return; }
+          this.openTwoStageTransferModal(res.negotiation.id);
+        });
+      });
+      document.querySelectorAll('.tr-start-loan-in').forEach((b) => {
+        b.addEventListener('click', () => {
+          this.selectedPlayerId = b.dataset.pid || null;
+          this.navHistory.updateCurrentSnapshot({ selectedPlayerId: this.selectedPlayerId });
+          const res = this.state.transferSystem.startNegotiation(b.dataset.pid, 'loan');
           if (!res.ok) { this.audio.playAlert(); this.toast(res.error, 'error'); return; }
           this.openTwoStageTransferModal(res.negotiation.id);
         });
@@ -1170,24 +2210,30 @@ export class UIManager {
       });
       document.querySelectorAll('.tr-accept-bid').forEach((b) => {
         b.addEventListener('click', () => {
-          const bid = this.state.transferSystem.incomingBids.find((x) => x.id === b.dataset.bid);
-          if (!bid) return;
-          const res = this.state.transferSystem.sellPlayer(bid.playerId, bid.buyerClub, bid.fee);
-          if (res.ok) { this.audio.playSuccess(); this.toast(`💰 Đã bán ${bid.playerName} sang ${bid.buyerClub} (+€${bid.fee}M)!`, 'success'); }
+          const res = this.state.transferSystem.acceptIncomingBid(b.dataset.bid);
+          if (res.ok) { this.audio.playSuccess(); this.toast(`💰 Đã hoàn tất đề nghị cho ${res.deal.playerName} sang ${res.deal.to}!`, 'success'); }
           else { this.audio.playAlert(); this.toast(res.error, 'error'); }
-          this.openComputer('transfers');
+          this.openComputer('transfers', stayOpts);
+        });
+      });
+      document.querySelectorAll('.tr-counter-bid').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.transferSystem.counterIncomingBid(b.dataset.bid, Number(b.dataset.fee));
+          if (res.ok) { this.audio.playSuccess(); this.toast(res.message, res.outcome === 'rejected' ? 'warn' : 'info'); }
+          else { this.audio.playAlert(); this.toast(res.error, 'error'); }
+          this.openComputer('transfers', stayOpts);
         });
       });
       document.querySelectorAll('.tr-reject-bid').forEach((b) => {
         b.addEventListener('click', () => {
-          this.state.transferSystem.incomingBids = this.state.transferSystem.incomingBids.filter((x) => x.id !== b.dataset.bid);
-          this.audio.playClick(); this.toast('Đã từ chối lời hỏi mua.', 'info'); this.openComputer('transfers');
+          this.state.transferSystem.rejectIncomingBid(b.dataset.bid);
+          this.audio.playClick(); this.toast('Đã từ chối đề nghị.', 'info'); this.openComputer('transfers', stayOpts);
         });
       });
       document.querySelectorAll('.tr-toggle-list').forEach((b) => {
         b.addEventListener('click', () => {
           const p = this.state.getPlayerById(b.dataset.pid);
-          if (p) { p.transferListed = !p.transferListed; this.audio.playClick(); this.openComputer('transfers'); }
+          if (p) { p.transferListed = !p.transferListed; this.audio.playClick(); this.openComputer('transfers', stayOpts); }
         });
       });
       document.querySelectorAll('.tr-quick-sell').forEach((b) => {
@@ -1197,7 +2243,7 @@ export class UIManager {
           const res = this.state.transferSystem.sellPlayer(p.id, null, p.value);
           if (res.ok) { this.audio.playSuccess(); this.toast(`💰 Đã bán ${p.name} sang ${res.deal.to} (+€${res.deal.fee}M) & giải phóng tủ 3D!`, 'success'); }
           else { this.audio.playAlert(); this.toast(res.error, 'error'); }
-          this.openComputer('transfers');
+          this.openComputer('transfers', stayOpts);
         });
       });
       document.querySelectorAll('.tr-loan-out').forEach((b) => {
@@ -1207,17 +2253,20 @@ export class UIManager {
           const res = this.state.transferSystem.loanOutPlayer(p.id, 'RC Strasbourg Alsace', Math.round(p.value * 1.1));
           if (res.ok) { this.audio.playSuccess(); this.toast(`🔄 Đã cho mượn ${p.name} tới ${res.deal.to}!`, 'success'); }
           else { this.audio.playAlert(); this.toast(res.error, 'error'); }
-          this.openComputer('transfers');
+          this.openComputer('transfers', stayOpts);
         });
       });
       document.querySelectorAll('.tr-renew-psg').forEach((b) => {
         b.addEventListener('click', () => {
-          const p = this.state.getPlayerById(b.dataset.pid);
-          if (!p) return;
-          p.contractYears += 3;
-          p.wage = Math.round(p.wage * 1.1);
-          if (p.contract) { p.contract.contractYears = p.contractYears; p.contract.weeklyWage = p.wage; p.contract.renewalStatus = 'Ổn định'; }
-          this.audio.playSuccess(); this.toast(`✍️ Đã gia hạn hợp đồng với ${p.name} (+3 năm)!`, 'success'); this.openComputer('transfers');
+          const res = this.state.renewPsgPlayerContract(b.dataset.pid, 3);
+          if (res.ok) {
+            this.audio.playSuccess();
+            this.toast(`✍️ Đã gia hạn hợp đồng với ${res.player.name} (+3 năm)!`, 'success');
+          } else {
+            this.audio.playAlert();
+            this.toast(res.error, 'error');
+          }
+          this.openComputer('transfers', stayOpts);
         });
       });
       document.getElementById('tr-sim-ai')?.addEventListener('click', () => {
@@ -1225,85 +2274,142 @@ export class UIManager {
         this.state.transferSystem.generateIncomingBids(2);
         this.audio.playSuccess();
         this.toast(`🌐 Thị trường AI đã hoàn tất ${created.length} thương vụ mới!`, 'success');
-        this.openComputer('transfers');
+        this.openComputer('transfers', stayOpts);
       });
       document.getElementById('tr-close-win')?.addEventListener('click', () => {
         const res = this.state.transferSystem.closeCurrentWindow(true);
         if (res.ok) { this.audio.playSuccess(); this.toast(`🔒 Đã đóng kỳ chuyển nhượng và gửi báo cáo cho Chủ tịch!`, 'info'); }
-        this.openComputer('transfers');
+        this.openComputer('transfers', stayOpts);
       });
       document.getElementById('tr-open-win')?.addEventListener('click', () => {
         this.state.transferSystem.openWindow('winter');
-        this.audio.playSuccess(); this.toast('🟢 Đã mở kỳ chuyển nhượng Mùa Đông!', 'success'); this.openComputer('transfers');
+        this.audio.playSuccess(); this.toast('🟢 Đã mở kỳ chuyển nhượng Mùa Đông!', 'success'); this.openComputer('transfers', stayOpts);
       });
-    } else if (tab === 'events') {
-      document.querySelectorAll('[data-setab]').forEach((b) => b.addEventListener('click', () => { this.eventSubTab = b.dataset.setab; this.openComputer('events'); }));
-      document.querySelectorAll('.se-start-evt').forEach((b) => {
+    } else if (tab === 'contracts') {
+      document.querySelectorAll('.tr-resume-neg').forEach((b) => {
+        b.addEventListener('click', () => this.openTwoStageTransferModal(b.dataset.negid));
+      });
+      document.querySelectorAll('.ct-accept-bid').forEach((b) => {
         b.addEventListener('click', () => {
-          const res = this.state.signingEventSystem.startEvent(b.dataset.evtid);
+          const res = this.state.transferSystem.acceptIncomingBid(b.dataset.bid);
+          if (res.ok) { this.audio.playSuccess(); this.toast(`✅ Đã chốt bán/mượn ${res.deal.playerName} sang ${res.deal.to}!`, 'success'); }
+          else { this.audio.playAlert(); this.toast(res.error, 'error'); }
+          this.openComputer('contracts', stayOpts);
+        });
+      });
+      document.querySelectorAll('.ct-counter-bid').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.transferSystem.counterIncomingBid(b.dataset.bid, Number(b.dataset.fee));
+          if (res.ok) { this.audio.playSuccess(); this.toast(res.message, 'info'); }
+          else { this.audio.playAlert(); this.toast(res.error, 'error'); }
+          this.openComputer('contracts', stayOpts);
+        });
+      });
+      document.querySelectorAll('.ct-reject-bid').forEach((b) => {
+        b.addEventListener('click', () => {
+          this.state.transferSystem.rejectIncomingBid(b.dataset.bid);
+          this.audio.playClick(); this.openComputer('contracts', stayOpts);
+        });
+      });
+      document.querySelectorAll('.ct-renew-player').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.renewPsgPlayerContract(b.dataset.pid, Number(b.dataset.years), Number(b.dataset.wage));
           if (res.ok) {
             this.audio.playSuccess();
-            this.closeModal();
-            this.cb.setEventCamera?.('signing_desk');
-            this.openLiveCeremonySheet();
-            this.toast(`🎬 Bắt đầu ${res.event.eventTypeLabel} cho ${res.event.subjectName}!`, 'success');
+            this.toast(`✍️ Đã gia hạn ${res.player.name} thêm ${b.dataset.years} năm (€${res.player.wage}k/tuần)!`, 'success');
           } else {
             this.audio.playAlert();
             this.toast(res.error, 'error');
           }
+          this.openComputer('contracts', stayOpts);
         });
       });
-      document.querySelector('.se-resume-live')?.addEventListener('click', () => {
-        const evt = this.state.signingEventSystem.activeEvent;
-        if (!evt) return;
-        this.closeModal();
-        this.cb.setEventCamera?.(evt.phase === 'press_conference' ? 'wide_stage' : 'signing_desk');
-        this.openLiveCeremonySheet();
-      });
-      document.querySelector('.se-open-tv')?.addEventListener('click', () => { this.eventSubTab = 'psgtv'; this.openComputer('events'); });
-      document.querySelector('.se-create-sponsor')?.addEventListener('click', () => {
-        const res = this.state.signingEventSystem.triggerCommercialEvent('major_sponsor', 'Qatar Airways Global', 25);
-        if (res.ok) { this.audio.playSuccess(); this.toast('✈️ Đã tạo Sự kiện Ký Tài Trợ Chiến Lược (+€25M)!', 'success'); this.openComputer('events'); }
-        else this.toast(res.error, 'info');
-      });
-      document.querySelector('.se-create-partner')?.addEventListener('click', () => {
-        const res = this.state.signingEventSystem.triggerCommercialEvent('commercial_partner', 'Dior Paris Luxury', 14);
-        if (res.ok) { this.audio.playSuccess(); this.toast('💎 Đã tạo Sự kiện Công Bố Đối Tác Thương Mại (+€14M)!', 'success'); this.openComputer('events'); }
-        else this.toast(res.error, 'info');
-      });
-      document.querySelector('.se-goto-signing')?.addEventListener('click', () => { this.cb.teleport('signing_room'); this.closeModal(); this.toast('🏢 Đã đến Phòng Ký Hợp Đồng Cao Cấp 3D!', 'info'); });
-      document.querySelector('.se-goto-press')?.addEventListener('click', () => { this.cb.teleport('press_hall'); this.closeModal(); this.toast('🎙️ Đã đến Phòng Họp Báo & Trường Quay PSG TV!', 'info'); });
-      document.querySelectorAll('.psgtv-cam').forEach((b) => {
+      document.querySelectorAll('.ct-renew-staff').forEach((b) => {
         b.addEventListener('click', () => {
-          this.state.signingEventSystem.broadcast.setCameraAngle(b.dataset.camkey);
-          this.cb.setEventCamera?.(b.dataset.camkey);
-          this.audio.playClick();
-          this.openComputer('events');
+          this.state.managerSystem.extendStaffContract(b.dataset.rkey, 2, 0.08);
+          this.audio.playSuccess();
+          this.toast('✍️ Đã gia hạn hợp đồng BHL (+2 năm)!', 'success');
+          this.openComputer('contracts', stayOpts);
+        });
+      });
+    } else if (tab === 'sponsors') {
+      document.querySelectorAll('.sp-sign-offer').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.commercialSystem.signSponsorOffer(b.dataset.oid);
+          if (res.ok) {
+            this.audio.playSuccess();
+            this.toast(`🤝 Đã ký hợp đồng tài trợ ${res.sponsor.name} (€${res.sponsor.annualValueM}M/năm)!`, 'success');
+          } else {
+            this.audio.playAlert();
+            this.toast(res.error, 'error');
+          }
+          this.openComputer('sponsors', stayOpts);
+        });
+      });
+      document.querySelectorAll('.sp-renew-btn').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.commercialSystem.renewSponsor(b.dataset.spid);
+          if (res.ok) {
+            this.audio.playSuccess();
+            this.toast(`🔄 Đã gia hạn ${res.sponsor.name} (+2 năm · €${res.sponsor.annualValueM}M/năm)!`, 'success');
+          } else {
+            this.audio.playAlert();
+            this.toast(res.error, 'error');
+          }
+          this.openComputer('sponsors', stayOpts);
+        });
+      });
+    } else if (tab === 'facilities') {
+      document.querySelectorAll('.fac-upgrade-btn').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.commercialSystem.upgradeFacility(b.dataset.fid);
+          if (res.ok) {
+            this.audio.playSuccess();
+            this.toast(`🏟️ Đã nâng cấp ${res.name} lên Cấp ${res.newLevel}!`, 'success');
+          } else {
+            this.audio.playAlert();
+            this.toast(res.error, 'error');
+          }
+          this.openComputer('facilities', stayOpts);
+        });
+      });
+    } else if (tab === 'commercial') {
+      document.querySelectorAll('.comm-launch-btn').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.commercialSystem.launchCommercialCampaign(b.dataset.ctype);
+          if (res.ok) {
+            this.audio.playSuccess();
+            this.toast(`🛍️ Đã triển khai ${res.campaign.name} (Lợi nhuận ròng +€${res.netGain}M)!`, 'success');
+          } else {
+            this.audio.playAlert();
+            this.toast(res.error, 'error');
+          }
+          this.openComputer('commercial', stayOpts);
         });
       });
     } else if (tab === 'coach') {
-      document.querySelectorAll('[data-stftab]').forEach((b) => b.addEventListener('click', () => { this.staffSubTab = b.dataset.stftab; this.openComputer('coach'); }));
+      document.querySelectorAll('[data-stftab]').forEach((b) => b.addEventListener('click', () => { this.staffSubTab = b.dataset.stftab; this.openComputer('coach', { skipHistory: true }); }));
       document.getElementById('stf-extend-hc')?.addEventListener('click', () => {
         this.state.managerSystem.extendStaffContract('head_coach', 2, 0.08);
-        this.audio.playSuccess(); this.toast('✍️ Đã gia hạn hợp đồng HLV trưởng (+2 năm)!', 'success'); this.openComputer('coach');
+        this.audio.playSuccess(); this.toast('✍️ Đã gia hạn hợp đồng HLV trưởng (+2 năm)!', 'success'); this.openComputer('coach', stayOpts);
       });
       document.getElementById('stf-fire-hc')?.addEventListener('click', () => this.openFireStaffModal('head_coach'));
       document.querySelectorAll('.stf-open-neg').forEach((b) => b.addEventListener('click', () => this.openStaffNegotiationModal(b.dataset.sid)));
       document.querySelectorAll('.stf-fire-role').forEach((b) => b.addEventListener('click', () => this.openFireStaffModal(b.dataset.rkey)));
       document.querySelectorAll('.stf-recruit-role').forEach((b) => b.addEventListener('click', () => this.openRoleCandidatesModal(b.dataset.rkey)));
     } else if (tab === 'leagues') {
-      document.getElementById('lg-play-now')?.addEventListener('click', () => { this.closeModal(); this.cb.startMatch(); });
+      document.getElementById('lg-play-now')?.addEventListener('click', () => { this.closeModal(true); this.cb.startMatch(); });
     } else if (tab === 'museum') {
       document.getElementById('mus-walk-3d')?.addEventListener('click', () => {
         this.audio.playDoor();
         this.cb.teleport('museum_entrance');
-        this.closeModal();
+        this.closeModal(true);
         this.toast('🏛️ Đã tới trước Cổng Bảo Tàng PARIS SAINT-GERMAIN CLUB MUSEUM! Bước vào để cửa kính tự động mở.', 'info');
       });
       document.querySelectorAll('.mus-tab-btn').forEach((b) => b.addEventListener('click', () => {
         this.audio.playClick();
         this.museumSubTab = b.dataset.mustab || 'history';
-        this.openComputer('museum');
+        this.openComputer('museum', { skipHistory: true });
       }));
       document.querySelectorAll('.mus-open-trophy').forEach((b) => b.addEventListener('click', () => {
         this.audio.playClick();
@@ -1318,65 +2424,228 @@ export class UIManager {
         this.openSeasonArchive(b.dataset.season);
       }));
     } else if (tab === 'media') {
+      document.querySelectorAll('[data-msub]').forEach((b) => b.addEventListener('click', () => {
+        this.mediaSubTab = b.dataset.msub;
+        this.activeArticleId = null;
+        this.openComputer('media', { skipHistory: true });
+      }));
       document.querySelectorAll('[data-ncat]').forEach((b) => b.addEventListener('click', () => {
         this.newsCategory = b.dataset.ncat; this.activeArticleId = null;
-        this.openComputer('media');
+        this.openComputer('media', { skipHistory: true });
       }));
       document.querySelectorAll('[data-open-news]').forEach((card) => card.addEventListener('click', () => {
-        this.activeArticleId = card.dataset.openNews; this.openComputer('media');
+        this._freezeOutgoingSnapshot();
+        this.activeArticleId = card.dataset.openNews;
+        this.openComputer('media');
       }));
       document.getElementById('news-back')?.addEventListener('click', () => {
-        this.activeArticleId = null;
-        this.openComputer('media');
+        if (this.navHistory.canGoBack() && this.navHistory.peekBackTarget()?.routeKey === 'pc:media') {
+          this.handleSmartBack();
+        } else {
+          this.activeArticleId = null;
+          this.openComputer('media', { skipHistory: true });
+        }
       });
       document.getElementById('news-save')?.addEventListener('click', (e) => {
         const a = this.state.newsArchive.find((x) => x.id === e.target.dataset.nid);
-        if (a) { a.saved = !a.saved; this.audio.playClick(); this.openComputer('media'); }
+        if (a) { a.saved = !a.saved; this.audio.playClick(); this.openComputer('media', stayOpts); }
       });
-    } else if (tab === 'history') {
-      this.saveManager.loadAuto().then((rec) => {
-        const el = document.getElementById('meta-autosave');
-        if (el) el.textContent = rec ? `${rec.summary} (Lưu lúc ${rec.savedAt})` : 'Chưa có bản tự động lưu (sẽ tự lưu khi thoát hoặc mỗi 30 giây)';
+      document.querySelectorAll('.rum-act-btn').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.rumorCrisisSystem.resolveRumor(b.dataset.rid, b.dataset.act);
+          if (res.ok) { this.audio.playSuccess(); this.toast(res.message, 'info'); }
+          else { this.audio.playAlert(); this.toast(res.error, 'error'); }
+          this.openComputer('media', stayOpts);
+        });
       });
-      document.getElementById('sv-auto-now')?.addEventListener('click', async () => {
-        await this.cb.autoSaveNow?.(true);
-        this.audio.playSuccess();
-        this.toast('Đã lưu tự động tiến trình hiện tại!', 'success');
-        this.openComputer('history');
+      document.querySelectorAll('.crs-resolve-btn').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.rumorCrisisSystem.resolveCrisis(b.dataset.cid, b.dataset.opt);
+          if (res.ok) { this.audio.playSuccess(); this.toast(`✅ Đã xử lý khủng hoảng: ${res.option.label}`, 'success'); }
+          else { this.audio.playAlert(); this.toast(res.error, 'error'); }
+          this.openComputer('media', stayOpts);
+        });
       });
-      let resetArmed = false;
-      document.getElementById('sv-reset-new')?.addEventListener('click', (e) => {
-        const btn = e.currentTarget;
-        if (!resetArmed) {
-          resetArmed = true;
-          btn.textContent = '⚠️ Bấm lần nữa để xác nhận chơi mới';
-          setTimeout(() => {
-            if (resetArmed) {
-              resetArmed = false;
-              btn.textContent = '🔄 Chơi lại từ đầu';
-            }
-          }, 4000);
-          return;
-        }
-        this.cb.resetNewGame?.();
+      document.querySelectorAll('.ctx-press-start').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.contextPressConference.start(b.dataset.ptype);
+          if (res.ok) { this.audio.playSuccess(); this.openComputer('media', { skipHistory: true }); }
+        });
       });
-      this.saveManager.listSlots().then((slots) => {
-        slots.forEach(({ id, rec }) => { const el = document.getElementById(`meta-${id}`); if (el) el.textContent = rec ? `${rec.summary} (${rec.savedAt})` : 'Ô trống'; });
+      document.querySelectorAll('.ctx-press-ans').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.contextPressConference.answer(b.dataset.opt);
+          if (res.ok) {
+            this.audio.playSuccess();
+            if (res.finished) this.toast('🎙️ Đã hoàn tất Họp báo & cập nhật uy tín Chủ tịch!', 'success');
+            this.openComputer('media', { skipHistory: true });
+          }
+        });
       });
-      document.querySelectorAll('.sv-save').forEach((b) => b.addEventListener('click', async () => {
-        const res = await this.saveManager.saveSlot(b.dataset.slot, this.cb.exportSnapshot());
-        this.audio.playSuccess(); this.toast(res.ok ? `Đã lưu ${b.dataset.slot}!` : 'Lỗi lưu.', res.ok ? 'success' : 'error'); this.openComputer('history');
-      }));
-      document.querySelectorAll('.sv-load').forEach((b) => b.addEventListener('click', async () => {
-        const rec = await this.saveManager.loadSlot(b.dataset.slot);
-        if (!rec) { this.toast('Ô trống.', 'warn'); return; }
-        this.cb.importSnapshot(rec.data); this.cb.autoSaveNow?.(true); this.audio.playSuccess(); this.toast('Đã tải game!', 'success'); this.closeModal();
-      }));
+      this._bindSigningEventHubButtons();
+    } else if (tab === 'approvals') {
+      document.querySelectorAll('.app-jump').forEach((b) => {
+        b.addEventListener('click', () => {
+          if (b.dataset.msub) this.mediaSubTab = b.dataset.msub;
+          this.openComputer(b.dataset.pctab || 'overview');
+        });
+      });
+      document.querySelectorAll('.app-accept-bid').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.transferSystem.acceptIncomingBid(b.dataset.bid);
+          if (res.ok) { this.audio.playSuccess(); this.toast(`💰 Đã chốt chuyển nhượng ${res.deal.playerName}!`, 'success'); }
+          else { this.audio.playAlert(); this.toast(res.error, 'error'); }
+          this.openComputer('approvals', stayOpts);
+        });
+      });
+      document.querySelectorAll('.app-counter-bid').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.transferSystem.counterIncomingBid(b.dataset.bid, Number(b.dataset.fee));
+          if (res.ok) { this.audio.playSuccess(); this.toast(res.message, 'info'); }
+          this.openComputer('approvals', stayOpts);
+        });
+      });
+      document.querySelectorAll('.app-reject-bid').forEach((b) => {
+        b.addEventListener('click', () => {
+          this.state.transferSystem.rejectIncomingBid(b.dataset.bid);
+          this.audio.playClick(); this.openComputer('approvals', stayOpts);
+        });
+      });
+      document.querySelectorAll('.app-rep-approve').forEach((b) => {
+        b.addEventListener('click', () => {
+          const rep = this.state.resolvePendingReport(b.dataset.rid, true);
+          this.audio.playSuccess();
+          if (rep) this.toast(`Đã phê duyệt "${rep.title}"!`, 'success');
+          this.openComputer('approvals', stayOpts);
+        });
+      });
+      document.querySelectorAll('.app-rep-reject').forEach((b) => {
+        b.addEventListener('click', () => {
+          this.state.resolvePendingReport(b.dataset.rid, false);
+          this.audio.playClick();
+          this.openComputer('approvals', stayOpts);
+        });
+      });
+      document.querySelectorAll('.app-ac-promote').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.transferSystem.promoteAcademyPlayer(b.dataset.yid);
+          if (res.ok) { this.audio.playSuccess(); this.toast(`🎓 Đã đôn ${res.player.name} lên Đội một!`, 'success'); }
+          else { this.audio.playAlert(); this.toast(res.error, 'error'); }
+          this.openComputer('approvals', stayOpts);
+        });
+      });
+      document.querySelectorAll('.app-rum-act').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = this.state.rumorCrisisSystem.resolveRumor(b.dataset.rid, b.dataset.act);
+          if (res.ok) { this.audio.playSuccess(); this.toast(res.message, 'info'); }
+          else { this.audio.playAlert(); this.toast(res.error, 'error'); }
+          this.openComputer('approvals', stayOpts);
+        });
+      });
+      this._bindSigningEventHubButtons();
     }
   }
 
+  _bindSigningEventHubButtons() {
+    const stayOpts = { skipHistory: true, preserveScroll: true };
+    document.querySelectorAll('[data-setab]').forEach((b) => b.addEventListener('click', () => {
+      this.eventSubTab = b.dataset.setab;
+      this.mediaSubTab = 'ceremony';
+      this.openComputer('media', { skipHistory: true });
+    }));
+    document.querySelectorAll('.se-start-evt').forEach((b) => {
+      b.addEventListener('click', () => {
+        const res = this.state.signingEventSystem.startEvent(b.dataset.evtid);
+        if (res.ok) {
+          this.audio.playSuccess();
+          this.closeModal(true);
+          this.cb.setEventCamera?.('signing_desk');
+          this.openLiveCeremonySheet();
+          this.toast(`🎬 Bắt đầu ${res.event.eventTypeLabel} cho ${res.event.subjectName}!`, 'success');
+        } else {
+          this.audio.playAlert();
+          this.toast(res.error, 'error');
+        }
+      });
+    });
+    document.querySelector('.se-resume-live')?.addEventListener('click', () => {
+      const evt = this.state.signingEventSystem.activeEvent;
+      if (!evt) return;
+      this.closeModal(true);
+      this.cb.setEventCamera?.(evt.phase === 'press_conference' ? 'wide_stage' : 'signing_desk');
+      this.openLiveCeremonySheet();
+    });
+    document.querySelector('.se-open-tv')?.addEventListener('click', () => {
+      this.eventSubTab = 'psgtv';
+      this.mediaSubTab = 'ceremony';
+      this.openComputer('media', { skipHistory: true });
+    });
+    document.querySelector('.se-create-sponsor')?.addEventListener('click', () => {
+      const res = this.state.signingEventSystem.triggerCommercialEvent('major_sponsor', 'Qatar Airways Global', 25);
+      if (res.ok) { this.audio.playSuccess(); this.toast('✈️ Đã tạo Sự kiện Ký Tài Trợ Chiến Lược (+€25M)!', 'success'); this.openComputer('media', stayOpts); }
+      else this.toast(res.error, 'info');
+    });
+    document.querySelector('.se-create-partner')?.addEventListener('click', () => {
+      const res = this.state.signingEventSystem.triggerCommercialEvent('commercial_partner', 'Dior Paris Luxury', 14);
+      if (res.ok) { this.audio.playSuccess(); this.toast('💎 Đã tạo Sự kiện Công Bố Đối Tác Thương Mại (+€14M)!', 'success'); this.openComputer('media', stayOpts); }
+      else this.toast(res.error, 'info');
+    });
+    document.querySelector('.se-goto-signing')?.addEventListener('click', () => { this.cb.teleport('signing_room'); this.closeModal(true); this.toast('🏢 Đã đến Phòng Ký Hợp Đồng Cao Cấp 3D!', 'info'); });
+    document.querySelector('.se-goto-press')?.addEventListener('click', () => { this.cb.teleport('press_hall'); this.closeModal(true); this.toast('🎙️ Đã đến Phòng Họp Báo & Trường Quay PSG TV!', 'info'); });
+    document.querySelectorAll('.psgtv-cam').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.state.signingEventSystem.broadcast.setCameraAngle(b.dataset.camkey);
+        this.cb.setEventCamera?.(b.dataset.camkey);
+        this.audio.playClick();
+        this.openComputer('media', stayOpts);
+      });
+    });
+  }
+
+  _bindHistorySaveEvents(returnTab = 'reports') {
+    this.saveManager.loadAuto().then((rec) => {
+      const el = document.getElementById('meta-autosave');
+      if (el) el.textContent = rec ? `${rec.summary} (Lưu lúc ${rec.savedAt})` : 'Chưa có bản tự động lưu (sẽ tự lưu khi thoát hoặc mỗi 30 giây)';
+    });
+    document.getElementById('sv-auto-now')?.addEventListener('click', async () => {
+      await this.cb.autoSaveNow?.(true);
+      this.audio.playSuccess();
+      this.toast('Đã lưu tự động tiến trình hiện tại!', 'success');
+      this.openComputer(returnTab, { skipHistory: true, preserveScroll: true });
+    });
+    let resetArmed = false;
+    document.getElementById('sv-reset-new')?.addEventListener('click', (e) => {
+      const btn = e.currentTarget;
+      if (!resetArmed) {
+        resetArmed = true;
+        btn.textContent = '⚠️ Bấm lần nữa để xác nhận chơi mới';
+        setTimeout(() => {
+          if (resetArmed) {
+            resetArmed = false;
+            btn.textContent = '🔄 Chơi lại từ đầu';
+          }
+        }, 4000);
+        return;
+      }
+      this.cb.resetNewGame?.();
+    });
+    this.saveManager.listSlots().then((slots) => {
+      slots.forEach(({ id, rec }) => { const el = document.getElementById(`meta-${id}`); if (el) el.textContent = rec ? `${rec.summary} (${rec.savedAt})` : 'Ô trống'; });
+    });
+    document.querySelectorAll('.sv-save').forEach((b) => b.addEventListener('click', async () => {
+      const res = await this.saveManager.saveSlot(b.dataset.slot, this.cb.exportSnapshot());
+      this.audio.playSuccess(); this.toast(res.ok ? `Đã lưu ${b.dataset.slot}!` : 'Lỗi lưu.', res.ok ? 'success' : 'error');
+      this.openComputer(returnTab, { skipHistory: true, preserveScroll: true });
+    }));
+    document.querySelectorAll('.sv-load').forEach((b) => b.addEventListener('click', async () => {
+      const rec = await this.saveManager.loadSlot(b.dataset.slot);
+      if (!rec) { this.toast('Ô trống.', 'warn'); return; }
+      this.cb.importSnapshot(rec.data); this.cb.autoSaveNow?.(true); this.audio.playSuccess(); this.toast('Đã tải game!', 'success'); this.closeModal(true);
+    }));
+  }
+
   // === QUY TRÌNH NGÀY THI ĐẤU 4 GIAI ĐOẠN (CHỦ TỊCH PHẠM MINH CHIÊU) ===
-  openMatchdayFlow() {
+  openMatchdayFlow(opts = {}) {
     const fx = this.state.getCurrentWeekFixture() || this.state.getNextFixture();
     if (!fx) {
       const { summary } = this.state.concludeSeason();
@@ -1431,7 +2700,11 @@ export class UIManager {
         <button class="btn-accent" id="md-open-form">👕 Chỉnh Sơ đồ đội hình</button>
       </div>`;
 
-    this.openModal('⚽ NGÀY THI ĐẤU — PARIS SAINT-GERMAIN', html, 'wide');
+    this.openModal('⚽ NGÀY THI ĐẤU — PARIS SAINT-GERMAIN', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: 'matchday_flow', screen: 'matchday_flow', label: 'Ngày thi đấu PSG' }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
     document.getElementById('md-kit-select')?.addEventListener('change', (e) => {
       this.state.setActiveKit?.(e.target.value);
       this.audio.playClick();
@@ -1452,7 +2725,7 @@ export class UIManager {
     });
   }
 
-  openMatchResultModal(res) {
+  openMatchResultModal(res, opts = {}) {
     const psgGoalsList = res.goalEvents.filter((e) => e.team === 'Paris Saint-Germain');
     const oppGoalsList = res.goalEvents.filter((e) => e.team !== 'Paris Saint-Germain');
     const cr = res.coachReport;
@@ -1519,11 +2792,16 @@ export class UIManager {
         <button class="btn-secondary" id="mr-close">${res.awardedTrophy ? '🏆 Tiếp tục Lễ Đăng Quang' : '🏢 Đóng báo cáo'}</button>
       </div>`;
 
-    this.openModal('🏁 THÔNG BÁO KẾT QUẢ & BÁO CÁO SAU TRẬN', html, 'wide');
+    const prevScroll = opts.preserveScroll ? this._captureCurrentUiSnapshot() : null;
+    this.openModal('🏁 THÔNG BÁO KẾT QUẢ & BÁO CÁO SAU TRẬN', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: `match_result:${res.fixture?.week || 0}`, screen: 'match_result', label: 'Kết quả trận đấu', params: { res } }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot || prevScroll);
     document.querySelectorAll('.cp-act').forEach((b) => {
       b.addEventListener('click', () => {
         const pr = cr.proposals.find((x) => x.id === b.dataset.cpid);
-        if (pr) { pr.status = b.dataset.act; this.audio.playSuccess(); this.toast(`Đã cập nhật đề xuất HLV: ${pr.status}`, 'success'); this.openMatchResultModal(res); }
+        if (pr) { pr.status = b.dataset.act; this.audio.playSuccess(); this.toast(`Đã cập nhật đề xuất HLV: ${pr.status}`, 'success'); this.openMatchResultModal(res, { skipHistory: true, preserveScroll: true }); }
       });
     });
     document.getElementById('mr-celebrate')?.addEventListener('click', () => {
@@ -1535,6 +2813,7 @@ export class UIManager {
       this.selectedSlotIdx = null;
       this.pitchZoom = 1.0;
       this.newsCategory = 'ALL';
+      this.mediaSubTab = 'news';
       this.openComputer('media');
     });
     document.getElementById('mr-close')?.addEventListener('click', () => {
@@ -1542,18 +2821,18 @@ export class UIManager {
       if (nextTrophy) {
         this.openCoronationCelebration(nextTrophy);
       } else {
-        this.closeModal();
+        this.closeModal(true);
       }
     });
   }
 
   // ==================== BẢO TÀNG TRUYỀN THỐNG & LỄ ĐĂNG QUANG PSG ====================
-  openMuseumModal(tab = 'history') {
+  openMuseumModal(tab = 'history', opts = {}) {
     this.museumSubTab = tab;
-    this.openComputer('museum');
+    this.openComputer('museum', opts);
   }
 
-  openTrophyDetail(trophyId) {
+  openTrophyDetail(trophyId, opts = {}) {
     const t = this.state.trophySystem?.getTrophyById?.(trophyId);
     if (!t) return;
     if (t.isNewHighlight) {
@@ -1561,45 +2840,61 @@ export class UIManager {
       this.cb.refreshMuseumAndTv?.();
     }
     const html = renderTrophyDetailHTML(t, this.state);
-    this.openModal(`🏆 CHIÊM NGƯỠNG DANH HIỆU · ${t.competitionName.toUpperCase()} (${t.seasonName})`, html, 'wide');
+    this.openModal(`🏆 CHIÊM NGƯỠNG DANH HIỆU · ${t.competitionName.toUpperCase()} (${t.seasonName})`, html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: `trophy:${trophyId}`, screen: 'trophy_detail', label: t.competitionName, params: { trophyId } }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
     document.querySelectorAll('#modal-body .open-profile-btn').forEach((b) => {
       b.addEventListener('click', () => this.openPlayerProfileModal(b.dataset.pid, 'overview'));
     });
     document.getElementById('td-open-museum')?.addEventListener('click', () => {
       this.openMuseumModal(t.category === 'domestic' ? 'domestic' : 'international');
     });
-    document.getElementById('td-close')?.addEventListener('click', () => this.closeModal());
+    document.getElementById('td-close')?.addEventListener('click', () => this.requestCloseModal());
   }
 
-  openLegendDetail(legendId) {
+  openLegendDetail(legendId, opts = {}) {
     const leg = PSG_LEGENDS.find((l) => l.legendId === legendId);
     if (!leg) return;
     const html = renderLegendDetailHTML(leg);
-    this.openModal(`⭐ HUYỀN THOẠI PSG · ${leg.name.toUpperCase()}`, html, 'normal');
+    this.openModal(`⭐ HUYỀN THOẠI PSG · ${leg.name.toUpperCase()}`, html, 'normal', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: `legend:${legendId}`, screen: 'legend_detail', label: leg.name, params: { legendId } }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
     document.getElementById('lgd-open-museum')?.addEventListener('click', () => this.openMuseumModal('legends'));
-    document.getElementById('lgd-close')?.addEventListener('click', () => this.closeModal());
+    document.getElementById('lgd-close')?.addEventListener('click', () => this.requestCloseModal());
   }
 
-  openSeasonArchive(seasonName) {
+  openSeasonArchive(seasonName, opts = {}) {
     const arc = this.state.trophySystem?.seasonArchives?.find((a) => a.season === seasonName || a.seasonId === seasonName);
     if (!arc) return;
     const html = renderSeasonArchiveDetailHTML(arc, this.state);
-    this.openModal(`📚 LỊCH SỬ MÙA GIẢI ${arc.season} · PARIS SAINT-GERMAIN`, html, 'wide');
+    this.openModal(`📚 LỊCH SỬ MÙA GIẢI ${arc.season} · PARIS SAINT-GERMAIN`, html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: `season:${arc.season}`, screen: 'season_archive', label: `Mùa ${arc.season}`, params: { seasonName } }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
     document.querySelectorAll('#modal-body .open-profile-btn').forEach((b) => {
       b.addEventListener('click', () => this.openPlayerProfileModal(b.dataset.pid, 'overview'));
     });
     document.getElementById('sa-open-museum')?.addEventListener('click', () => this.openMuseumModal('seasons'));
-    document.getElementById('sa-close')?.addEventListener('click', () => this.closeModal());
+    document.getElementById('sa-close')?.addEventListener('click', () => this.requestCloseModal());
   }
 
-  openCoronationCelebration(trophy) {
+  openCoronationCelebration(trophy, opts = {}) {
     if (!trophy) return;
     const html = renderCoronationModalHTML(trophy);
-    this.openModal(`🏆 LỄ ĐĂNG QUANG · ${trophy.competitionName.toUpperCase()} ${trophy.seasonName}`, html, 'normal');
+    this.openModal(`🏆 LỄ ĐĂNG QUANG · ${trophy.competitionName.toUpperCase()} ${trophy.seasonName}`, html, 'normal', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: `coronation:${trophy.trophyId}`, screen: 'coronation', label: `Lễ đăng quang ${trophy.competitionName}`, params: { trophy } }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
     document.getElementById('cor-go-museum')?.addEventListener('click', () => {
       this.audio.playDoor();
       this.cb.teleport('museum');
-      this.closeModal();
+      this.closeModal(true);
       this.toast(`🏛️ Chào mừng Chủ tịch đến Bảo tàng PSG chiêm ngưỡng Cúp ${trophy.competitionName} mới!`, 'success');
     });
     document.getElementById('cor-inspect')?.addEventListener('click', () => {
@@ -1608,22 +2903,33 @@ export class UIManager {
     document.getElementById('cor-skip')?.addEventListener('click', () => {
       const next = this.state.trophySystem?.popNextCelebration?.();
       if (next) this.openCoronationCelebration(next);
-      else this.closeModal();
+      else this.closeModal(true);
     });
   }
 
   // ==================== HỒ SƠ CẦU THỦ CHI TIẾT 8 TAB (DÙNG CHUNG TOÀN GAME) ====================
-  openPlayerProfileModal(playerId, activeTab = 'overview') {
+  openPlayerProfileModal(playerId, activeTab = 'overview', opts = {}) {
     const p = this.state.getPlayerById(playerId);
     if (!p) return;
+    this.selectedPlayerId = p.id;
+    const prevScroll = opts.preserveScroll ? this._captureCurrentUiSnapshot() : null;
     const isPsgFirstTeam = p.club === 'Paris Saint-Germain' && p.squadLevel === 'Đội một';
     const html = renderPlayerProfileHTML(p, activeTab, isPsgFirstTeam);
-    this.openModal(`👤 HỒ SƠ CẦU THỦ · ${p.name.toUpperCase()} (${p.id})`, html, 'wide');
+    this.openModal(`👤 HỒ SƠ CẦU THỦ · ${p.name.toUpperCase()} (${p.id})`, html, 'wide', { skipRefreshBack: true, skipHistory: !!opts.skipHistory });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({
+      routeKey: `player_profile:${p.id}`,
+      screen: 'player_profile',
+      label: `Hồ sơ ${p.name}`,
+      params: { playerId: p.id, tab: activeTab }
+    }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot || prevScroll);
 
     document.querySelectorAll('[data-pptab]').forEach((b) => {
       b.addEventListener('click', () => {
         this.audio.playClick();
-        this.openPlayerProfileModal(b.dataset.pid, b.dataset.pptab);
+        this.openPlayerProfileModal(b.dataset.pid, b.dataset.pptab, { skipHistory: true });
       });
     });
     document.getElementById('pp-meet')?.addEventListener('click', () => this.openPlayerMeetingSelector(p.id));
@@ -1648,7 +2954,7 @@ export class UIManager {
       });
       this.audio.playSuccess();
       this.toast(`✍️ Đã gia hạn +2 năm cho ${p.name} & tạo sự kiện ký kết trong mục Sự kiện!`, 'success');
-      this.openPlayerProfileModal(p.id, 'contract');
+      this.openPlayerProfileModal(p.id, 'contract', { skipHistory: true, preserveScroll: true });
     });
     document.getElementById('pp-negotiate')?.addEventListener('click', () => {
       const res = this.state.transferSystem.startNegotiation(p.id, 'buy');
@@ -1660,7 +2966,7 @@ export class UIManager {
       if (res.ok) {
         this.audio.playSuccess();
         this.toast(`🎓 Đã đôn ${p.name} (ID ${p.id}) lên Đội một PSG!`, 'success');
-        this.openPlayerProfileModal(p.id, 'overview');
+        this.openPlayerProfileModal(p.id, 'overview', { skipHistory: true, preserveScroll: true });
       } else {
         this.audio.playAlert();
         this.toast(res.error, 'error');
@@ -1669,7 +2975,7 @@ export class UIManager {
   }
 
   // ==================== SA THẢI & TUYỂN DỤNG NHÂN SỰ / HLV TRƯỞNG (PHẦN III) ====================
-  openFireStaffModal(roleKey) {
+  openFireStaffModal(roleKey, opts = {}) {
     this.state.timeSystem?.pushAutoPause('staff_decision');
     const staff = this.state.managerSystem.getActiveByRole(roleKey);
     if (!staff) return;
@@ -1691,12 +2997,15 @@ export class UIManager {
           <button class="btn-secondary" id="cancel-fire-btn">↩️ Hủy bỏ</button>
         </div>
       </div>`;
-    this.openModal(`🔥 SA THẢI ${staff.role.toUpperCase()}`, html, 'normal');
-    document.getElementById('cancel-fire-btn')?.addEventListener('click', () => this.openComputer('coach'));
+    this.openModal(`🔥 SA THẢI ${staff.role.toUpperCase()}`, html, 'normal', { skipRefreshBack: true });
+    this._recordNavigation({ routeKey: `fire_staff:${roleKey}`, screen: 'fire_staff', label: `Sa thải ${staff.role}`, params: { roleKey } }, opts);
+    this._snapshotFormBaselines(null, /^fire-/);
+    document.getElementById('cancel-fire-btn')?.addEventListener('click', () => this.handleSmartBack());
     document.getElementById('confirm-fire-btn')?.addEventListener('click', () => {
       const reason = document.getElementById('fire-reason')?.value || 'Quyết định của Chủ tịch';
       const res = this.state.managerSystem.fireStaff(roleKey, reason);
       if (res.ok) {
+        this._dirtyTracker.dirty = false;
         this.audio.playAlert();
         this.toast(`🔥 Đã sa thải ${staff.name} (-€${res.severance}M). Mời chọn ứng viên mới!`, 'info');
         this.openRoleCandidatesModal(roleKey);
@@ -1704,7 +3013,7 @@ export class UIManager {
     });
   }
 
-  openRoleCandidatesModal(roleKey) {
+  openRoleCandidatesModal(roleKey, opts = {}) {
     this.state.timeSystem?.pushAutoPause('staff_decision');
     const meta = STAFF_ROLE_META[roleKey] || { title: roleKey };
     const cands = this.state.managerSystem.getCandidatesForRole(roleKey);
@@ -1720,14 +3029,18 @@ export class UIManager {
           </div>`).join('')}
       </div>
       <div class="btn-row" style="margin-top:8px;"><button class="btn-secondary" id="cand-back-btn">↩️ Quay lại Quản lý Nhân sự</button></div>`;
-    this.openModal(`📋 DANH SÁCH ỨNG VIÊN · ${meta.title.toUpperCase()}`, html, 'wide');
-    document.getElementById('cand-back-btn')?.addEventListener('click', () => this.openComputer('coach'));
+    this.openModal(`📋 DANH SÁCH ỨNG VIÊN · ${meta.title.toUpperCase()}`, html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: `role_candidates:${roleKey}`, screen: 'role_candidates', label: `Ứng viên ${meta.title}`, params: { roleKey } }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
+    document.getElementById('cand-back-btn')?.addEventListener('click', () => this.handleSmartBack());
     document.querySelectorAll('.cand-pick-btn').forEach((b) => {
       b.addEventListener('click', () => this.openStaffNegotiationModal(b.dataset.sid));
     });
   }
 
-  openStaffNegotiationModal(staffId, feedback = null, prefill = null) {
+  openStaffNegotiationModal(staffId, feedback = null, prefill = null, opts = {}) {
     this.state.timeSystem?.pushAutoPause('staff_decision');
     const c = this.state.managerSystem.getById(staffId);
     if (!c) return;
@@ -1750,8 +3063,12 @@ export class UIManager {
         <button class="btn-primary" id="sn-submit">📩 Gửi lời mời & Đàm phán</button>
         <button class="btn-secondary" id="sn-back">↩️ Quay lại danh sách</button>
       </div>`;
-    this.openModal(`🤝 ĐÀM PHÁN BỔ NHIỆM · ${c.name.toUpperCase()}`, html, 'normal');
-    document.getElementById('sn-back')?.addEventListener('click', () => this.openRoleCandidatesModal(c.roleKey));
+    this.openModal(`🤝 ĐÀM PHÁN BỔ NHIỆM · ${c.name.toUpperCase()}`, html, 'normal', { skipRefreshBack: true });
+    this._recordNavigation({ routeKey: `staff_neg:${c.staffId}`, screen: 'staff_neg', label: `Đàm phán ${c.name}`, params: { staffId: c.staffId } }, opts);
+    this._snapshotFormBaselines(null, /^sn-/);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
+    document.getElementById('sn-back')?.addEventListener('click', () => this.handleSmartBack());
     document.getElementById('sn-submit')?.addEventListener('click', () => {
       const offer = {
         wage: Number(document.getElementById('sn-wage')?.value || c.wage),
@@ -1760,6 +3077,7 @@ export class UIManager {
         tacticalReq: document.getElementById('sn-req')?.value || c.tacticalStyle
       };
       const res = this.state.managerSystem.negotiateOffer(c.staffId, offer);
+      this._dirtyTracker.dirty = false;
       if (res.outcome === 'accepted') {
         const app = this.state.managerSystem.appointStaff(c.staffId, res.agreedOffer);
         if (app.ok) {
@@ -1769,19 +3087,20 @@ export class UIManager {
         }
       } else if (res.outcome === 'counter') {
         this.audio.playClick();
-        this.openStaffNegotiationModal(c.staffId, res.message, res.counterOffer);
+        this.openStaffNegotiationModal(c.staffId, res.message, res.counterOffer, { skipHistory: true });
       } else {
         this.audio.playAlert();
-        this.openStaffNegotiationModal(c.staffId, res.message, offer);
+        this.openStaffNegotiationModal(c.staffId, res.message, offer, { skipHistory: true });
       }
     });
   }
 
   // ==================== ĐÀM PHÁN CHUYỂN NHƯỢNG 2 GIAI ĐOẠN (CLB -> CẦU THỦ) ====================
-  openTwoStageTransferModal(negId, feedback = null) {
+  openTwoStageTransferModal(negId, feedback = null, opts = {}) {
     this.state.timeSystem?.pushAutoPause('transfer_negotiation');
     const neg = this.state.transferSystem.activeNegotiations.find((n) => n.id === negId);
-    if (!neg) { this.openComputer('transfers'); return; }
+    if (!neg) { this.openComputer('transfers', { skipHistory: true }); return; }
+    this.selectedPlayerId = neg.playerId || this.selectedPlayerId;
     const psgSquad = this.state.getPsgSquad();
 
     let stageHtml = '';
@@ -1789,7 +3108,7 @@ export class UIManager {
       stageHtml = `
         <div class="section-label">Giai đoạn 1/2 · Đàm phán trực tiếp với ${neg.fromClub}</div>
         <div class="grid-2">
-          <div class="form-row"><label>Hình thức:</label><select id="n1-type" class="input-ctrl"><option value="buy" ${neg.dealType === 'buy' ? 'selected' : ''}>Mua đứt</option><option value="loan">Mượn 1 mùa</option><option value="loan_buy">Mượn kèm mua đứt</option></select></div>
+          <div class="form-row"><label>Hình thức:</label><select id="n1-type" class="input-ctrl"><option value="buy" ${neg.dealType === 'buy' ? 'selected' : ''}>Mua đứt</option><option value="loan" ${neg.dealType === 'loan' ? 'selected' : ''}>Mượn 1 mùa</option><option value="loan_buy">Mượn kèm mua đứt</option></select></div>
           <div class="form-row"><label>Giá đề nghị (€M · Định giá €${neg.clubAskFee}M):</label><input id="n1-fee" type="number" class="input-ctrl" value="${neg.clubAskFee}" /></div>
           <div class="form-row"><label>Trả góp (số đợt bổ sung):</label><select id="n1-inst" class="input-ctrl"><option value="0">Trả thẳng 1 lần</option><option value="1">Trả góp 2 đợt</option><option value="2">Trả góp 3 đợt</option><option value="3">Trả góp 4 đợt</option></select></div>
           <div class="form-row"><label>Thưởng thành tích (€M):</label><input id="n1-bonus" type="number" class="input-ctrl" value="5" /></div>
@@ -1827,8 +3146,12 @@ export class UIManager {
       <div class="section-label">Nhật ký đàm phán</div>
       <div class="scroll-list" style="max-height:95px;">${neg.history.map((h) => `<div class="muted">• ${h}</div>`).join('')}</div>`;
 
-    this.openModal(`🤝 ĐÀM PHÁN 2 GIAI ĐOẠN · ${neg.playerName.toUpperCase()}`, html, 'wide');
-    document.getElementById('n-back')?.addEventListener('click', () => this.openComputer('transfers'));
+    this.openModal(`🤝 ĐÀM PHÁN 2 GIAI ĐOẠN · ${neg.playerName.toUpperCase()}`, html, 'wide', { skipRefreshBack: true });
+    this._recordNavigation({ routeKey: `transfer_neg:${neg.id}`, screen: 'transfer_neg', label: `Đàm phán ${neg.playerName}`, params: { negId: neg.id } }, opts);
+    this._snapshotFormBaselines(null, /^n[12]-/);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
+    document.getElementById('n-back')?.addEventListener('click', () => this.handleSmartBack());
 
     document.getElementById('n1-submit')?.addEventListener('click', () => {
       neg.dealType = document.getElementById('n1-type')?.value || 'buy';
@@ -1839,13 +3162,14 @@ export class UIManager {
         sellOnPct: Number(document.getElementById('n1-sellon')?.value || 0),
         swapPlayerId: document.getElementById('n1-swap')?.value || null
       });
+      this._dirtyTracker.dirty = false;
       if (!res.ok) { this.audio.playAlert(); this.toast(res.error, 'error'); return; }
       if (res.outcome === 'accepted') {
         this.audio.playSuccess();
-        this.openTwoStageTransferModal(neg.id, res.message);
+        this.openTwoStageTransferModal(neg.id, res.message, { skipHistory: true });
       } else if (res.outcome === 'counter') {
         this.audio.playClick();
-        this.openTwoStageTransferModal(neg.id, res.message);
+        this.openTwoStageTransferModal(neg.id, res.message, { skipHistory: true });
       } else {
         this.audio.playAlert();
         this.toast(res.message, 'error');
@@ -1862,6 +3186,7 @@ export class UIManager {
         playtimeGuarantee: document.getElementById('n2-play')?.value || 'Cao',
         releaseClause: Number(document.getElementById('n2-rc')?.value || 150)
       });
+      this._dirtyTracker.dirty = false;
       if (!res.ok) { this.audio.playAlert(); this.toast(res.error, 'error'); return; }
       if (res.outcome === 'accepted') {
         this.audio.playSuccess();
@@ -1875,7 +3200,7 @@ export class UIManager {
         }
       } else if (res.outcome === 'counter') {
         this.audio.playClick();
-        this.openTwoStageTransferModal(neg.id, res.message);
+        this.openTwoStageTransferModal(neg.id, res.message, { skipHistory: true });
       } else {
         this.audio.playAlert();
         this.toast(res.message, 'error');

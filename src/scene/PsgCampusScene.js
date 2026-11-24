@@ -875,20 +875,58 @@ export class PsgCampusScene {
     this.addCollider(-18.5, -14.2, 0.6, 2.25);
     this.tagInteractable(pTrophy, 'pres_trophy', 'Kệ Danh Hiệu Phòng Chủ tịch · Bảo Tàng PSG', '🏆', 'open_museum_ui');
 
-    const wallScr = this.furn.createWallScreen(3.4, 1.8, 'PSG PRESIDENT COMMAND CENTER');
-    wallScr.position.set(-18.22, 2.35, -10.5);
-    wallScr.rotation.y = -Math.PI / 2;
-    this.root.add(wallScr);
+    // TV Truyền thông màn hình lớn 3D thực tế trong Phòng Chủ tịch (bật/tắt độc lập, chuyển 9 kênh + PSG Morning News)
+    const tvGroup = new THREE.Group();
+    tvGroup.position.set(-18.22, 2.38, -10.5);
+    tvGroup.rotation.y = -Math.PI / 2;
+    tvGroup.userData.dynamicObject = true;
+
+    const bezelMat = this._tagShared(new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.28, metalness: 0.65 }));
+    const trimGoldMat = this._tagShared(new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.3, metalness: 0.8 }));
+    const tvFrame = new THREE.Mesh(this._boxGeo(3.68, 2.02, 0.11), bezelMat);
+    const tvGoldTrim = new THREE.Mesh(this._boxGeo(3.72, 0.04, 0.12), trimGoldMat);
+    tvGoldTrim.position.set(0, -1.03, 0);
+    const soundBar = new THREE.Mesh(this._boxGeo(2.5, 0.14, 0.16), bezelMat);
+    soundBar.position.set(0, -1.24, 0.06);
+
+    this.presidentTvLedMat = new (typeof THREE.MeshBasicMaterial === 'function' ? THREE.MeshBasicMaterial : THREE.MeshStandardMaterial)({
+      color: 0x22c55e
+    });
+    const ledDot = new THREE.Mesh(this._boxGeo(0.08, 0.04, 0.03), this.presidentTvLedMat);
+    ledDot.position.set(1.56, -0.96, 0.06);
 
     const TvMatCtor = typeof THREE.MeshBasicMaterial === 'function' ? THREE.MeshBasicMaterial : THREE.MeshStandardMaterial;
+    let tvCanvas = null;
+    let tvTex = null;
+    if (typeof document !== 'undefined' && typeof THREE.CanvasTexture === 'function') {
+      tvCanvas = document.createElement('canvas');
+      tvCanvas.width = 512;
+      tvCanvas.height = 256;
+      const ctx = tvCanvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#04060a';
+        ctx.fillRect(0, 0, 512, 256);
+      }
+      tvTex = new THREE.CanvasTexture(tvCanvas);
+      tvTex.generateMipmaps = false;
+      if (typeof THREE.LinearFilter !== 'undefined') tvTex.minFilter = THREE.LinearFilter;
+    }
+    this._presidentTvCanvas = tvCanvas;
+    this._presidentTvCtx = tvCanvas ? tvCanvas.getContext('2d') : null;
+    this._presidentTvTex = tvTex;
+    this._presidentTvTimer = 0;
+    this._presidentTvLastSig = '';
+
     this.presidentTvOverlay = new THREE.Mesh(
-      this._planeGeo(3.2, 1.6),
-      new TvMatCtor({ map: this.tex.signTexture('PSG PRESIDENT COMMAND CENTER', '#00205b', '#ffffff', '#da291c') })
+      this._planeGeo(3.46, 1.80),
+      new TvMatCtor(tvTex ? { map: tvTex } : { color: 0x04060a })
     );
-    this.presidentTvOverlay.position.set(-18.30, 2.35, -10.5);
-    this.presidentTvOverlay.rotation.y = -Math.PI / 2;
+    this.presidentTvOverlay.position.set(0, 0, 0.065);
     this.presidentTvOverlay.userData.dynamicObject = true;
-    this.root.add(this.presidentTvOverlay);
+
+    tvGroup.add(tvFrame, tvGoldTrim, soundBar, ledDot, this.presidentTvOverlay);
+    this.root.add(tvGroup);
+    this.tagInteractable(tvGroup, 'pres_media_tv', 'Bật / Xem TV Truyền Thông PSG (9 Kênh)', '📺', 'open_president_tv');
 
     const pCrest = new THREE.Mesh(
       this._tagShared(new THREE.CircleGeometry(0.85, 28)),
@@ -1184,20 +1222,58 @@ export class PsgCampusScene {
     this.root.add(trunks, crowns);
   }
 
+  isNearPresidentOffice(pos) {
+    if (!pos || this.hqInteriorGroup?.visible === false) return false;
+    return pos.x >= -36.5 && pos.x <= -15.0 && pos.z >= -24.5 && pos.z <= -2.0;
+  }
+
+  updatePresidentTvVisual(tvSystem, dt = 0, animTime = 0, playerPos = null) {
+    if (!tvSystem || !this._presidentTvCtx || !this._presidentTvTex) return;
+
+    const isOn = !!tvSystem.isOn;
+    if (this.presidentTvLedMat) {
+      this.presidentTvLedMat.color.setHex(isOn ? 0x22c55e : 0xef4444);
+    }
+
+    const sig = `${isOn ? 1 : 0}_${tvSystem.activeChannelId}_${tvSystem.programMode}_${tvSystem.channelSwitchPulse > 0 ? 1 : 0}`;
+    const stateChanged = sig !== this._presidentTvLastSig;
+
+    // Khi tắt, vẽ đúng 1 lần màu đen rồi ngưng toàn bộ render canvas!
+    if (!isOn) {
+      if (stateChanged) {
+        this._presidentTvLastSig = sig;
+        tvSystem.renderScreenCanvas(this._presidentTvCtx, 512, 256, animTime);
+        this._presidentTvTex.needsUpdate = true;
+      }
+      return;
+    }
+
+    // Chỉ cập nhật texture động khi Chủ tịch đang ở trong / gần Phòng Chủ tịch!
+    if (playerPos && !this.isNearPresidentOffice(playerPos) && !stateChanged) {
+      return;
+    }
+
+    this._presidentTvTimer += dt;
+    if (stateChanged || this._presidentTvTimer >= 0.14) {
+      this._presidentTvTimer = 0;
+      this._presidentTvLastSig = sig;
+      tvSystem.renderScreenCanvas(this._presidentTvCtx, 512, 256, animTime);
+      this._presidentTvTex.needsUpdate = true;
+    }
+  }
+
   updateBroadcastTv(broadcast = null) {
     const title = broadcast?.title || 'PSG PRESIDENT COMMAND CENTER · PARIS SAINT-GERMAIN';
     const sub = broadcast?.subtitle || 'PARC DES PRINCES · WELCOME';
-    const updateScreen = (mesh, txt, bg, fg, accent) => {
-      if (!mesh || !mesh.material || !this.tex?.signTexture) return;
-      const oldMap = mesh.material.map;
-      const nextMap = this.tex.signTexture(txt, bg, fg, accent);
+    if (this.lobbyTvOverlay && this.lobbyTvOverlay.material && this.tex?.signTexture) {
+      const oldMap = this.lobbyTvOverlay.material.map;
+      const nextMap = this.tex.signTexture(broadcast ? `${title} · ${sub}` : sub, '#00205b', '#fde68a', '#da291c');
       if (oldMap && oldMap !== nextMap && typeof oldMap.dispose === 'function' && !oldMap.userData?.sharedAsset) {
         oldMap.dispose();
       }
-      mesh.material.map = nextMap;
-      mesh.material.needsUpdate = true;
-    };
-    updateScreen(this.presidentTvOverlay, title, '#00205b', broadcast ? '#fde68a' : '#ffffff', '#da291c');
-    updateScreen(this.lobbyTvOverlay, broadcast ? `${title} · ${sub}` : sub, '#00205b', '#fde68a', '#da291c');
+      this.lobbyTvOverlay.material.map = nextMap;
+      this.lobbyTvOverlay.material.needsUpdate = true;
+    }
+    this._presidentTvLastSig = '';
   }
 }

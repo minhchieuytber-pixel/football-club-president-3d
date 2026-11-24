@@ -217,6 +217,230 @@ export class PressQuestionSystem {
 
     return questions;
   }
+
+  // Xây dựng họp báo theo bối cảnh điều hành CLB (Trước mùa giải, Trước trận lớn, Sau trận, Khủng hoảng truyền thông)
+  static buildContextQuestions(contextType, ctx = {}, state = null) {
+    const season = state?.season || '2026/27';
+    const coachName = state?.coach?.name || 'Luis Enrique';
+    const nextFx = ctx.fixture || state?.getCurrentWeekFixture?.() || state?.getNextFixture?.();
+    const lastRes = ctx.matchResult || state?.lastMatchResult;
+
+    if (contextType === 'pre_season') {
+      return [
+        {
+          id: 'ctx_preseason_1',
+          reporter: 'Julien Bernard',
+          outlet: 'PSG TV',
+          category: 'Mục tiêu mùa giải',
+          question: `Thưa Chủ tịch Phạm Minh Chiêu, bước vào mùa giải ${season}, mục tiêu cao nhất mà ngài đặt ra cho HLV ${coachName} và toàn đội là gì?`,
+          options: [
+            {
+              key: 'A',
+              text: 'Thống trị Ligue 1 và dồn toàn lực chinh phục chiếc cúp UEFA Champions League danh giá!',
+              repDelta: { fanTrust: +5, mediaTrust: +3, partnerTrust: +3, coachTrust: -1 },
+              tone: 'ambitious'
+            },
+            {
+              key: 'B',
+              text: 'Xây dựng lối chơi bản sắc, kết hợp các ngôi sao và cầu thủ Học viện PSG để phát triển bền vững.',
+              repDelta: { governanceSkill: +4, coachTrust: +4, playerTrust: +3, fanTrust: +2 },
+              tone: 'balanced'
+            },
+            {
+              key: 'C',
+              text: 'Cân bằng thành tích thể thao với sức khỏe tài chính FFP và mở rộng thương hiệu toàn cầu.',
+              repDelta: { partnerTrust: +5, governanceSkill: +4, mediaTrust: +2 },
+              tone: 'corporate'
+            }
+          ]
+        },
+        {
+          id: 'ctx_preseason_2',
+          reporter: 'Matteo Romano',
+          outlet: 'Transfer Insider',
+          category: 'Kế hoạch chuyển nhượng',
+          question: 'PSG sẽ tiếp tục bạo chi trên thị trường chuyển nhượng hay ưu tiên giữ ổn định bộ khung hiện có?',
+          options: [
+            {
+              key: 'A',
+              text: 'Chúng tôi chỉ bổ sung những vị trí thực sự cần thiết theo đề xuất chuyên môn của BHL.',
+              repDelta: { coachTrust: +3, governanceSkill: +4, mediaTrust: +2 },
+              tone: 'disciplined'
+            },
+            {
+              key: 'B',
+              text: 'Nếu xuất hiện siêu sao nâng tầm Champions League, PSG luôn sẵn sàng hành động quyết đoán.',
+              repDelta: { fanTrust: +4, partnerTrust: +3, playerTrust: -1 },
+              tone: 'bold'
+            }
+          ]
+        }
+      ];
+    }
+
+    if (contextType === 'pre_big_match') {
+      const opp = nextFx ? (nextFx.home === 'Paris Saint-Germain' ? nextFx.away : nextFx.home) : (ctx.opponent || 'đối thủ lớn');
+      const comp = nextFx?.comp || 'UEFA Champions League';
+      return [
+        {
+          id: 'ctx_prematch_1',
+          reporter: 'Clara Rossi',
+          outlet: 'International Sports Network',
+          category: 'Trước đại chiến',
+          question: `Thưa Chủ tịch, trước cuộc thư hùng với ${opp} tại ${comp}, ngài đánh giá thế nào về tinh thần phòng thay đồ PSG?`,
+          options: [
+            {
+              key: 'A',
+              text: `Tôi tin tưởng tuyệt đối vào sự chuẩn bị chiến thuật của HLV ${coachName} và bản lĩnh các cầu thủ.`,
+              repDelta: { coachTrust: +4, playerTrust: +4, fanTrust: +2 },
+              tone: 'supportive'
+            },
+            {
+              key: 'B',
+              text: 'Tại Parc des Princes, người hâm mộ xứng đáng được chứng kiến một PSG tấn công rực lửa và giành chiến thắng!',
+              repDelta: { fanTrust: +5, mediaTrust: +2, partnerTrust: +2 },
+              tone: 'fiery'
+            },
+            {
+              key: 'C',
+              text: `Chúng tôi tôn trọng ${opp}, nhưng PSG luôn bước ra sân với tâm thế làm chủ cuộc chơi.`,
+              repDelta: { mediaTrust: +3, governanceSkill: +2, playerTrust: +2 },
+              tone: 'measured'
+            }
+          ]
+        }
+      ];
+    }
+
+    if (contextType === 'post_match') {
+      const score = lastRes ? `${lastRes.homeGoals}-${lastRes.awayGoals}` : 'vừa qua';
+      const opp = lastRes?.oppName || 'đối thủ';
+      const won = lastRes ? lastRes.psgWon : true;
+      return [
+        {
+          id: 'ctx_postmatch_1',
+          reporter: 'Matthieu Delacroix',
+          outlet: 'Sports Daily',
+          category: 'Sau trận đấu',
+          question: won
+            ? `Chúc mừng Chủ tịch sau kết quả ${score} trước ${opp}! Ngài đánh giá đâu là yếu tố quyết định thắng lợi này?`
+            : `Thưa Chủ tịch, sau kết quả ${score} chưa như kỳ vọng trước ${opp}, Ban lãnh đạo có điều chỉnh gì ngay lập tức không?`,
+          options: won
+            ? [
+                {
+                  key: 'A',
+                  text: 'Công sức thuộc về tinh thần đoàn kết của toàn đội, HLV trưởng và sự cổ vũ cuồng nhiệt từ khán đài.',
+                  repDelta: { playerTrust: +4, coachTrust: +4, fanTrust: +4 },
+                  tone: 'humble'
+                },
+                {
+                  key: 'B',
+                  text: 'Chiến thắng này khẳng định hướng đầu tư và quản trị thể thao của PSG đang đi đúng quỹ đạo.',
+                  repDelta: { governanceSkill: +3, partnerTrust: +3, mediaTrust: +2 },
+                  tone: 'confident'
+                }
+              ]
+            : [
+                {
+                  key: 'A',
+                  text: 'Thất bại là bài học cần thiết. Ban lãnh đạo sẽ ngồi lại bình tĩnh cùng HLV để rút kinh nghiệm.',
+                  repDelta: { coachTrust: +3, governanceSkill: +3, mediaTrust: +2 },
+                  tone: 'calm'
+                },
+                {
+                  key: 'B',
+                  text: 'Tôi chia sẻ sự thất vọng với CĐV và yêu cầu toàn đội phản ứng mạnh mẽ ngay từ buổi tập ngày mai.',
+                  repDelta: { fanTrust: +4, playerTrust: -1, governanceSkill: +2 },
+                  tone: 'demanding'
+                }
+              ]
+        }
+      ];
+    }
+
+    // crisis_response
+    const crisisTitle = ctx.crisisTitle || 'làn sóng tin đồn & áp lực dư luận';
+    return [
+      {
+        id: 'ctx_crisis_1',
+        reporter: 'Matteo Romano',
+        outlet: 'Transfer Insider',
+        category: 'Họp báo Xử lý Khủng hoảng',
+        question: `Thưa Chủ tịch Phạm Minh Chiêu, dư luận đang rất quan tâm tới ${crisisTitle}. Thông điệp chính thức của PSG lúc này là gì?`,
+        options: [
+          {
+            key: 'A',
+            text: 'PSG vận hành dựa trên kỷ luật, sự minh bạch tài chính và sự đoàn kết tuyệt đối giữa Chủ tịch, HLV và cầu thủ.',
+            repDelta: { governanceSkill: +5, mediaTrust: +4, partnerTrust: +3, coachTrust: +2 },
+            tone: 'authoritative'
+          },
+          {
+            key: 'B',
+            text: 'Mọi thông tin chính thức chỉ xuất hiện trên PSG.fr và PSG TV. Chúng tôi mong CĐV không bị nhiễu loạn bởi tin đồn.',
+            repDelta: { fanTrust: +4, mediaTrust: +2, playerTrust: +2 },
+            tone: 'protective'
+          }
+        ]
+      }
+    ];
+  }
+}
+
+export class ContextPressConferenceRunner {
+  constructor(state) {
+    this.state = state;
+    this.activeSession = null;
+    this.completedCount = 0;
+  }
+
+  start(contextType, ctx = {}) {
+    const labels = {
+      pre_season: 'Họp Báo Khởi Động Mùa Giải',
+      pre_big_match: 'Họp Báo Trước Trận Đấu Lớn',
+      post_match: 'Họp Báo Sau Trận Đấu',
+      crisis_response: 'Họp Báo Đặc Biệt Xử Lý Khủng Hoảng'
+    };
+    const questions = PressQuestionSystem.buildContextQuestions(contextType, ctx, this.state);
+    this.activeSession = {
+      id: `pconf_${Date.now()}`,
+      contextType,
+      title: labels[contextType] || 'Họp Báo PSG TV',
+      questions,
+      currentIdx: 0,
+      answers: []
+    };
+    this.state?.televisionSystem?.pushBreakingNews(`🔴 TRỰC TIẾP HỌP BÁO: Chủ tịch Phạm Minh Chiêu chủ trì ${this.activeSession.title}`, 'press_conference');
+    return this.activeSession;
+  }
+
+  answer(optionKey) {
+    const ses = this.activeSession;
+    if (!ses) return { ok: false, error: 'Không có buổi họp báo nào đang mở.' };
+    const q = ses.questions[ses.currentIdx];
+    if (!q) return { ok: false, error: 'Đã hoàn tất toàn bộ câu hỏi.' };
+    const opt = (q.options || []).find((o) => o.key === optionKey) || q.options?.[0];
+    if (!opt) return { ok: false, error: 'Lựa chọn không hợp lệ.' };
+
+    ses.answers.push({ question: q.question, outlet: q.outlet, answer: opt.text, repDelta: opt.repDelta });
+    this.state?.reputationSystem?.applyDelta(opt.repDelta, `Họp báo (${ses.title})`, `${ses.id}_${q.id}`);
+
+    ses.currentIdx++;
+    const finished = ses.currentIdx >= ses.questions.length;
+    if (finished) {
+      this.completedCount++;
+      this.state?.eventBus?.emit('PRESS_CONFERENCE_COMPLETED', {
+        sessionId: ses.id,
+        contextType: ses.contextType,
+        title: ses.title,
+        answers: ses.answers
+      }, ses.id);
+      const summary = `${ses.title}: "${ses.answers[0]?.answer || ''}"`;
+      this.state?.pushSocial('PSG TV', '@PSGTV', `🎙️ Chủ tịch Phạm Minh Chiêu vừa kết thúc ${ses.title}.`, 'positive');
+      this.activeSession = null;
+      return { ok: true, finished: true, summary };
+    }
+    return { ok: true, finished: false, nextQuestion: ses.questions[ses.currentIdx] };
+  }
 }
 
 export class DialogueBranchSystem {

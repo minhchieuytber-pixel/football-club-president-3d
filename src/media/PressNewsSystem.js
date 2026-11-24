@@ -100,20 +100,30 @@ export class NewsImageSystem {
 export class PressNewsSystem {
   static outlets = ['L\'Équipe', 'Le Parisien Sport', 'France Football', 'RMC Sport', 'PSG Insider', 'Canal+ Foot'];
 
-  // 30 nhóm kịch bản báo chí chuẩn hóa (A: 1-10 Trước trận, B: 11-20 Sau trận, C: 21-30 Chuyển nhượng & Nội bộ)
+  // 30+ nhóm kịch bản báo chí chuẩn hóa + News Engine phân loại rõ Chuyển nhượng / Nội bộ / Thi đấu / Thương mại & Trạng thái xác thực
   static createArticle(state, cfg) {
     const {
-      scenarioId, category, tagType = 'Chính thức', title, summary, body,
+      scenarioId = 1, category, tagType = 'Chính thức', verificationStatus = null,
+      title, summary, body,
       imageType = 'pre_clash', imageCaption = 'PARIS SAINT-GERMAIN', relatedEntity = 'PSG',
-      importance = 'Cao', fanTone = 'positive', badge = '10'
+      importance = 'Cao', fanTone = 'positive', badge = '10', dedupeKey = null
     } = cfg;
+    if (dedupeKey && state.newsArchive.some((a) => a.dedupeKey === dedupeKey)) {
+      return null;
+    }
+    const resolvedVerification = verificationStatus || (
+      tagType === 'Chính thức' ? 'Chính thức'
+        : (tagType === 'Tin đồn' ? 'Tin đồn' : 'Chưa xác nhận')
+    );
     const outlet = PressNewsSystem.outlets[(state.newsArchive.length + scenarioId) % PressNewsSystem.outlets.length];
     const comments = PressNewsSystem.generateFanComments(fanTone, relatedEntity);
     const article = {
       id: `news_${Date.now()}_${Math.floor(Math.random() * 9999)}`,
+      dedupeKey: dedupeKey || null,
       scenarioId,
-      category,      // Tin PSG | Trước trận | Sau trận | Chuyển nhượng | Ligue 1 | Champions League | Nội bộ
-      tagType,       // Chính thức | Tin đồn | Nhận định chuyên gia | Phản ứng CĐV
+      category,      // Tin PSG | Trước trận | Sau trận | Chuyển nhượng | Ligue 1 | Champions League | Nội bộ | Thương mại
+      tagType,       // Chính thức | Tin đồn | Chưa xác nhận | Nhận định chuyên gia | Phản ứng CĐV
+      verificationStatus: resolvedVerification, // Chính thức | Chưa xác nhận | Tin đồn
       outlet,
       date: `Tuần ${state.week} · ${state.dayName} (${state.season})`,
       title,
@@ -128,7 +138,7 @@ export class PressNewsSystem {
       comments
     };
     state.newsArchive.unshift(article);
-    if (state.newsArchive.length > 80) state.newsArchive.pop();
+    if (state.newsArchive.length > 90) state.newsArchive.pop();
     return article;
   }
 
@@ -244,10 +254,45 @@ export class PressNewsSystem {
       });
     }
 
-    // Bài phụ chuyên sâu (Thủ môn giữ sạch lưới #18 / Cầu thủ trẻ tỏa sáng #17 / Ngôi sao lập cú đúp #15)
+    // Kiểm tra cầu thủ PSG lập hat-trick (Kịch bản #15)
+    const psgGoalCounts = {};
+    (res.goalEvents || []).filter((e) => e.team === 'Paris Saint-Germain').forEach((e) => {
+      psgGoalCounts[e.scorer] = (psgGoalCounts[e.scorer] || 0) + 1;
+    });
+    const hatTrickHero = Object.entries(psgGoalCounts).find(([, cnt]) => cnt >= 3);
+    if (hatTrickHero) {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 15, category: 'Sau trận', tagType: 'Chính thức', verificationStatus: 'Chính thức',
+        title: `HAT-TRICK RỰC SÁNG! ${hatTrickHero[0]} bùng nổ ${hatTrickHero[1]} bàn thắng trước ${res.oppName}!`,
+        summary: `Màn trình diễn siêu hạng giúp ${hatTrickHero[0]} trở thành tâm điểm của truyền thông châu Âu sau trận thắng ${score}.`,
+        body: `Với ${hatTrickHero[1]} pha lập công trước ${res.oppName}, ${hatTrickHero[0]} đã khẳng định đẳng cấp ngôi sao hàng đầu trong đội hình Paris Saint-Germain dưới triều đại Chủ tịch Phạm Minh Chiêu.`,
+        imageType: 'celebration',
+        imageCaption: `HAT-TRICK · ${hatTrickHero[0].toUpperCase()}`,
+        relatedEntity: hatTrickHero[0],
+        importance: 'Rất cao',
+        fanTone: 'win'
+      });
+    }
+
+    // Kiểm tra HLV bị chỉ trích nếu chuỗi thua >= 2
+    if (!res.psgWon && !res.psgDrew && (state.loseStreak || 0) >= 2) {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 20, category: 'Nội bộ', tagType: 'Nhận định chuyên gia', verificationStatus: 'Chưa xác nhận',
+        title: `Áp lực gia tăng với HLV ${state.coach?.name} sau ${state.loseStreak} thất bại liên tiếp của PSG`,
+        summary: `Giới chuyên môn Pháp phân tích những dấu hỏi về chiến thuật và kỳ vọng phản ứng từ Chủ tịch Phạm Minh Chiêu.`,
+        body: `Chuỗi ${state.loseStreak} trận không thắng khiến ghế HLV trưởng tại Parc des Princes trở thành chủ đề nóng trên mặt báo. Tuy nhiên Ban lãnh đạo PSG chưa phát đi thông báo chính thức nào về tương lai HLV ${state.coach?.name}.`,
+        imageType: 'boardroom',
+        imageCaption: `ÁP LỰC CHIẾN THUẬT · ${state.coach?.name?.toUpperCase() || 'PSG'}`,
+        relatedEntity: state.coach?.name || 'HLV PSG',
+        importance: 'Rất cao',
+        fanTone: 'loss'
+      });
+    }
+
+    // Bài phụ chuyên sâu (Thủ môn giữ sạch lưới #18 / Cầu thủ trẻ tỏa sáng #17)
     if (res.cleanSheet && res.gkRating) {
       PressNewsSystem.createArticle(state, {
-        scenarioId: 18, category: 'Tin PSG', tagType: 'Nhận định chuyên gia',
+        scenarioId: 18, category: 'Tin PSG', tagType: 'Nhận định chuyên gia', verificationStatus: 'Chính thức',
         title: `Bức tường thép ${res.gkRating.name}: Giữ sạch lưới ấn tượng trước ${res.oppName}!`,
         summary: `Thủ thành ${res.gkRating.name} nhận điểm ${res.gkRating.rating} nhờ sự chắc chắn tuyệt đối trong khung gỗ PSG.`,
         body: `Những pha ra vào hợp lý và cản phá xuất sắc của ${res.gkRating.name} là nền tảng giúp Paris Saint-Germain bảo toàn mảnh lưới suốt 90 phút.`,
@@ -258,7 +303,7 @@ export class PressNewsSystem {
       });
     } else if (res.youngStar) {
       PressNewsSystem.createArticle(state, {
-        scenarioId: 17, category: 'Tin PSG', tagType: 'Nhận định chuyên gia',
+        scenarioId: 17, category: 'Tin PSG', tagType: 'Nhận định chuyên gia', verificationStatus: 'Chính thức',
         title: `Tài năng trẻ ${res.youngStar.name} gây ấn tượng mạnh với điểm số ${res.youngStar.rating}!`,
         summary: `Cầu thủ ${res.youngStar.age} tuổi tận dụng xuất sắc cơ hội ra sân trong màu áo PSG.`,
         body: `Màn trình diễn tự tin của ${res.youngStar.name} cho thấy chính sách phát triển tài năng trẻ dưới thời Chủ tịch Phạm Minh Chiêu đang đi đúng hướng.`,
@@ -270,21 +315,29 @@ export class PressNewsSystem {
     }
   }
 
-  // NHÓM C: Tin chuyển nhượng & nội bộ (Kịch bản 21-30)
-  static generateTransferNews(state, playerName, fromClub, fee, isOfficial = true) {
+  // NHÓM C: Tin chuyển nhượng (TUYỆT ĐỐI không gắn 'Chính thức' nếu isOfficial === false!)
+  static generateTransferNews(state, playerName, fromClub, fee, isOfficial = true, extra = {}) {
+    const status = isOfficial ? 'Chính thức' : (extra.verificationStatus || 'Tin đồn');
     PressNewsSystem.createArticle(state, {
       scenarioId: isOfficial ? 24 : 21,
       category: 'Chuyển nhượng',
-      tagType: isOfficial ? 'Chính thức' : 'Tin đồn',
-      title: isOfficial ? `CHÍNH THỨC: PSG chào đón tân binh ${playerName} từ ${fromClub}!` : `Tin đồn Mercato: PSG đang theo dõi sát sao ${playerName}`,
-      summary: isOfficial ? `Chủ tịch Phạm Minh Chiêu hoàn tất thương vụ ${playerName} với mức phí €${fee}M.` : `Truyền thông châu Âu cho biết PSG đang cân nhắc chiêu mộ ${playerName}.`,
+      tagType: status,
+      verificationStatus: status,
+      title: isOfficial
+        ? `CHÍNH THỨC: PSG ${extra.isSale ? `chia tay ${playerName} sang ${fromClub}` : `chào đón tân binh ${playerName} từ ${fromClub}`}!`
+        : (extra.title || `Tin đồn Mercato: PSG và thương vụ ${playerName}`),
+      summary: isOfficial
+        ? `Chủ tịch Phạm Minh Chiêu hoàn tất thương vụ ${playerName} với mức phí €${fee}M.`
+        : (extra.summary || `Truyền thông châu Âu cho biết đang có những động thái xung quanh ${playerName}, nhưng chưa có xác nhận chính thức.`),
       body: isOfficial
-        ? `Paris Saint-Germain chính thức công bố bản hợp đồng mới mang tên ${playerName} từ ${fromClub} với tổng mức phí €${fee}M. Chủ tịch Phạm Minh Chiêu và Giám đốc thể thao Luís Campos kỳ vọng tân binh sẽ lập tức nâng tầm sức mạnh đội bóng.`
-        : `Theo nguồn tin chuyển nhượng, bộ phận tuyển trạch PSG đang theo sát phong độ của ${playerName}. Hiện chưa có đề nghị chính thức nào được xác nhận.`,
+        ? `Paris Saint-Germain chính thức xác nhận thương vụ ${playerName} (${fromClub}) với tổng mức phí €${fee}M. Chủ tịch Phạm Minh Chiêu và Giám đốc thể thao đã hoàn tất đầy đủ hồ sơ pháp lý.`
+        : (extra.body || `Theo nguồn tin Mercato chưa xác thực, tương lai của ${playerName} đang được giới truyền thông quan tâm. Các bên liên quan chưa đưa ra thông báo chính thức nào.`),
       imageType: 'transfer',
       imageCaption: `MERCATO · ${playerName.toUpperCase()}`,
       relatedEntity: playerName,
-      fanTone: 'transfer'
+      importance: fee >= 50 ? 'Rất cao' : 'Cao',
+      fanTone: 'transfer',
+      dedupeKey: extra.dedupeKey || null
     });
   }
 
@@ -294,13 +347,150 @@ export class PressNewsSystem {
       scenarioId: 29,
       category: trophy.category === 'international' ? 'Champions League' : 'Tin PSG',
       tagType: 'Chính thức',
+      verificationStatus: 'Chính thức',
       title: `CHAMPIONS! PSG chính thức đăng quang ${trophy.competitionName} mùa giải ${trophy.seasonName}!`,
       summary: `Chiếc cúp ${trophy.competitionName} đã được trao cho PSG và tự động trưng bày trang trọng tại Bảo tàng Danh hiệu CLB.`,
       body: `${trophy.historicalDescription} HLV trưởng ${trophy.winningManagerName} cùng đội hình ${trophy.squadSnapshot?.length || 11} cầu thủ đã làm nên trang sử vàng mới dưới sự lãnh đạo của Chủ tịch ${trophy.presidentName}. Người hâm mộ có thể tham quan trực tiếp chiếc cúp tại ${trophy.displayLocation}.`,
-      imageType: 'celebration',
+      imageType: 'trophy',
       imageCaption: `VÔ ĐỊCH ${trophy.competitionName.toUpperCase()} · ${trophy.seasonName}`,
       relatedEntity: trophy.winningManagerName || 'PSG',
+      importance: 'Rất cao',
       fanTone: 'win'
+    });
+  }
+
+  // Kết nối News Engine với ClubEventBus trung tâm cho đủ 4 nhóm tin (Chuyển nhượng, Nội bộ, Thi đấu, Thương mại)
+  static subscribeToEventBus(eventBus, state) {
+    if (!eventBus) return;
+
+    eventBus.on('TRANSFER_BID_RECEIVED', (p) => {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 22, category: 'Chuyển nhượng', tagType: 'Chưa xác nhận', verificationStatus: 'Chưa xác nhận',
+        title: `Tin nóng: ${p.buyerClub} gửi đề nghị ${p.dealType === 'loan' ? 'mượn' : `€${p.fee}M hỏi mua`} ${p.playerName} của PSG`,
+        summary: `Đề nghị từ ${p.buyerClub} đang nằm trên bàn làm việc của Chủ tịch Phạm Minh Chiêu, hiện chưa có quyết định chốt hạ.`,
+        body: `Các nguồn tin sát sườn tiết lộ ${p.buyerClub} muốn có sự phục vụ của ${p.playerName} (${p.position}). Phía Paris Saint-Germain chưa công bố phản hồi chính thức.`,
+        imageType: 'transfer', imageCaption: `${p.buyerClub.toUpperCase()} → ${p.playerName.toUpperCase()}`,
+        relatedEntity: p.playerName, importance: 'Cao', fanTone: 'transfer',
+        dedupeKey: `news_bid_${p.bidId}`
+      });
+    });
+
+    eventBus.on('TRANSFER_NEGOTIATION_STARTED', (p) => {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 21, category: 'Chuyển nhượng', tagType: 'Chưa xác nhận', verificationStatus: 'Chưa xác nhận',
+        title: `Đàm phán mở màn: PSG tiếp xúc ${p.fromClub} cho trường hợp của ${p.playerName}`,
+        summary: `Giám đốc Thể thao PSG đã bắt đầu trao đổi với ${p.fromClub} về mức phí dự kiến €${p.askFee}M.`,
+        body: `Thương vụ ${p.playerName} vẫn đang ở giai đoạn đàm phán giữa hai câu lạc bộ và chưa đạt thỏa thuận chính thức cuối cùng.`,
+        imageType: 'transfer', imageCaption: `ĐÀM PHÁN · ${p.playerName.toUpperCase()}`,
+        relatedEntity: p.playerName, importance: 'Cao', fanTone: 'transfer',
+        dedupeKey: `news_negstart_${p.negId}`
+      });
+    });
+
+    eventBus.on('TRANSFER_COUNTER_OFFER', (p) => {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 23, category: 'Chuyển nhượng', tagType: 'Chưa xác nhận', verificationStatus: 'Chưa xác nhận',
+        title: p.stage === 2
+          ? `Cầu thủ ${p.playerName} đặt yêu cầu lương €${p.counterValue}k/tuần với PSG`
+          : `Đàm phán căng thẳng: ${p.fromClub} nâng giá ${p.playerName} lên €${p.counterValue}M`,
+        summary: `Hai bên đang thương lượng chi tiết nhưng thương vụ chưa được ký kết.`,
+        body: `${p.message || 'Các cuộc thương thảo vẫn tiếp tục diễn ra giữa đại diện các bên.'}`,
+        imageType: 'transfer', imageCaption: `THƯƠNG LƯỢNG · ${p.playerName.toUpperCase()}`,
+        relatedEntity: p.playerName, importance: 'Trung bình', fanTone: 'transfer',
+        dedupeKey: `news_counter_${p.negId}_r${p.round}`
+      });
+    });
+
+    eventBus.on('TRANSFER_DEAL_FAILED', (p) => {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 25, category: 'Chuyển nhượng', tagType: 'Chính thức', verificationStatus: 'Chính thức',
+        title: `Đàm phán đổ bể: Thương vụ ${p.playerName} không thể đi đến thống nhất`,
+        summary: p.reason || `PSG và đối tác không đạt được thỏa thuận cuối cùng cho ${p.playerName}.`,
+        body: `Các cuộc đàm phán liên quan tới ${p.playerName} đã chính thức khép lại mà không có chữ ký nào được thực hiện.`,
+        imageType: 'boardroom', imageCaption: `THẤT BẠI · ${p.playerName.toUpperCase()}`,
+        relatedEntity: p.playerName, importance: 'Cao', fanTone: 'loss',
+        dedupeKey: `news_fail_${p.negId}`
+      });
+    });
+
+    eventBus.on('CONTRACT_RENEWED', (p) => {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 27, category: 'Nội bộ', tagType: 'Chính thức', verificationStatus: 'Chính thức',
+        title: `CHÍNH THỨC: ${p.playerName} gia hạn hợp đồng gắn bó tương lai cùng PSG`,
+        summary: `Bản hợp đồng mới có thời hạn ${p.contractYears} năm với mức lương €${p.weeklyWage}k/tuần vừa được Chủ tịch Phạm Minh Chiêu phê duyệt.`,
+        body: `Ban lãnh đạo Paris Saint-Germain xác nhận đã giữ chân thành công ${p.playerName}. Động thái này củng cố sự ổn định dài hạn trong phòng thay đồ tại Campus PSG.`,
+        imageType: 'transfer', imageCaption: `GIA HẠN · ${p.playerName.toUpperCase()}`,
+        relatedEntity: p.playerName, importance: 'Cao', fanTone: 'win'
+      });
+    });
+
+    eventBus.on('STAFF_CHANGED', (p) => {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 28, category: 'Nội bộ', tagType: 'Chính thức', verificationStatus: 'Chính thức',
+        title: `Biến động nhân sự PSG: ${p.title || `${p.staffName} đảm nhận vai trò ${p.role}`}`,
+        summary: p.summary || `Chủ tịch Phạm Minh Chiêu chính thức điều chỉnh cấu trúc nhân sự chuyên môn tại CLB.`,
+        body: p.body || `Quyết định bổ nhiệm/điều chỉnh ${p.staffName} (${p.role}) nhằm nâng cao hiệu suất vận hành đội một và học viện Paris Saint-Germain.`,
+        imageType: 'boardroom', imageCaption: `NHÂN SỰ PSG · ${(p.staffName || 'BHL').toUpperCase()}`,
+        relatedEntity: p.staffName || 'Ban huấn luyện PSG', importance: 'Cao', fanTone: 'neutral'
+      });
+    });
+
+    eventBus.on('PLAYER_INJURED', (p) => {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 19, category: 'Tin PSG', tagType: 'Chính thức', verificationStatus: 'Chính thức',
+        title: `Tin y tế PSG: ${p.playerName} chấn thương, dự kiến nghỉ ${p.days} ngày`,
+        summary: `Bộ phận Y tế xác nhận ${p.playerName} gặp vấn đề ${p.injuryType || 'cơ bắp'} và đang được điều trị tích cực.`,
+        body: `HLV trưởng sẽ phải tính toán phương án xoay tua nhân sự trong thời gian ${p.playerName} hồi phục tại Trung tâm Y tế Campus PSG.`,
+        imageType: 'training', imageCaption: `Y TẾ PSG · ${p.playerName.toUpperCase()}`,
+        relatedEntity: p.playerName, importance: 'Cao', fanTone: 'loss'
+      });
+    });
+
+    eventBus.on('SPONSOR_SIGNED', (p) => {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 30, category: 'Thương mại', tagType: 'Chính thức', verificationStatus: 'Chính thức',
+        title: `THƯƠNG MẠI: PSG ${p.isRenewal ? 'gia hạn' : 'ký hợp đồng mới'} với nhà tài trợ ${p.sponsorName} (€${p.annualValueM}M/năm)`,
+        summary: `Thỏa thuận ${p.slot} giúp củng cố mạnh mẽ tiềm lực tài chính và vị thế thương hiệu toàn cầu của PSG.`,
+        body: `Dưới sự chủ trì của Chủ tịch Phạm Minh Chiêu, Paris Saint-Germain tiếp tục mở rộng hệ sinh thái đối tác chiến lược cùng ${p.sponsorName} trong ${p.years} năm tới.`,
+        imageType: 'boardroom', imageCaption: `TÀI TRỢ · ${p.sponsorName.toUpperCase()}`,
+        relatedEntity: p.sponsorName, importance: 'Cao', fanTone: 'win'
+      });
+    });
+
+    eventBus.on('COMMERCIAL_MILESTONE', (p) => {
+      PressNewsSystem.createArticle(state, {
+        scenarioId: 31, category: 'Thương mại', tagType: 'Chính thức', verificationStatus: 'Chính thức',
+        title: `Bùng nổ thương mại: ${p.title} mang về €${p.revenueM}M doanh thu cho PSG`,
+        summary: `Lượng áo đấu bán ra tăng thêm ${p.jerseysSoldK}k chiếc và lượng người hâm mộ toàn cầu tăng thêm ${p.fanGainM}M.`,
+        body: `Chiến dịch thương mại do Chủ tịch Phạm Minh Chiêu phê duyệt đã tạo cú hích mạnh về doanh số bán lẻ và độ phủ thương hiệu Paris Saint-Germain trên toàn thế giới.`,
+        imageType: 'fans', imageCaption: `THƯƠNG MẠI PSG · +€${p.revenueM}M`,
+        relatedEntity: 'Thương mại PSG', importance: 'Trung bình', fanTone: 'win'
+      });
+    });
+
+    eventBus.on('RUMOR_ACTION_TAKEN', (p) => {
+      if (!p?.rumor) return;
+      if (p.action === 'deny' || p.action === 'confirm' || p.action === 'delegate_media') {
+        const isConfirmedOfficial = p.action === 'confirm' && p.rumor.verificationStatus === 'Thông báo chính thức';
+        PressNewsSystem.createArticle(state, {
+          scenarioId: 32,
+          category: 'Nội bộ',
+          tagType: isConfirmedOfficial ? 'Chính thức' : 'Chưa xác nhận',
+          verificationStatus: isConfirmedOfficial ? 'Chính thức' : 'Chưa xác nhận',
+          title: p.action === 'deny'
+            ? `PSG lên tiếng bác bỏ tin đồn liên quan tới ${p.rumor.relatedEntity}`
+            : p.action === 'confirm'
+              ? `CHÍNH THỨC: Chủ tịch Phạm Minh Chiêu xác nhận thông tin về ${p.rumor.relatedEntity}`
+              : `Phòng Truyền thông PSG phát thông cáo làm rõ tin đồn ${p.rumor.relatedEntity}`,
+          summary: p.message,
+          body: `${p.rumor.detail} — Phản hồi chính thức từ PSG: ${p.message}`,
+          imageType: 'boardroom',
+          imageCaption: `TRUYỀN THÔNG PSG · ${p.rumor.relatedEntity.toUpperCase()}`,
+          relatedEntity: p.rumor.relatedEntity,
+          importance: 'Cao',
+          fanTone: p.action === 'deny' ? 'neutral' : 'transfer'
+        });
+      }
     });
   }
 }

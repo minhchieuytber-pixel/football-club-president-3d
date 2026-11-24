@@ -254,6 +254,14 @@ class FootballPresidentGame3D {
         this.campus?.updateBroadcastTv?.(this.state.latestTrophyBroadcast);
         this.perfManager?.requestShadowUpdate();
       },
+      refreshTv3D: () => {
+        this.campus?.updatePresidentTvVisual?.(
+          this.state.televisionSystem,
+          0.05,
+          performance.now() * 0.001,
+          this.playerMesh.position
+        );
+      },
       exportSnapshot: () => this._buildExportSnapshot(),
       importSnapshot: (snap) => this._applySnapshot(snap),
       autoSaveNow: (mirrorIdb = true) => this.autoSaveNow(mirrorIdb),
@@ -345,6 +353,12 @@ class FootballPresidentGame3D {
       px = this.seatedSeat.standX;
       pz = this.seatedSeat.standZ;
     }
+    if (this.ui) {
+      this.state.uiPrefs = {
+        dockState: this.ui.dockManager?.exportState?.() || null,
+        navState: this.ui.navHistory?.exportState?.() || null
+      };
+    }
     return this.state.exportFullState({
       x: px,
       z: pz,
@@ -356,12 +370,23 @@ class FootballPresidentGame3D {
   _applySnapshot(snap) {
     if (!snap) return;
     this.state.importFullState(snap);
+    if (this.ui && snap.uiPrefs) {
+      if (snap.uiPrefs.dockState) {
+        this.ui.dockManager?.importState?.(snap.uiPrefs.dockState);
+        this.saveManager?.saveSettings({ dockState: this.ui.dockManager.exportState() });
+      }
+      if (snap.uiPrefs.navState) {
+        this.ui.navHistory?.importState?.(snap.uiPrefs.navState);
+      }
+      this.ui.applyDockVisualState?.();
+    }
     this.npcSystem.spawnFromProfiles(this.state.npcs, this.state.clockHour);
     this.npcSystem.syncStaffNpcs(this.state.staffDb.active, this.state.clockHour);
     this.npcSystem.syncSquadPlayers(this.state.getPsgSquad(), this.state.clockHour);
     this.dressingRoom.refreshDynamicElements();
     this.museumScene?.syncWithTrophySystem(this.state.trophySystem);
     this.campus.updateBroadcastTv?.(this.state.latestTrophyBroadcast);
+    this.campus.updatePresidentTvVisual?.(this.state.televisionSystem, 0.2, 0, this.playerMesh.position);
     this.campus.updateDayNightCycle(this.state.clockHour, this.state.timeSystem.weather);
     this.standUp(true);
     this._preEventPlayerState = null;
@@ -626,13 +651,14 @@ class FootballPresidentGame3D {
         this.audio.playDoor();
         this.ui.toast(isOpen ? 'Đã mở cửa gỗ.' : 'Đã đóng cửa gỗ.', 'info');
       } else if (act === 'sit_seat' && t.data.extra) this.sitOnSeat(t.data.extra);
-      else if (act === 'open_computer') this.ui.openComputer('reports');
+      else if (act === 'open_computer') this.ui.openComputer('overview');
+      else if (act === 'open_president_tv') this.ui.openTelevisionModal();
       else if (act === 'open_reports') this.ui.openComputer('reports');
       else if (act === 'open_history') this.ui.openComputer('history');
       else if (act === 'open_board_meeting') this.ui.openBoardMeeting();
       else if (act === 'open_medical') this.ui.openComputer('squad');
       else if (act === 'open_tactics' || act === 'open_formation') this.ui.openComputer('formation');
-      else if (act === 'open_signing_event') this.ui.openComputer('events');
+      else if (act === 'open_signing_event') this.ui.openComputer('media');
       else if (act === 'open_museum_ui') this.ui.openMuseumModal(t.data.extra?.tab || 'history');
       else if (act === 'inspect_trophy' && t.data.extra?.trophyId) this.ui.openTrophyDetail(t.data.extra.trophyId);
       else if (act === 'inspect_legend' && t.data.extra?.legendId) this.ui.openLegendDetail(t.data.extra.legendId);
@@ -778,6 +804,9 @@ class FootballPresidentGame3D {
     const simDt = this.state.timeSystem.isPaused() ? 0 : dt;
     this.campus.updateDoors(dt, this.playerMesh.position, this.npcSystem.npcs);
     this.state.signingEventSystem.update(dt);
+    if (!modalOpen) {
+      this.campus.updatePresidentTvVisual?.(this.state.televisionSystem, dt, performance.now() * 0.001, this.playerMesh.position);
+    }
 
     if (simDt > 0) {
       let focusPos = this.playerMesh.position;

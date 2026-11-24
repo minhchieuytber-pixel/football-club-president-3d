@@ -21,6 +21,13 @@ import { SigningEventSystem, createMediaNpcProfiles } from '../media/SigningEven
 import { MediaReputationSystem } from '../media/MediaNewsGenerator.js';
 import { TrophySystem } from '../trophies/TrophySystem.js';
 import { TournamentSystem } from '../leagues/TournamentSystem.js';
+import { ClubEventBus } from '../core/ClubEventBus.js';
+import { ReputationSystem } from './ReputationSystem.js';
+import { CommercialFacilitySystem } from './CommercialFacilitySystem.js';
+import { RumorAndCrisisSystem } from '../media/RumorAndCrisisSystem.js';
+import { MorningNewsSystem } from '../media/MorningNewsSystem.js';
+import { TelevisionSystem } from '../media/TelevisionSystem.js';
+import { ContextPressConferenceRunner } from '../media/PressConferenceSystem.js';
 
 export class GameState {
   constructor() {
@@ -199,7 +206,15 @@ export class GameState {
     this.lastSeasonSummary = null;
     this.latestTrophyBroadcast = null;
 
-    // Khởi tạo toàn bộ các hệ thống con kết nối chung Single Source of Truth
+    // Khởi tạo EventBus trung tâm & toàn bộ hệ thống con kết nối chung Single Source of Truth
+    this.eventBus = new ClubEventBus(this);
+    this.reputationSystem = new ReputationSystem(this);
+    this.commercialSystem = new CommercialFacilitySystem(this);
+    this.rumorCrisisSystem = new RumorAndCrisisSystem(this);
+    this.morningNewsSystem = new MorningNewsSystem(this);
+    this.televisionSystem = new TelevisionSystem(this);
+    this.contextPressConference = new ContextPressConferenceRunner(this);
+
     this.formationSystem = new SquadFormationSystem(this);
     this.managerSystem = new ManagerManagementSystem(this);
     this.coachingSystem = new CoachingStaffSystem(this);
@@ -212,18 +227,72 @@ export class GameState {
     MediaReputationSystem.ensureBrandMetrics(this);
     this.signingEventSystem = new SigningEventSystem(this);
 
+    this._bindCoreEventBus();
+
     // Đăng ký sự kiện đồng hồ toàn game
     this.timeSystem.on('onDayChange', (evt) => this.handleNewGameDay(evt));
 
     this.generateDailyBriefing();
     if (this.fixtures[0]) PressNewsSystem.generatePreMatchNews(this, this.fixtures[0]);
     PressNewsSystem.createArticle(this, {
-      scenarioId: 26, category: 'Nội bộ', tagType: 'Chính thức',
+      scenarioId: 26, category: 'Nội bộ', tagType: 'Chính thức', verificationStatus: 'Chính thức',
       title: 'Chủ tịch Phạm Minh Chiêu chính thức mở màn mùa giải mới cùng Paris Saint-Germain',
       summary: 'Ban lãnh đạo PSG khẳng định quyết tâm bảo vệ ngôi vương Ligue 1 và chinh phục UEFA Champions League.',
       body: `Tại trụ sở hiện đại Campus PSG, Chủ tịch Phạm Minh Chiêu đã có buổi làm việc đầu mùa với 12 phòng ban và HLV trưởng ${this.coach.name}, đặt mục tiêu kết hợp giữa bản sắc bóng đá tấn công và sự phát triển bền vững của Học viện.`,
       imageType: 'boardroom', imageCaption: 'BAN LÃNH ĐẠO PSG · MÙA GIẢI MỚI', relatedEntity: 'Chủ tịch Phạm Minh Chiêu', fanTone: 'win'
     });
+    this.morningNewsSystem.generateDigest(true);
+  }
+
+  _bindCoreEventBus() {
+    if (!this.eventBus) return;
+    PressNewsSystem.subscribeToEventBus(this.eventBus, this);
+    this.rumorCrisisSystem.subscribeToEventBus(this.eventBus);
+    this.eventBus.on('TRANSFER_DEAL_COMPLETED', (deal) => {
+      if (deal && (deal.to === 'Paris Saint-Germain' || deal.from === 'Paris Saint-Germain')) {
+        this.televisionSystem?.pushBreakingNews(`${deal.playerName}: ${deal.from} → ${deal.to} (€${deal.fee}M)`, 'transfer_news');
+        this.morningNewsSystem?.generateDigest(true);
+      }
+    });
+  }
+
+  renewPsgPlayerContract(playerId, years = 3, customWage = null) {
+    const p = this.getPsgSquad().find((x) => x.id === playerId);
+    if (!p) return { ok: false, error: 'Không tìm thấy cầu thủ trong đội một PSG.' };
+    const newWage = Math.max(p.wage || 40, Number(customWage || Math.round((p.wage || 60) * 1.1)));
+    const newYears = Math.max(2, Math.min(5, Number(years || 3)));
+    p.wage = newWage;
+    p.contractYears = newYears;
+    p.morale = Math.min(100, (p.morale || 80) + 8);
+    if (p.contract) {
+      p.contract.weeklyWage = newWage;
+      p.contract.annualWage = +((newWage * 52) / 1000).toFixed(2);
+      p.contract.contractYears = newYears;
+      p.contract.renewalStatus = 'Ổn định';
+    }
+    if (p.psychology) p.psychology.morale = p.morale;
+    this.transferSystem?.recalcWeeklyWages();
+    this.reputationSystem?.applyDelta(
+      { playerTrust: +3, governanceSkill: +2, fanTrust: +1 },
+      `Gia hạn hợp đồng ${p.name} (+${newYears} năm)`
+    );
+    this.eventBus?.emit('CONTRACT_RENEWED', {
+      playerId: p.id,
+      playerName: p.name,
+      weeklyWage: newWage,
+      contractYears: newYears
+    });
+    this.notifySquadChanged();
+    return { ok: true, player: p, newWage, newYears };
+  }
+
+  getTotalPendingApprovalsCount() {
+    const rep = this.pendingReports?.length || 0;
+    const bids = this.transferSystem?.incomingBids?.length || 0;
+    const rumors = (this.rumorCrisisSystem?.rumors || []).filter((r) => !r.handled).length;
+    const crises = (this.rumorCrisisSystem?.crises || []).filter((c) => c.status === 'active').length;
+    const events = this.signingEventSystem?.pendingEvents?.length || 0;
+    return rep + bids + rumors + crises + events;
   }
 
   // ==================== SINGLE SOURCE OF TRUTH LOOKUPS ====================
@@ -267,6 +336,7 @@ export class GameState {
   // Cập nhật thời gian toàn game (gọi mỗi frame trong main.js)
   tickTime(realDt) {
     this.timeSystem.tick(realDt);
+    this.televisionSystem?.tick(realDt);
     this.clockHour = this.timeSystem.clockHour;
     this.dayName = this.timeSystem.dayName;
   }
@@ -277,11 +347,13 @@ export class GameState {
     this.dayNum += daysPassed;
     this.dayName = this.timeSystem.dayName;
 
-    // 1. Hồi phục thể lực & tiến triển chấn thương theo số ngày trôi qua
+    // 1. Hồi phục thể lực & tiến triển chấn thương theo số ngày trôi qua + cấp Trung tâm Y tế
     const rehabMult = this.coachingSystem?.getTrainingQualityMultipliers()?.rehab || 1.0;
+    const medLv = this.commercialSystem?.getFacilityLevel('medical_lab') || 3;
+    const medBonus = 1 + medLv * 0.06;
     this.getPsgSquad().forEach((p) => {
       if (p.injuryDays > 0) {
-        const heal = daysPassed * (rehabMult >= 1.1 ? 1.25 : 1);
+        const heal = daysPassed * (rehabMult >= 1.1 ? 1.25 : 1) * medBonus;
         p.injuryDays = Math.max(0, Math.round(p.injuryDays - heal));
         if (p.health) p.health.injuryDays = p.injuryDays;
       }
@@ -298,12 +370,13 @@ export class GameState {
       this.transferSystem.runAiTransferMarketCycle(1);
     }
 
-    // 3. Tiến độ nhiệm vụ & Bản tin ngày
+    // 3. Tiến độ nhiệm vụ, Bản tin ngày & Bản Tin Sáng PSG Morning News
     TaskAssignmentSystem.advanceTasks(this, 35 * daysPassed);
     this.generateDailyBriefing();
+    this.morningNewsSystem?.generateDigest(false);
 
     if (this._onNewDayToast) {
-      this._onNewDayToast(`🌅 Ngày mới: ${this.timeSystem.dayNameUpper} (${evt.date}) — Bản tin tình hình & lịch huấn luyện đã cập nhật!`);
+      this._onNewDayToast(`🌅 Ngày mới: ${this.timeSystem.dayNameUpper} (${evt.date}) — Bản tin sáng PSG & lịch huấn luyện đã cập nhật!`);
     }
   }
 
@@ -375,13 +448,17 @@ export class GameState {
 
     this.transferSystem.recalcWeeklyWages();
     const wageM = this.finance.weeklyWages;
-    this.addLedger(`Chi trả quỹ lương tuần ${this.week} (Đội một + BHL + 12 phòng ban)`, -wageM);
+    const facUpkeep = this.commercialSystem?.getTotalWeeklyFacilityUpkeep() || 0;
+    this.addLedger(`Chi trả quỹ lương tuần ${this.week} (Đội một + BHL + 12 phòng ban) & bảo trì CSVC`, -(wageM + facUpkeep));
     if (this.week % 2 === 0) {
-      this.addLedger(`Doanh thu thương mại & áo đấu tuần ${this.week}`, +(5.8 + this.president.prestige * 0.04).toFixed(2));
+      const jerseyRev = +(5.8 + this.president.prestige * 0.04 + ((this.commercialSystem?.commercial?.globalStores || 14) * 0.08)).toFixed(2);
+      this.addLedger(`Doanh thu thương mại & áo đấu tuần ${this.week}`, jerseyRev);
     }
 
-    // Tiến triển học viện & cầu thủ đang cho mượn
-    this.academy.forEach((y) => { if (!y.promoted && Math.random() < 0.22 && y.ovr < y.pot) y.ovr = Math.min(y.pot, y.ovr + 1); });
+    // Tiến triển học viện & cầu thủ đang cho mượn (nhân hệ số cấp Học viện)
+    const acLv = this.commercialSystem?.getFacilityLevel('youth_academy') || 3;
+    const acChance = 0.18 + acLv * 0.04;
+    this.academy.forEach((y) => { if (!y.promoted && Math.random() < acChance && y.ovr < y.pot) y.ovr = Math.min(y.pot, y.ovr + 1); });
     this.transferSystem.simulateLoanProgress();
 
     // Báo cáo chờ duyệt mới
@@ -404,16 +481,19 @@ export class GameState {
       this.pushPhoneMsg('Lịch Thi Đấu PSG', `⚠️ Tuần ${this.week} có trận: ${newFx.home} vs ${newFx.away}`, `Giải ${newFx.comp} (${newFx.round}). Hãy vào mục Ngày Thi Đấu để chỉ đạo trước khi qua tuần.`, true);
     }
 
-    // Hoạt động AI thị trường chuyển nhượng (nếu đang mở cửa sổ)
+    // Hoạt động AI thị trường chuyển nhượng & Tin đồn hàng tuần
     if (this.transferSystem.isWindowOpen()) {
       this.transferSystem.runAiTransferMarketCycle(3);
       this.transferSystem.generateIncomingBids(1);
     }
+    this.rumorCrisisSystem?.generateWeeklyIntel();
 
-    // Kiểm tra sự kiện chấn thương thực tế dựa trên injuryRisk
+    // Kiểm tra sự kiện chấn thương thực tế dựa trên injuryRisk & Trung tâm Y tế
+    const medLv = this.commercialSystem?.getFacilityLevel('medical_lab') || 3;
+    const injuryProb = Math.max(0.1, 0.34 - medLv * 0.035);
     const psgSquad = this.getPsgSquad();
     const roll = Math.random();
-    if (roll < 0.28 && psgSquad.length > 0) {
+    if (roll < injuryProb && psgSquad.length > 0) {
       const tired = [...psgSquad].sort((a, b) => (b.health?.injuryRisk || 10) - (a.health?.injuryRisk || 10));
       const target = tired[Math.floor(Math.random() * Math.min(6, tired.length))];
       if (target && target.injuryDays === 0) {
@@ -423,6 +503,12 @@ export class GameState {
         const medHead = this.staffDb.active.find((s) => s.roleKey === 'head_medical')?.name || 'Trưởng Y Tế';
         const evtText = `${target.name} bị căng cơ trong buổi tập! Trung tâm Y tế đã lập báo cáo (nghỉ 14 ngày).`;
         this.pushPhoneMsg(`${medHead} (Y Tế)`, `Báo cáo chấn thương: ${target.name}`, evtText, true);
+        this.eventBus?.emit('PLAYER_INJURED', {
+          playerId: target.id,
+          playerName: target.name,
+          days: 14,
+          injuryType: 'Căng cơ gân kheo'
+        }, `inj_${target.id}_w${this.week}`);
         this.incomingCall = {
           caller: `${medHead} · Trưởng Bộ Phận Y Tế`,
           summary: `${target.name} chấn thương cơ (14 ngày). Chủ tịch có duyệt phác đồ hồi phục nhanh (€0.6M → 7 ngày) không?`,
@@ -437,6 +523,7 @@ export class GameState {
 
     TaskAssignmentSystem.advanceTasks(this, 60);
     this.generateDailyBriefing();
+    this.morningNewsSystem?.generateDigest(true);
     if (!this.getNextFixture()) this.concludeSeason();
     return { blocked: false };
   }
@@ -497,24 +584,38 @@ export class GameState {
       if (pl.psychology) pl.psychology.morale = pl.morale;
     });
 
-    if (res.psgIsHome) this.addLedger(`Doanh thu bán vé & VIP Parc des Princes (${fx.comp})`, 4.2);
+    const vipLv = this.commercialSystem?.getFacilityLevel('parc_vip') || 4;
+    if (res.psgIsHome) {
+      this.addLedger(`Doanh thu bán vé & VIP Parc des Princes (${fx.comp})`, +(3.6 + vipLv * 0.7).toFixed(1));
+    }
     if (res.psgWon) {
       this.loseStreak = 0;
-      this.president.fanSupport = Math.min(100, this.president.fanSupport + 3);
-      this.president.boardTrust = Math.min(100, this.president.boardTrust + 2);
-      this.president.prestige = Math.min(100, this.president.prestige + 1);
+      this.reputationSystem?.applyDelta(
+        { fanTrust: +3, coachTrust: +2, partnerTrust: +1, governanceSkill: +1 },
+        `Thắng ${res.oppName} (${res.homeGoals}-${res.awayGoals})`,
+        `match_rep_${fx.id}`
+      );
       if (fx.comp === 'UEFA Champions League') this.addLedger('Tiền thưởng chiến thắng UEFA Champions League', 2.8);
     } else if (!res.psgDrew) {
       this.loseStreak++;
-      this.president.fanSupport = Math.max(25, this.president.fanSupport - 4);
-      this.president.boardTrust = Math.max(30, this.president.boardTrust - 3);
+      this.reputationSystem?.applyDelta(
+        { fanTrust: -3, coachTrust: -2, mediaTrust: -1 },
+        `Thua ${res.oppName} (${res.homeGoals}-${res.awayGoals})`,
+        `match_rep_${fx.id}`
+      );
     }
 
     PressNewsSystem.generatePostMatchNews(this, res);
     const tourRes = this.tournamentSystem.evaluateMatchResult(res);
     if (tourRes?.awarded && tourRes.trophy) {
       res.awardedTrophy = tourRes.trophy;
+      this.reputationSystem?.applyDelta(
+        { fanTrust: +5, partnerTrust: +4, governanceSkill: +4, mediaTrust: +3 },
+        `Đăng quang ${tourRes.trophy.competitionName}`,
+        `trophy_rep_${tourRes.trophy.trophyId}`
+      );
     }
+    this.eventBus?.emit('MATCH_COMPLETED', res, `match_evt_${fx.id}`);
     this.pushPhoneMsg(
       'Trung Tâm Thi Đấu PSG',
       `🏁 KẾT QUẢ: ${fx.home} ${res.homeGoals} - ${res.awayGoals} ${fx.away} (${fx.comp})`,
@@ -522,6 +623,7 @@ export class GameState {
       true
     );
     this.generateDailyBriefing();
+    this.morningNewsSystem?.generateDigest(true);
     return res;
   }
 
@@ -652,6 +754,13 @@ export class GameState {
       signingEventState: this.signingEventSystem.exportState(),
       trophyState: this.trophySystem.exportState(),
       tournamentState: this.tournamentSystem.exportState(),
+      eventBusState: this.eventBus.exportState(),
+      reputationState: this.reputationSystem.exportState(),
+      commercialState: this.commercialSystem.exportState(),
+      rumorCrisisState: this.rumorCrisisSystem.exportState(),
+      morningNewsState: this.morningNewsSystem.exportState(),
+      televisionState: this.televisionSystem.exportState(),
+      uiPrefs: this.uiPrefs || null,
       playerPos
     };
   }
@@ -692,6 +801,15 @@ export class GameState {
     if (snap.signingEventState) this.signingEventSystem.importState(snap.signingEventState);
     if (snap.trophyState) this.trophySystem.importState(snap.trophyState);
     if (snap.tournamentState) this.tournamentSystem.importState(snap.tournamentState);
+    if (snap.eventBusState) this.eventBus.importState(snap.eventBusState);
+    if (snap.reputationState) this.reputationSystem.importState(snap.reputationState);
+    else this.reputationSystem.syncFromLegacyIfNeeded();
+    if (snap.commercialState) this.commercialSystem.importState(snap.commercialState);
+    if (snap.rumorCrisisState) this.rumorCrisisSystem.importState(snap.rumorCrisisState);
+    if (snap.morningNewsState) this.morningNewsSystem.importState(snap.morningNewsState);
+    else this.morningNewsSystem.generateDigest(true);
+    if (snap.televisionState) this.televisionSystem.importState(snap.televisionState);
+    if (snap.uiPrefs) this.uiPrefs = snap.uiPrefs;
 
     this.notifyStaffChanged();
     this.notifySquadChanged();

@@ -145,13 +145,17 @@ export class SaveManager {
   }
 
   saveSettings(settings) {
-    try { localStorage.setItem(this.settingsKey, JSON.stringify(settings)); } catch (_) {}
+    try {
+      const current = this.loadSettings();
+      const merged = { ...current, ...(settings || {}) };
+      localStorage.setItem(this.settingsKey, JSON.stringify(merged));
+    } catch (_) {}
   }
 
   loadSettings() {
     try {
       const raw = localStorage.getItem(this.settingsKey);
-      return raw ? JSON.parse(raw) : { quality: 'Medium', muted: false };
+      return raw ? { quality: 'Medium', muted: false, ...(JSON.parse(raw) || {}) } : { quality: 'Medium', muted: false };
     } catch (_) {
       return { quality: 'Medium', muted: false };
     }

@@ -22,12 +22,28 @@ export function renderMuseumHubHTML(state, activeTab = 'history') {
   const intlCareer = ts ? ts.getByCategory('international') : [];
   const archives = ts ? ts.seasonArchives : [];
 
+  const completedPsgDeals = (state.transferSystem?.completedDeals || []).filter((d) => d.to === 'Paris Saint-Germain');
+  const individualHonors = [
+    { year: '2025', award: 'Ballon d\'Or & Cầu thủ Xuất sắc nhất FIFA', winner: 'Ousmane Dembélé', detail: 'Vinh danh mùa giải ăn ba lịch sử cùng UEFA Champions League 2025 của Paris Saint-Germain.' },
+    { year: '2024', award: 'Vua phá lưới Ligue 1 (6 mùa liên tiếp)', winner: 'Kylian Mbappé', detail: 'Kỷ lục ghi 256 bàn thắng mọi đấu trường trong màu áo PSG (2017–2024).' },
+    { year: '2021 & 2023', award: 'Quả bóng Vàng Thế giới tại Parc des Princes', winner: 'Lionel Messi', detail: 'Hai danh hiệu Ballon d\'Or gắn liền với quãng thời gian thi đấu cho Paris Saint-Germain.' },
+    { year: '2013–2016', award: '3x Cầu thủ Xuất sắc nhất Ligue 1 (UNFP)', winner: 'Zlatan Ibrahimović', detail: '3 lần giành danh hiệu Vua phá lưới Ligue 1 và đặt nền móng kỷ nguyên thống trị quốc nội.' },
+    { year: '1995', award: 'Ballon d\'Or Châu Âu', winner: 'George Weah', detail: 'Chân sút kiệt xuất đưa PSG vào Bán kết Champions League 1995 trước khi đoạt Quả bóng Vàng.' }
+  ];
+  const iconicSignings = [
+    { year: '2017', player: 'Neymar Jr', from: 'FC Barcelona', fee: '€222M', note: 'Thương vụ kỷ lục thế giới nâng tầm thương hiệu PSG lên quy mô toàn cầu.' },
+    { year: '2017', player: 'Kylian Mbappé', from: 'AS Monaco', fee: '€180M', note: 'Thần đồng bóng đá Pháp trở thành chân sút vĩ đại nhất lịch sử CLB.' },
+    { year: '2012', player: 'Zlatan Ibrahimović & Thiago Silva', from: 'AC Milan', fee: '€63M', note: 'Cặp chữ ký biểu tượng mở đầu kỷ nguyên thống trị bóng đá Pháp.' },
+    { year: '2023', player: 'Ousmane Dembélé', from: 'FC Barcelona', fee: '€50M', note: 'Ngòi nổ chủ lực giúp PSG đăng quang UEFA Champions League 2025.' }
+  ];
+
   const subTabs = [
-    ['history', '📜 1. Sảnh Lịch Sử'],
-    ['domestic', `🇫🇷 2. Quốc Nội (${domesticCareer.length})`],
-    ['international', `🌍 3. Quốc Tế (${intlCareer.length})`],
-    ['legends', `⭐ 4. Huyền Thoại (${PSG_LEGENDS.length})`],
-    ['seasons', `📚 5. Các Mùa Giải (${archives.length})`]
+    ['history', '📜 1. Lịch Sử & Thành Tích'],
+    ['domestic', `🇫🇷 2. Cúp Quốc Nội (${domesticCareer.length})`],
+    ['international', `🌍 3. Cúp Quốc Tế (${intlCareer.length})`],
+    ['legends', `⭐ 4. Huyền Thoại & Áo Đấu (${PSG_LEGENDS.length})`],
+    ['awards', `🏅 5. Giải Cá Nhân & Hợp Đồng (${individualHonors.length + completedPsgDeals.length})`],
+    ['seasons', `📚 6. Đội Hình Qua Các Mùa (${archives.length})`]
   ];
 
   const renderTrophyCards = (list, catKey) => {
@@ -95,7 +111,7 @@ export function renderMuseumHubHTML(state, activeTab = 'history') {
           <span>Danh hiệu sự nghiệp (2026+): <b>${careerCount}</b></span>
         </div>
       </div>
-      <div class="section-label">Dòng thời gian phát triển & Thế hệ cầu thủ PSG</div>
+      <div class="section-label">Dòng thời gian phát triển & Thành tích lịch sử PSG</div>
       ${PSG_HISTORY_TIMELINE.map((m) => `
         <div class="card-item">
           <div class="card-head"><strong>📌 ${esc(m.year)} · ${esc(m.title)}</strong><span class="tag">${esc(m.generation)}</span></div>
@@ -107,6 +123,7 @@ export function renderMuseumHubHTML(state, activeTab = 'history') {
     bodyHtml = renderTrophyCards(intlCareer, 'international');
   } else if (activeTab === 'legends') {
     bodyHtml = `
+      <div class="section-label">⭐ Phòng Vinh Danh Huyền Thoại & Áo Đấu Biểu Tượng PSG</div>
       <div class="grid-2">
         ${PSG_LEGENDS.map((l) => `
           <div class="card-item">
@@ -115,14 +132,45 @@ export function renderMuseumHubHTML(state, activeTab = 'history') {
               <span class="tag">${esc(l.era)}</span>
             </div>
             <div class="muted">${esc(l.position)} · ${esc(l.nationality)} · ${esc(l.apps)} trận / ${esc(l.goals)} bàn</div>
-            <p style="margin:6px 0;"><b>Thành tích:</b> ${esc(l.trophies)}</p>
+            <div style="display:flex;align-items:center;gap:8px;margin:6px 0;">
+              <span style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;background:${esc(l.jerseyColor || '#00205b')};border:1.5px solid #da291c;font-weight:800;font-size:11px;color:#fff;">#${l.shirtNumber}</span>
+              <span class="muted">Áo đấu lưu niệm #${l.shirtNumber} · ${esc(l.trophies)}</span>
+            </div>
             <p class="muted" style="margin:0 0 6px;">${esc(l.contribution)}</p>
             <button class="btn-xs btn-secondary mus-open-legend" data-lid="${esc(l.legendId)}">🏅 Xem bảng vinh danh</button>
           </div>`).join('')}
       </div>`;
+  } else if (activeTab === 'awards') {
+    bodyHtml = `
+      <div class="section-label">🏅 Giải Thưởng Cá Nhân Cao Quý Trong Lịch Sử PSG</div>
+      <div class="grid-2" style="margin-bottom:10px;">
+        ${individualHonors.map((aw) => `
+          <div class="card-item">
+            <div class="card-head"><strong>${esc(aw.winner)}</strong><span class="tag ok">${esc(aw.year)}</span></div>
+            <div class="card-sub">${esc(aw.award)}</div>
+            <p class="muted">${esc(aw.detail)}</p>
+          </div>`).join('')}
+      </div>
+      <div class="section-label">✍️ Những Bản Hợp Đồng Đáng Nhớ & Tân Binh Triều Đại Mới</div>
+      ${completedPsgDeals.length > 0 ? `
+        <div class="grid-2" style="margin-bottom:8px;">
+          ${completedPsgDeals.slice(0, 6).map((d) => `
+            <div class="card-item urgent">
+              <div class="card-head"><strong>${esc(d.playerName)} (${esc(d.from)} → PSG)</strong><span class="tag ok">€${d.fee}M · ${esc(d.date)}</span></div>
+              <p class="muted">Bản hợp đồng chính thức dưới triều đại Chủ tịch ${esc(state.president?.name || 'Phạm Minh Chiêu')}.</p>
+            </div>`).join('')}
+        </div>` : ''}
+      <div class="grid-2">
+        ${iconicSignings.map((sg) => `
+          <div class="card-item">
+            <div class="card-head"><strong>${esc(sg.player)} (${esc(sg.year)})</strong><span class="tag">${esc(sg.fee)}</span></div>
+            <div class="muted">Từ: ${esc(sg.from)}</div>
+            <p class="muted">${esc(sg.note)}</p>
+          </div>`).join('')}
+      </div>`;
   } else {
     bodyHtml = `
-      <div class="section-label">Kho lưu trữ lịch sử từng mùa giải PSG (${archives.length} mùa)</div>
+      <div class="section-label">📸 Lưu Trữ Đội Hình & Hồ Sơ Từng Mùa Giải PSG (${archives.length} mùa)</div>
       ${archives.map((arc) => `
         <div class="card-item">
           <div class="card-head">
