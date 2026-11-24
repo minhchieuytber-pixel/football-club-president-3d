@@ -1,16 +1,27 @@
 // src/ui/FormationPitchView.js
-// Giao diện Sân Bóng Chiến Thuật Kéo Thả (Drag & Drop Pointer Events) + AI Position Suitability Intelligence
-// Tối ưu cả màn hình dọc iPhone Safari lẫn Desktop, không xung đột camera 3D, không lag/jitter khi kéo thả.
-import { getPlayerPortraitDataUrl } from '../players/PlayerDatabase.js';
-import { FORMATION_PRESETS, TACTICAL_ZONE_ANCHORS } from '../squad/SquadFormationSystem.js';
+// Giao diện Đội Hình Chiến Thuật PSG (Chạm 2 lần để Thay/Hoán đổi — KHÔNG kéo thả):
+// 1. Header -> 2. Thanh Chiến thuật & Sơ đồ -> 3. Sân bóng cố định + Banner hướng dẫn
+// -> 4. Danh sách Dự bị cuộn độc lập (30-45+ cầu thủ, Card 2 cột / List, Tìm kiếm, 7 Bộ lọc)
+// -> 5. Đánh giá AI Position Suitability toàn đội & cầu thủ đang chọn
+
+import { FORMATION_PRESETS } from '../squad/SquadFormationSystem.js';
 import {
-  CANONICAL_POSITIONS,
+  CANONICAL_POSITIONS as ALL_POSITIONS,
   POSITION_DISPLAY_LABEL,
-  getPositionGroup,
-  getSuitabilityTier,
-  normalizePosition
+  normalizePosition,
+  getSuitabilityTier as getSuitabilityVisual
 } from '../squad/PositionSuitabilityAI.js';
-import { PSG_KIT_THEMES } from '../characters/PlayerKitSystem.js';
+import { getPlayerPortraitDataUrl } from '../players/PlayerDatabase.js';
+
+const BENCH_FILTERS = [
+  { key: 'ALL', label: 'Tất cả' },
+  { key: 'GK', label: 'Thủ môn' },
+  { key: 'DEF', label: 'Hậu vệ' },
+  { key: 'MID', label: 'Tiền vệ' },
+  { key: 'ATT', label: 'Tiền đạo' },
+  { key: 'YOUTH', label: 'Cầu thủ trẻ' },
+  { key: 'MULTI', label: 'Đa năng' }
+];
 
 function escapeHtml(str) {
   return String(str ?? '')
@@ -20,865 +31,777 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-function renderPitchLinesSVG() {
+function getPlayerAvatarSrc(p) {
+  if (!p) return '';
+  if (p.avatarSvg) return p.avatarSvg;
+  return getPlayerPortraitDataUrl(p);
+}
+
+function matchesBenchFilter(benchItem, filterKey) {
+  const pos = normalizePosition(benchItem.position);
+  const p = benchItem.player || {};
+  switch (filterKey) {
+    case 'GK': return pos === 'GK';
+    case 'DEF': return ['CB', 'LB', 'RB'].includes(pos);
+    case 'MID': return ['DM', 'CM', 'AM'].includes(pos);
+    case 'ATT': return ['LW', 'RW', 'ST'].includes(pos);
+    case 'YOUTH': return (Number(p.age) > 0 && Number(p.age) <= 21) || !!p.academyOrigin;
+    case 'MULTI': return Array.isArray(p.secondaryPositions) && p.secondaryPositions.length > 0;
+    case 'ALL':
+    default:
+      return true;
+  }
+}
+
+function matchesSearchQuery(benchItem, rawQuery) {
+  const q = String(rawQuery || '').trim().toLowerCase();
+  if (!q) return true;
+  const full = String(benchItem.fullName || '').toLowerCase();
+  const disp = String(benchItem.displayName || '').toLowerCase();
+  const num = String(benchItem.shirtNumber ?? '');
+  const cleanQ = q.replace(/^#/, '');
+  return full.includes(q) || disp.includes(q) || (cleanQ && num === cleanQ) || num.includes(cleanQ);
+}
+
+function renderPitchLinesSvg() {
   return `
-    <svg class="tac-pitch-svg" viewBox="0 0 100 140" preserveAspectRatio="none" aria-hidden="true">
-      <!-- Đường biên & Vạch giữa sân -->
-      <rect x="4" y="5" width="92" height="130" fill="none" stroke="rgba(255,255,255,0.78)" stroke-width="0.7" />
-      <line x1="4" y1="70" x2="96" y2="70" stroke="rgba(255,255,255,0.72)" stroke-width="0.6" />
-      <circle cx="50" cy="70" r="12" fill="none" stroke="rgba(255,255,255,0.72)" stroke-width="0.6" />
-      <circle cx="50" cy="70" r="0.9" fill="rgba(255,255,255,0.85)" />
-
-      <!-- Khung thành & Khu vực 16m50 / 5m50 phía trên (Hướng tấn công PSG) -->
-      <rect x="41" y="1.4" width="18" height="3.6" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.88)" stroke-width="0.75" />
-      <rect x="23" y="5" width="54" height="19" fill="none" stroke="rgba(255,255,255,0.74)" stroke-width="0.6" />
-      <rect x="35" y="5" width="30" height="7.5" fill="none" stroke="rgba(255,255,255,0.74)" stroke-width="0.55" />
-      <circle cx="50" cy="18.2" r="0.8" fill="rgba(255,255,255,0.85)" />
-      <path d="M 40,24 A 11,11 0 0 0 60,24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="0.55" />
-
-      <!-- Khung thành & Khu vực 16m50 / 5m50 phía dưới (Khung thành PSG) -->
-      <rect x="41" y="135" width="18" height="3.6" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.88)" stroke-width="0.75" />
-      <rect x="23" y="116" width="54" height="19" fill="none" stroke="rgba(255,255,255,0.74)" stroke-width="0.6" />
-      <rect x="35" y="127.5" width="30" height="7.5" fill="none" stroke="rgba(255,255,255,0.74)" stroke-width="0.55" />
-      <circle cx="50" cy="121.8" r="0.8" fill="rgba(255,255,255,0.85)" />
-      <path d="M 40,116 A 11,11 0 0 1 60,116" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="0.55" />
+    <svg class="tac-pitch-svg" viewBox="0 0 100 130" preserveAspectRatio="none" aria-hidden="true">
+      <rect x="4" y="4" width="92" height="122" fill="none" stroke="rgba(255,255,255,0.44)" stroke-width="0.7" />
+      <line x1="4" y1="65" x2="96" y2="65" stroke="rgba(255,255,255,0.42)" stroke-width="0.6" />
+      <circle cx="50" cy="65" r="11.5" fill="none" stroke="rgba(255,255,255,0.42)" stroke-width="0.6" />
+      <circle cx="50" cy="65" r="0.9" fill="rgba(255,255,255,0.65)" />
+      <rect x="23" y="4" width="54" height="18" fill="none" stroke="rgba(255,255,255,0.42)" stroke-width="0.6" />
+      <rect x="35" y="4" width="30" height="7" fill="none" stroke="rgba(255,255,255,0.42)" stroke-width="0.6" />
+      <rect x="23" y="108" width="54" height="18" fill="none" stroke="rgba(255,255,255,0.42)" stroke-width="0.6" />
+      <rect x="35" y="119" width="30" height="7" fill="none" stroke="rgba(255,255,255,0.42)" stroke-width="0.6" />
+      <circle cx="50" cy="113" r="0.8" fill="rgba(255,255,255,0.65)" />
+      <path d="M 38 108 A 14 14 0 0 1 62 108" fill="none" stroke="rgba(255,255,255,0.36)" stroke-width="0.55" />
     </svg>`;
 }
 
-function renderStarterSlotCardHTML(slot, isSelected, isSwapCandidate) {
-  if (!slot.player) {
-    return `
-      <button type="button"
-        class="tac-slot-card empty ${isSelected ? 'selected' : ''} ${isSwapCandidate ? 'drop-candidate' : ''}"
-        data-slot="${slot.slotIndex}"
-        data-role="${slot.role}"
-        style="left:${slot.formationX}%;top:${slot.formationY}%;"
-        aria-label="Vị trí trống ${slot.displayRole}">
-        <span class="tac-empty-plus">+</span>
-        <span class="tac-slot-role-pill">${slot.displayRole}</span>
-        <span class="tac-empty-lbl">Trống</span>
-      </button>`;
+export function renderFormationPitchTabHTML(state, uiState) {
+  const fs = state.formationSystem;
+  const data = fs.getFormationData();
+  const teamEval = fs.getSquadEvaluation();
+  const ctx = fs.getContext();
+  const isInMatch = !!data.subSession?.active;
+
+  const selectedSlotIdx = Number.isInteger(uiState.selectedSlotIdx) ? uiState.selectedSlotIdx : null;
+  const selectedBenchId = uiState.selectedBenchId || null;
+  const benchFilter = uiState.benchPosFilter || 'ALL';
+  const benchViewMode = uiState.benchViewMode === 'list' ? 'list' : 'card';
+  const benchSearchQuery = String(uiState.benchSearchQuery || '');
+  const pendingPreview = uiState.pendingFormationPreview || null;
+
+  const selectedSlot = selectedSlotIdx !== null ? data.slots[selectedSlotIdx] : null;
+  const selectedBenchItem = selectedBenchId ? data.bench.find((b) => b.playerId === selectedBenchId) : null;
+  const inspectedPlayer = selectedSlot?.player || selectedBenchItem?.player || data.starters[0]?.player || null;
+  const inspectedRole = selectedSlot ? selectedSlot.role : (inspectedPlayer?.position || 'CM');
+
+  const top3Report = inspectedPlayer
+    ? fs.suitabilityAI.getTop3Positions(inspectedPlayer, ctx, inspectedRole)
+    : null;
+  const inspectedSuit = inspectedPlayer
+    ? fs.suitabilityAI.evaluatePlayerAtPosition(inspectedPlayer, inspectedRole, ctx)
+    : null;
+
+  const formCompare = fs.suitabilityAI.compareFormations(state.getPsgSquad(), FORMATION_PRESETS, data.formation, ctx);
+
+  // Đánh giá Top 3 cầu thủ dự bị phù hợp nhất khi Chủ tịch đã chọn 1 vị trí/cầu thủ trên sân
+  const benchSuitMap = new Map();
+  const top3ReplacementRankMap = new Map();
+  if (selectedSlot) {
+    const scoredCandidates = [];
+    data.bench.forEach((b) => {
+      if (!b.player) return;
+      const ev = fs.suitabilityAI.evaluatePlayerAtPosition(b.player, selectedSlot.role, ctx);
+      benchSuitMap.set(b.playerId, ev);
+      if (b.availability === 'available') {
+        scoredCandidates.push({ playerId: b.playerId, score: ev.score });
+      }
+    });
+    scoredCandidates.sort((a, b) => b.score - a.score);
+    scoredCandidates.slice(0, 3).forEach((cand, idx) => {
+      top3ReplacementRankMap.set(cand.playerId, idx + 1);
+    });
   }
 
-  const p = slot.player;
-  const suit = slot.suitability;
-  const score = suit ? suit.score : 85;
-  const tier = suit ? suit.tier : getSuitabilityTier(score);
-  const portrait = getPlayerPortraitDataUrl(p);
-  const displaySurname = p.name.trim().split(/\s+/).slice(-1)[0].toUpperCase();
-  const isCap = slot.playerId && slot.isCaptain;
-  const isWarn = score < 65;
+  // Banner hướng dẫn thao tác Chạm 2 bước
+  let bannerActive = false;
+  let bannerHtml = 'Chạm 1 cầu thủ trên sân để <b>thay dự bị</b> hoặc <b>hoán đổi vị trí</b> (hoặc chạm cầu thủ dự bị trước).';
+  if (selectedSlot && selectedSlot.player) {
+    bannerActive = true;
+    bannerHtml = `Đang chọn <strong>#${selectedSlot.player.shirtNumber || ''} ${escapeHtml(selectedSlot.player.name)}</strong> (${escapeHtml(selectedSlot.displayRole)}) — <b>Hãy chọn cầu thủ dự bị để thay thế</b> hoặc chạm cầu thủ khác trên sân để hoán đổi.`;
+  } else if (selectedSlot && !selectedSlot.player) {
+    bannerActive = true;
+    bannerHtml = `Đang chọn ô trống <strong>${escapeHtml(selectedSlot.displayRole)}</strong> — <b>Hãy chọn cầu thủ dự bị để đưa vào sân</b>.`;
+  } else if (selectedBenchItem) {
+    bannerActive = true;
+    const posLbl = escapeHtml(selectedBenchItem.displayPosition || selectedBenchItem.position);
+    bannerHtml = `Đang chọn dự bị <strong>#${selectedBenchItem.shirtNumber || ''} ${escapeHtml(selectedBenchItem.fullName)}</strong> (${posLbl}) — <b>Chạm vào 1 cầu thủ trên sân</b> để thay thế ngay.`;
+  }
 
-  return `
-    <button type="button"
-      class="tac-slot-card filled ${isSelected ? 'selected' : ''} ${isSwapCandidate ? 'drop-candidate' : ''} ${isWarn ? 'mismatch-warn' : ''}"
-      data-slot="${slot.slotIndex}"
-      data-pid="${p.id}"
-      data-role="${slot.role}"
-      style="left:${slot.formationX}%;top:${slot.formationY}%;--suit-color:${tier.color};--suit-border:${tier.border};"
-      title="${escapeHtml(p.name)} (#${p.shirtNumber}) · ${slot.displayRole} · Độ phù hợp: ${score}/100">
-      <div class="tac-card-top">
-        <img class="tac-avatar" src="${portrait}" alt="" draggable="false" />
-        <span class="tac-num-badge">${p.shirtNumber}</span>
-        ${isCap ? '<span class="tac-cap-badge" title="Đội trưởng">C</span>' : ''}
-        <span class="tac-suit-pill" style="background:${tier.bg};color:${tier.color};border-color:${tier.border};">${score}</span>
-      </div>
-      <div class="tac-card-name">${escapeHtml(displaySurname)}</div>
-      <div class="tac-card-meta">
-        <span>${slot.displayRole}</span>
-        <span>·</span>
-        <b>${p.ovr}</b>
-      </div>
-    </button>`;
-}
-
-export function renderFormationPitchTabHTML(state, ui) {
-  const fs = state.formationSystem;
-  const ai = fs.suitabilityAI;
-  const data = fs.getFormationData({ fillEmpty: false });
-  const squadEval = ai.evaluateSquad(data, fs.getContext());
-  const subSession = data.subSession;
-  const inMatch = !!subSession?.active;
-
-  const benchFilter = ui.benchPosFilter || 'ALL';
-  const filteredBench = data.bench.filter((b) => {
-    if (benchFilter === 'ALL') return true;
-    return getPositionGroup(b.position) === benchFilter;
+  // FilterCounts cho 7 nhóm bộ lọc
+  const filterCounts = {};
+  BENCH_FILTERS.forEach((f) => {
+    filterCounts[f.key] = data.bench.filter((b) => matchesBenchFilter(b, f.key)).length;
   });
 
-  const groupCounts = {
-    ALL: data.bench.length,
-    GK: data.bench.filter((b) => getPositionGroup(b.position) === 'GK').length,
-    DEF: data.bench.filter((b) => getPositionGroup(b.position) === 'DEF').length,
-    MID: data.bench.filter((b) => getPositionGroup(b.position) === 'MID').length,
-    ATT: data.bench.filter((b) => getPositionGroup(b.position) === 'ATT').length
-  };
+  // Lọc toàn bộ danh sách dự bị (không cắt ngắn để hiển thị đủ 30–40+ cầu thủ)
+  const filteredBench = data.bench
+    .filter((b) => matchesBenchFilter(b, benchFilter) && matchesSearchQuery(b, benchSearchQuery));
 
-  const selectedSlot = ui.selectedSlotIdx !== null
-    ? data.slots.find((sl) => sl.slotIndex === ui.selectedSlotIdx)
-    : null;
-  const selectedBench = !selectedSlot && ui.selectedBenchId
-    ? data.bench.find((b) => b.playerId === ui.selectedBenchId)
-    : null;
+  if (selectedSlot) {
+    filteredBench.sort((a, b) => {
+      const availA = a.availability === 'available' ? 1 : 0;
+      const availB = b.availability === 'available' ? 1 : 0;
+      if (availA !== availB) return availB - availA;
+      const sa = benchSuitMap.get(a.playerId)?.score || 0;
+      const sb = benchSuitMap.get(b.playerId)?.score || 0;
+      return sb - sa;
+    });
+  }
 
-  const activePlayer = selectedSlot?.player || selectedBench?.player || null;
-  const activeRole = selectedSlot?.role || activePlayer?.position || null;
-  const top3Info = activePlayer ? ai.getTop3Positions(activePlayer, fs.getContext(), activeRole) : null;
+  const slotCardsHtml = data.slots.map((sl) => {
+    const isSelected = selectedSlotIdx === sl.slotIndex;
+    const isSwapTarget = !isSelected && (selectedSlotIdx !== null || selectedBenchId !== null);
+    const yCss = Math.max(8, Math.min(93, Math.round(sl.formationY * 0.96)));
+    if (!sl.player) {
+      return `
+        <button type="button"
+          class="tac-slot-card empty ${isSelected ? 'selected' : ''} ${isSwapTarget ? 'swap-target' : ''}"
+          data-slotidx="${sl.slotIndex}"
+          style="left:${sl.formationX}%;top:${yCss}%;"
+          title="Vị trí trống (${escapeHtml(sl.displayRole)}) — Chạm để xếp cầu thủ">
+          <span class="tac-empty-plus">+</span>
+          <span class="tac-slot-role-pill">${escapeHtml(sl.displayRole)}</span>
+          <span class="tac-empty-lbl">Trống</span>
+        </button>`;
+    }
 
-  const teamTier = squadEval.tier;
-  const compFormations = ai.compareFormations(state.getPsgSquad(), FORMATION_PRESETS, data.formation, fs.getContext());
-  const phase = fs.getRoutinePhase(state.clockHour);
+    const p = sl.player;
+    const suit = sl.suitability || { score: 75, badgeColor: '#38bdf8', shortReason: '' };
+    const vis = getSuitabilityVisual(suit.score);
+    const isCap = p.id === data.captainId;
+    const mismatchWarn = suit.score < 62;
+    const surname = escapeHtml(fs.getDisplaySurname(p.name));
 
-  // Vùng chiến thuật phụ (hiển thị khi người dùng đang kéo cầu thủ đá chính)
-  const extraAnchors = TACTICAL_ZONE_ANCHORS.filter((anc) =>
-    !data.slots.some((sl) => Math.hypot(sl.formationX - anc.x, sl.formationY - anc.y) < 11 && sl.role === anc.role)
-  );
+    return `
+      <button type="button"
+        class="tac-slot-card ${isSelected ? 'selected' : ''} ${isSwapTarget ? 'swap-target' : ''} ${mismatchWarn ? 'mismatch-warn' : ''}"
+        data-slotidx="${sl.slotIndex}"
+        data-pid="${p.id}"
+        style="left:${sl.formationX}%;top:${yCss}%;--suit-border:${vis.border};"
+        title="${escapeHtml(p.name)} (${escapeHtml(p.position)}) tại ${escapeHtml(sl.displayRole)} — Phù hợp ${suit.score}/100">
+        <div class="tac-card-top">
+          <img class="tac-avatar" src="${getPlayerAvatarSrc(p)}" alt="${surname}" />
+          <span class="tac-num-badge">${p.shirtNumber || '-'}</span>
+          ${isCap ? '<span class="tac-cap-badge">C</span>' : ''}
+          <span class="tac-suit-pill" style="background:${vis.bg};color:${vis.color};border-color:${vis.border};">${suit.score}</span>
+        </div>
+        <div class="tac-card-name">${surname}</div>
+        <div class="tac-card-meta"><span>${escapeHtml(sl.displayRole)}</span><b>${p.ovr}</b></div>
+      </button>`;
+  }).join('');
 
-  const pendingPreview = ui.pendingFormationPreview;
-  const currentKit = state.activeKit || 'home';
-  const kitOptions = [
-    ['home', 'Sân nhà', PSG_KIT_THEMES.home],
-    ['away', 'Sân khách', PSG_KIT_THEMES.away],
-    ['third', 'Áo thứ ba', PSG_KIT_THEMES.third]
-  ];
+  const matchBannerHtml = isInMatch ? `
+    <div class="tac-match-banner">
+      <div>
+        <span class="psgtv-live-badge on">● TRONG TRẬN · PHÚT ${data.subSession.matchMinute}'</span>
+        <b>Lượt thay người còn lại: ${data.subSession.maxSubs - data.subSession.subsUsed}/${data.subSession.maxSubs}</b>
+        <span class="muted"> · Chạm cầu thủ đang đá rồi chạm dự bị để thay người (hoặc chạm 2 cầu thủ trên sân để đổi chỗ)</span>
+      </div>
+      ${data.subSession.subHistory.length > 0 ? `
+        <div class="tac-sub-log">
+          ${data.subSession.subHistory.map((h) => `<span class="tag ok">${h.minute}' 🔄 ${escapeHtml(h.inName)} ← ${escapeHtml(h.outName)}</span>`).join('')}
+        </div>` : ''}
+    </div>` : '';
+
+  const previewModalHtml = pendingPreview ? `
+    <div class="tac-confirm-card">
+      <div class="card-head">
+        <strong>🔄 Đánh giá chuyển từ ${escapeHtml(pendingPreview.currentFormation)} → ${escapeHtml(pendingPreview.targetFormation)}</strong>
+        <span class="tag ${pendingPreview.mismatches.length > 0 ? 'bad' : 'ok'}">${pendingPreview.mismatches.length} vị trí lệch</span>
+      </div>
+      <div class="kpi-mini" style="margin:6px 0;">
+        <span>Hiện tại: <b>${pendingPreview.currentEvaluation.avgSuitability}/100</b></span>
+        <span>Giữ nguyên người sang ${escapeHtml(pendingPreview.targetFormation)}: <b style="color:${pendingPreview.keepLineupEvaluation.avgSuitability < 75 ? '#f87171' : '#fde68a'}">${pendingPreview.keepLineupEvaluation.avgSuitability}/100</b></span>
+        <span>AI sắp xếp tối ưu: <b style="color:#4ade80;">${pendingPreview.optimalEvaluation.avgSuitability}/100</b></span>
+      </div>
+      ${pendingPreview.mismatches.length > 0 ? `
+        <div class="muted" style="margin-bottom:6px;">
+          <b>Cảnh báo lệch vai trò nếu giữ người cũ:</b>
+          ${pendingPreview.mismatches.slice(0, 4).map((m) => `${escapeHtml(m.playerName)} (${escapeHtml(m.naturalPosition)} → ${escapeHtml(m.targetRole)}: ${m.score}đ)`).join(' · ')}
+        </div>` : ''}
+      <div class="btn-row">
+        <button type="button" class="btn-xs btn-primary" id="tac-pv-auto">✨ Đổi sang ${escapeHtml(pendingPreview.targetFormation)} & AI tự xếp tốt nhất</button>
+        <button type="button" class="btn-xs btn-secondary" id="tac-pv-keep">Giữ đội hình hiện tại, chỉ đổi khung</button>
+        <button type="button" class="btn-xs btn-danger" id="tac-pv-cancel">Hủy</button>
+      </div>
+    </div>` : '';
+
+  const optimalConfirmHtml = uiState.confirmOptimalXI ? `
+    <div class="tac-confirm-card">
+      <div class="card-head"><strong>✨ Xác nhận AI Tự Sắp Xếp Đội Hình Tối Ưu</strong></div>
+      <p class="muted" style="margin:4px 0 8px;">Hệ thống AI sẽ chọn 11 cầu thủ khỏe mạnh phù hợp nhất với sơ đồ <b>${escapeHtml(data.formation)}</b> & chiến thuật <b>${escapeHtml(data.tacticName)}</b>.</p>
+      <div class="btn-row">
+        <button type="button" class="btn-xs btn-primary" id="tac-opt-yes">✅ Áp dụng ngay</button>
+        <button type="button" class="btn-xs btn-secondary" id="tac-opt-no">Hủy</button>
+      </div>
+    </div>` : '';
+
+  const inspectedVis = inspectedSuit ? getSuitabilityVisual(inspectedSuit.score) : getSuitabilityVisual(80);
+  const availTag = !inspectedPlayer ? ''
+    : (inspectedPlayer.injuryDays || 0) > 0 ? `<span class="tag bad">🏥 Chấn thương ${inspectedPlayer.injuryDays}n</span>`
+      : inspectedPlayer.suspended ? '<span class="tag bad">🟥 Treo giò</span>'
+        : data.subSession.subbedOutIds?.includes(inspectedPlayer.id) ? '<span class="tag bad">🔻 Đã rời sân</span>'
+          : '<span class="tag ok">✅ Sẵn sàng</span>';
+
+  const benchCardsHtml = filteredBench.length > 0 ? filteredBench.map((b) => {
+    const p = b.player;
+    const isSel = selectedBenchId === b.playerId;
+    const disabled = b.availability !== 'available';
+    const rank = !disabled ? top3ReplacementRankMap.get(b.playerId) : null;
+    const fitEval = benchSuitMap.get(b.playerId);
+    const fitVis = fitEval ? getSuitabilityVisual(fitEval.score) : null;
+    const reasonBadge = b.availability === 'injured' ? `🏥 ${p.injuryDays}n`
+      : b.availability === 'suspended' ? '🟥 Treo giò'
+        : b.availability === 'subbed_out' ? '🔻 Đã ra sân'
+          : `TL ${p.health?.fitness ?? 90}%`;
+
+    const secPosStr = Array.isArray(p.secondaryPositions) && p.secondaryPositions.length > 0
+      ? ` · Phụ: ${p.secondaryPositions.map((sp) => POSITION_DISPLAY_LABEL[sp] || sp).join('/')}`
+      : '';
+    const youthTag = ((p.age <= 21 || p.academyOrigin) ? ' · 🎓 Trẻ' : '');
+
+    return `
+      <button type="button"
+        class="tac-bench-card ${isSel ? 'selected' : ''} ${rank ? 'top-fit-rec' : ''} ${disabled ? 'disabled' : ''}"
+        data-benchpid="${b.playerId}"
+        data-avail="${b.availability}"
+        title="${escapeHtml(b.fullName)} · ${escapeHtml(b.position)} · OVR ${p.ovr}${fitEval ? ` · Hợp ${selectedSlot?.displayRole}: ${fitEval.score}/100` : ''}">
+        <img class="tac-bench-avatar" src="${getPlayerAvatarSrc(p)}" alt="${escapeHtml(b.displayName)}" />
+        <div class="tac-bench-info">
+          <div class="tac-bench-title">#${b.shirtNumber || '-'} ${escapeHtml(b.fullName)}</div>
+          <div class="tac-bench-sub">
+            <b>${escapeHtml(b.displayPosition || b.position)}</b> · OVR <b>${p.ovr}</b>${benchViewMode === 'list' ? `${secPosStr}${youthTag}` : ''} · ${reasonBadge}
+          </div>
+        </div>
+        <div class="tac-bench-right">
+          ${rank ? `<span class="tag ok" style="font-size:9.5px;">Top ${rank}</span>` : ''}
+          ${fitEval ? `<span class="tac-fit-badge" style="background:${fitVis.bg};color:${fitVis.color};border-color:${fitVis.border};">${fitEval.score}đ</span>` : `<span class="tag">${escapeHtml(b.position)}</span>`}
+        </div>
+      </button>`;
+  }).join('') : `<div class="muted" style="padding:14px 8px;text-align:center;">Không có cầu thủ dự bị nào khớp với từ khóa / bộ lọc hiện tại.</div>`;
 
   return `
     <div class="tac-root" id="tac-root">
-      <!-- Thanh công cụ gọn, chạm dễ trên iPhone & Desktop -->
-      <div class="tac-toolbar">
-        <div class="tac-toolbar-row">
-          <select id="fm-preset" class="input-ctrl tac-select" aria-label="Chọn sơ đồ chiến thuật">
-            ${Object.keys(FORMATION_PRESETS).map((k) => `<option value="${k}" ${k === data.formation ? 'selected' : ''}>Sơ đồ ${k}</option>`).join('')}
-          </select>
-          <input id="fm-name" class="input-ctrl tac-name-input" value="${escapeHtml(data.tacticName)}" placeholder="Tên chiến thuật..." />
-          <button type="button" class="btn-primary tac-btn" id="fm-save-lineup" title="Lưu & đồng bộ toàn game">💾 Lưu</button>
+      <!-- PHẦN 1: HEADER QUẢN LÝ ĐỘI HÌNH -->
+      <div class="tac-header-bar">
+        <div>
+          <div class="tac-header-title">👕 QUẢN LÝ ĐỘI HÌNH & CHIẾN THUẬT PSG</div>
+          <div class="muted">Sơ đồ <b>${escapeHtml(data.formation)}</b> · Lối chơi <b>${escapeHtml(data.tacticName)}</b> · Đá chính ${data.starters.length}/11 · Dự bị ${data.bench.length} cầu thủ</div>
         </div>
-        <div class="tac-toolbar-row">
-          <button type="button" class="btn-secondary tac-btn" id="fm-undo" ${!fs.canUndo() ? 'disabled' : ''}>↩️ Hoàn tác${fs.undoStack.length ? ` (${fs.undoStack.length})` : ''}</button>
-          <button type="button" class="btn-accent tac-btn" id="fm-auto-opt" ${inMatch ? 'disabled' : ''}>🤖 AI Tối ưu XI</button>
-          <button type="button" class="btn-secondary tac-btn ${inMatch ? 'tac-btn-live' : ''}" id="fm-toggle-match-mode">
-            ${inMatch ? `⏱️ Trong trận (${subSession.maxSubs - subSession.subsUsed}/${subSession.maxSubs} lượt)` : '📋 Trước trận · Chế độ 5 lượt thay'}
-          </button>
-        </div>
-        <div class="tac-toolbar-row" aria-label="Chọn trang phục thi đấu PSG">
-          <span class="muted" style="font-size:11px;font-weight:700;">👕 Áo đấu 3D:</span>
-          ${kitOptions.map(([key, label, theme]) => `
-            <button type="button"
-              class="tac-filter-pill ${currentKit === key ? 'active' : ''}"
-              data-set-kit="${key}"
-              style="display:inline-flex;align-items:center;gap:5px;">
-              <span style="width:10px;height:10px;border-radius:2px;background:${theme.baseHex};border:1px solid ${theme.accentHex};display:inline-block;"></span>
-              ${label}
-            </button>
-          `).join('')}
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <span class="tag ok">AI TB: ${teamEval.avgSuitability}/100</span>
+          <span class="tag ${isInMatch ? 'bad' : ''}">${isInMatch ? `🔴 TRONG TRẬN (${data.subSession.maxSubs - data.subSession.subsUsed} lượt)` : '🟢 TRƯỚC TRẬN'}</span>
         </div>
       </div>
 
-      ${inMatch ? `
-        <div class="tac-match-banner">
-          <div>
-            <b>⚽ TRẠNG THÁI TRONG TRẬN · Phút ${Math.floor(subSession.matchMinute)}'</b>
-            <span class="muted"> · Còn <b>${subSession.maxSubs - subSession.subsUsed}/${subSession.maxSubs}</b> lượt thay người · Cầu thủ đã rời sân không thể vào lại</span>
-          </div>
-          ${subSession.subHistory.length ? `
-            <div class="tac-sub-log">
-              ${subSession.subHistory.slice(0, 3).map((h) => `<span class="tag ok">${h.minute}' ↑${escapeHtml(h.inName)} / ↓${escapeHtml(h.outName)}</span>`).join('')}
-            </div>
-          ` : ''}
+      <!-- PHẦN 2: THANH CHIẾN THUẬT & SƠ ĐỒ -->
+      <div class="tac-toolbar">
+        <div class="tac-toolbar-row">
+          <select id="tac-form-select" class="input-ctrl tac-select" ${isInMatch ? 'disabled' : ''}>
+            ${Object.keys(FORMATION_PRESETS).map((f) => `<option value="${f}" ${data.formation === f ? 'selected' : ''}>${f}</option>`).join('')}
+          </select>
+          <input id="tac-name-input" class="input-ctrl tac-name-input" value="${escapeHtml(data.tacticName)}" placeholder="Tên chiến thuật PSG..." />
+          <button type="button" class="btn-secondary tac-btn" id="tac-name-save">💾 Lưu tên</button>
+          <button type="button" class="btn-primary tac-btn" id="tac-optimal-btn" ${isInMatch ? 'disabled' : ''}>✨ Tự xếp 11 tối ưu</button>
+          <button type="button" class="btn-secondary tac-btn" id="tac-undo-btn" ${fs.canUndo() ? '' : 'disabled'}>↩️ Hoàn tác</button>
+          ${data.emptySlots.length > 0 ? `<button type="button" class="btn-accent tac-btn" id="tac-fill-empty">➕ Điền ${data.emptySlots.length} vị trí trống</button>` : ''}
+          <button type="button" class="btn-accent tac-btn ${isInMatch ? 'tac-btn-live' : ''}" id="tac-match-toggle">
+            ${isInMatch ? `🏁 Kết thúc trận (${data.subSession.subsUsed}/${data.subSession.maxSubs})` : '⚽ Mô phỏng Trong Trận (5 lượt)'}
+          </button>
         </div>
-      ` : `
         <div class="tac-sync-bar muted">
-          <span>📅 ${escapeHtml(phase.label)}</span> · <span>Đồng bộ Cầu thủ 3D, Phòng Thay Đồ & Ngày Thi Đấu</span>
+          ⚡ Đồng bộ tức thì: <b>Phòng Thay Đồ 3D (${fs.lockers.filter((l) => l.isAssigned).length} tủ)</b> · <b>Sân Tập 3D</b> · <b>Trận Đấu 3D</b> · ${data.emptySlots.length === 0 ? '<span style="color:#4ade80;">Đủ 11 cầu thủ ra sân</span>' : `<span style="color:#f87171;">⚠️ Còn ${data.emptySlots.length} vị trí trống!</span>`}
         </div>
-      `}
+      </div>
 
-      ${pendingPreview ? `
-        <div class="tac-confirm-card" id="fm-confirm-switch">
-          <div class="card-head">
-            <strong>⚠️ Xác nhận chuyển sơ đồ ${pendingPreview.currentFormation} → ${pendingPreview.targetFormation}</strong>
-            <span class="tag">Điểm dự kiến: ${pendingPreview.keepLineupEvaluation.avgSuitability} → AI Tối ưu: ${pendingPreview.optimalEvaluation.avgSuitability}</span>
-          </div>
-          ${pendingPreview.mismatches.length > 0 ? `
-            <p class="muted" style="margin:4px 0;">
-              Phát hiện <b>${pendingPreview.mismatches.length}</b> cầu thủ trái sở trường nếu giữ nguyên vị trí:
-              ${pendingPreview.mismatches.map((m) => `<b>${escapeHtml(m.playerName)}</b> (${m.targetRole}: ${m.score}/100, hợp ${m.bestPosition})`).join(' · ')}
-            </p>
-          ` : `<p class="muted" style="margin:4px 0;">Đội hình hiện tại tương thích tốt với sơ đồ ${pendingPreview.targetFormation}.</p>`}
-          <div class="btn-row">
-            <button type="button" class="btn-primary tac-btn" id="fm-confirm-opt">🤖 Áp dụng ${pendingPreview.targetFormation} & AI sắp xếp vị trí</button>
-            <button type="button" class="btn-secondary tac-btn" id="fm-confirm-keep">✅ Giữ nhân sự hiện tại & Đổi sơ đồ</button>
-            <button type="button" class="btn-danger tac-btn" id="fm-confirm-cancel">✕ Hủy</button>
-          </div>
-        </div>
-      ` : ''}
+      ${matchBannerHtml}
+      ${previewModalHtml}
+      ${optimalConfirmHtml}
 
-      ${ui.confirmOptimalXI ? `
-        <div class="tac-confirm-card" id="fm-confirm-auto">
-          <div class="card-head">
-            <strong>🤖 Xác nhận AI Tự động sắp xếp Đội hình Tối ưu (${data.formation})</strong>
-            <span class="tag ok">Đề xuất bởi Trợ lý chiến thuật AI</span>
+      <!-- PHẦN 3 & 4: SÂN BÓNG CỐ ĐỊNH + BANNER CHỌN 2 BƯỚC & DỰ BỊ CUỘN ĐỘC LẬP -->
+      <div class="tac-board-layout">
+        <!-- PHẦN 3: SÂN BÓNG CHIẾN THUẬT CỐ ĐỊNH -->
+        <div class="tac-pitch-sticky">
+          <div id="tac-selection-banner" class="tac-selection-banner ${bannerActive ? 'is-active' : ''}">
+            <div class="tac-selection-text">${bannerHtml}</div>
+            ${bannerActive ? '<button type="button" class="btn-xs btn-danger" id="tac-cancel-select">✕ Hủy chọn</button>' : ''}
           </div>
-          <p class="muted" style="margin:4px 0;">Hệ thống sẽ chọn 11 cầu thủ có mức độ phù hợp vị trí & phong độ cao nhất hiện có (có thể Hoàn tác ngay sau khi áp dụng).</p>
-          <div class="btn-row">
-            <button type="button" class="btn-primary tac-btn" id="fm-opt-yes">✅ Áp dụng Đội hình Tối ưu</button>
-            <button type="button" class="btn-secondary tac-btn" id="fm-opt-no">✕ Giữ nguyên</button>
+          <div class="tac-pitch-board" id="tac-pitch-board">
+            <div class="tac-goal-label top">KHUNG THÀNH ĐỐI PHƯƠNG</div>
+            ${renderPitchLinesSvg()}
+            ${slotCardsHtml}
+            <div class="tac-goal-label bot">KHUNG THÀNH PSG</div>
           </div>
         </div>
-      ` : ''}
 
-      <div class="tac-main-grid">
-        <!-- CỘT TRÁI: SÂN CHIẾN THUẬT + DỰ BỊ -->
-        <div class="tac-pitch-col">
-          <div class="tac-pitch-wrap" id="tac-pitch-wrap">
-            <!-- Thanh preview AI nhỏ gọn nổi trên mép sân khi kéo/hover -->
-            <div class="tac-drag-preview hidden" id="fm-drag-preview"></div>
-            <div class="tac-pitch-board" id="tac-pitch-board">
-              ${renderPitchLinesSVG()}
-              <div class="tac-goal-label top">HƯỚNG TẤN CÔNG ↑</div>
-              <div class="tac-goal-label bot">KHUNG THÀNH PSG</div>
-
-              <!-- Các vùng chiến thuật trống bổ sung (hiện khi kéo cầu thủ đá chính) -->
-              <div class="tac-zone-layer" id="tac-zone-layer">
-                ${extraAnchors.map((anc) => `
-                  <div class="tac-zone-anchor" data-zone-role="${anc.role}" data-zx="${anc.x}" data-zy="${anc.y}" style="left:${anc.x}%;top:${anc.y}%;">
-                    <span>${anc.label}</span>
-                  </div>
-                `).join('')}
-              </div>
-
-              <!-- 11 vị trí chiến thuật -->
-              ${data.slots.map((sl) => {
-                const isSel = ui.selectedSlotIdx === sl.slotIndex;
-                const canAcceptTapSwap = (ui.selectedBenchId !== null) || (ui.selectedSlotIdx !== null && ui.selectedSlotIdx !== sl.slotIndex);
-                return renderStarterSlotCardHTML({
-                  ...sl,
-                  playerId: sl.playerId,
-                  isCaptain: sl.playerId === data.captainId
-                }, isSel, canAcceptTapSwap);
-              }).join('')}
-            </div>
-          </div>
-
-          <!-- Danh sách Dự bị phân loại theo vị trí GK / DEF / MID / ATT -->
-          <div class="tac-bench-section">
-            <div class="tac-bench-header">
-              <div class="section-label" style="margin:0;">🪑 Dự bị (${filteredBench.length}) · Kéo thẻ lên sân để thay</div>
-              <div class="tac-bench-tabs">
-                ${[
-                  ['ALL', `Tất cả (${groupCounts.ALL})`],
-                  ['GK', `GK (${groupCounts.GK})`],
-                  ['DEF', `DEF (${groupCounts.DEF})`],
-                  ['MID', `MID (${groupCounts.MID})`],
-                  ['ATT', `ATT (${groupCounts.ATT})`]
-                ].map(([k, lbl]) => `
-                  <button type="button" class="tac-filter-pill ${benchFilter === k ? 'active' : ''}" data-bfilter="${k}">${lbl}</button>
-                `).join('')}
+        <!-- PHẦN 4: DANH SÁCH DỰ BỊ CUỘN ĐỘC LẬP -->
+        <div class="tac-bench-section">
+          <div class="tac-bench-header">
+            <div class="tac-bench-top-row">
+              <strong>🪑 Dự bị & Xoay tua (${filteredBench.length}/${data.bench.length})</strong>
+              <div class="tac-bench-view-toggle" role="group" aria-label="Chế độ xem dự bị">
+                <button type="button" id="tac-view-card" class="tac-view-btn ${benchViewMode === 'card' ? 'active' : ''}">⊞ Thẻ (2 cột)</button>
+                <button type="button" id="tac-view-list" class="tac-view-btn ${benchViewMode === 'list' ? 'active' : ''}">☰ Danh sách</button>
               </div>
             </div>
-            <div class="tac-bench-grid" id="tac-bench-grid">
-              ${filteredBench.map((b) => {
-                const p = b.player;
-                const avail = b.availability;
-                const disabled = avail !== 'available';
-                const isSel = ui.selectedBenchId === b.playerId;
-                const portrait = getPlayerPortraitDataUrl(p);
-                const statusTag = avail === 'injured'
-                  ? `<span class="tag bad">Chấn thương ${p.injuryDays}n</span>`
-                  : avail === 'suspended'
-                    ? '<span class="tag bad">Treo giò</span>'
-                    : avail === 'subbed_out'
-                      ? '<span class="tag bad">Đã thay ra</span>'
-                      : `<span class="tag ok">OVR ${p.ovr}</span>`;
+            <div class="tac-bench-search-row">
+              <input id="tac-bench-search" type="search" class="input-ctrl tac-bench-search" value="${escapeHtml(benchSearchQuery)}" placeholder="Tìm theo tên hoặc số áo (#)..." />
+              ${benchSearchQuery ? '<button type="button" class="btn-xs btn-secondary" id="tac-bench-clear-q">✕</button>' : ''}
+            </div>
+            <div class="tac-bench-tabs">
+              ${BENCH_FILTERS.map((f) => `<button type="button" class="tac-filter-btn ${benchFilter === f.key ? 'active' : ''}" data-bfilter="${f.key}">${f.label} (${filterCounts[f.key] ?? 0})</button>`).join('')}
+            </div>
+          </div>
+          <div class="tac-bench-scroll" id="tac-bench-scroll">
+            <div class="tac-bench-grid ${benchViewMode === 'list' ? 'mode-list' : 'mode-card'}">
+              ${benchCardsHtml}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PHẦN 5: ĐÁNH GIÁ ĐỘI HÌNH & CHI TIẾT AI POSITION SUITABILITY -->
+      <div class="tac-eval-section">
+        <div class="card-item" style="margin-bottom:0;">
+          ${inspectedPlayer ? `
+            <div class="tac-player-hero">
+              <img class="tac-hero-img" src="${getPlayerAvatarSrc(inspectedPlayer)}" alt="${escapeHtml(inspectedPlayer.name)}" />
+              <div style="flex:1;min-width:0;">
+                <div class="card-head" style="margin-bottom:2px;">
+                  <strong>#${inspectedPlayer.shirtNumber || '-'} ${escapeHtml(inspectedPlayer.name)}</strong>
+                  ${availTag}
+                </div>
+                <div class="muted">
+                  Sở trường: <b>${escapeHtml(POSITION_DISPLAY_LABEL[inspectedPlayer.position] || inspectedPlayer.position)}</b>
+                  · OVR <b>${inspectedPlayer.ovr}</b>/POT ${inspectedPlayer.pot} · TL ${inspectedPlayer.health?.fitness ?? 90}%
+                </div>
+                <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                  <span class="tag" style="background:${inspectedVis.bg};color:${inspectedVis.color};border:1px solid ${inspectedVis.border};">
+                    ${selectedSlot ? `Tại ${escapeHtml(selectedSlot.displayRole)}` : `Vị trí gốc`}: <b>${inspectedSuit.score}/100</b> (${escapeHtml(inspectedSuit.tier?.label || '')})
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="tac-quick-actions">
+              <button type="button" class="btn-xs btn-secondary open-profile-btn" data-pid="${inspectedPlayer.id}">👤 Hồ sơ 8 tab</button>
+              <button type="button" class="btn-xs btn-accent" id="tac-set-cap" data-pid="${inspectedPlayer.id}">${inspectedPlayer.id === data.captainId ? '©️ Đang là Đội trưởng' : '©️ Chọn làm Đội trưởng'}</button>
+              ${selectedSlot && !isInMatch ? `<button type="button" class="btn-xs btn-danger" id="tac-bench-slot" data-slot="${selectedSlot.slotIndex}">⬇️ Rút xuống dự bị</button>` : ''}
+              <div class="tac-num-edit">
+                <input id="tac-num-inp" type="number" min="1" max="99" value="${inspectedPlayer.shirtNumber || 10}" class="input-ctrl" style="width:54px;min-width:54px;padding:3px 6px;" />
+                <button type="button" class="btn-xs btn-primary" id="tac-num-save" data-pid="${inspectedPlayer.id}">Lưu số</button>
+              </div>
+            </div>
+
+            ${selectedSlot ? `
+              <div class="tac-role-changer">
+                <span class="muted">Đổi vai trò chiến thuật của ô #${selectedSlot.slotIndex + 1} (${escapeHtml(selectedSlot.displayRole)}):</span>
+                <div class="tac-role-chips">
+                  ${ALL_POSITIONS.map((rp) => `<button type="button" class="tac-role-chip ${selectedSlot.role === rp ? 'active' : ''}" data-setrole="${rp}">${escapeHtml(POSITION_DISPLAY_LABEL[rp] || rp)}</button>`).join('')}
+                </div>
+              </div>` : ''}
+
+            <div class="section-label" style="margin-top:8px;">🧠 Top 3 vị trí phù hợp nhất (AI Suitability)</div>
+            <div class="tac-top3-list">
+              ${(top3Report?.top3 || []).map((item, i) => {
+                const v = getSuitabilityVisual(item.score);
                 return `
-                  <div class="tac-bench-card ${disabled ? 'disabled' : ''} ${isSel ? 'selected' : ''}"
-                    data-bench-pid="${b.playerId}"
-                    data-avail="${avail}"
-                    role="button"
-                    tabindex="0"
-                    aria-label="${escapeHtml(b.fullName)}">
-                    <img class="tac-bench-avatar" src="${portrait}" alt="" draggable="false" />
-                    <div class="tac-bench-info">
-                      <div class="tac-bench-title">#${b.shirtNumber} <b>${escapeHtml(b.fullName)}</b></div>
-                      <div class="tac-bench-sub">${b.displayPosition} · Thể lực ${p.health?.fitness ?? 88}%</div>
-                    </div>
-                    <div class="tac-bench-right">${statusTag}</div>
+                  <div class="tac-top3-row">
+                    <span class="tac-rank">#${i + 1}</span>
+                    <b>${escapeHtml(item.displayPosition)}</b>
+                    <div class="tac-score-bar-track"><div class="tac-score-bar-fill" style="width:${item.score}%;background:${v.color};"></div></div>
+                    <b style="color:${v.color};">${item.score}</b>
                   </div>`;
               }).join('')}
-              ${filteredBench.length === 0 ? '<div class="muted" style="padding:8px;">Không có cầu thủ dự bị nào ở nhóm vị trí này.</div>' : ''}
             </div>
-          </div>
+            <div class="tac-ai-explain">
+              <div><b>Phân tích AI:</b> ${escapeHtml(inspectedSuit?.explanation || '')}</div>
+              <div class="muted" style="margin-top:3px;">${escapeHtml(top3Report?.recommendationText || '')}</div>
+            </div>` : '<div class="muted">Chạm vào một cầu thủ bất kỳ để xem phân tích AI.</div>'}
         </div>
 
-        <!-- CỘT PHẢI: AI POSITION SUITABILITY & TEAM INTELLIGENCE -->
-        <div class="tac-side-col">
-          ${activePlayer && top3Info ? `
-            <div class="card-item tac-ai-player-card">
-              <div class="tac-player-hero">
-                <img class="tac-hero-img" src="${getPlayerPortraitDataUrl(activePlayer)}" alt="" />
-                <div style="flex:1;min-width:0;">
-                  <div class="card-head">
-                    <strong style="font-size:13.5px;">#${activePlayer.shirtNumber} ${escapeHtml(activePlayer.name)} ${activePlayer.id === data.captainId ? '©️' : ''}</strong>
-                    <span class="tag ok">OVR ${activePlayer.ovr}</span>
-                  </div>
-                  <div class="muted">
-                    Sở trường: <b>${POSITION_DISPLAY_LABEL[normalizePosition(activePlayer.position)] || activePlayer.position}</b>
-                    ${selectedSlot ? ` · Đang xếp: <b style="color:${top3Info.currentEval.tier.color}">${selectedSlot.displayRole} (${top3Info.currentEval.score}/100)</b>` : ' · Ghế dự bị'}
-                  </div>
-                  <div class="kpi-mini" style="margin-top:4px;">
-                    <span>Thể lực: <b>${activePlayer.health?.fitness ?? 88}%</b></span>
-                    <span>Phong độ: <b>${activePlayer.form}</b></span>
-                    <span>Chân thuận: <b>${activePlayer.foot}</b></span>
-                  </div>
-                </div>
-              </div>
-
-              ${selectedSlot ? `
-                <div class="tac-quick-actions">
-                  <button type="button" class="btn-xs btn-primary open-profile-btn" data-pid="${activePlayer.id}">👤 Hồ sơ</button>
-                  <button type="button" class="btn-xs btn-accent" id="fm-set-cap" data-pid="${activePlayer.id}">©️ Đội trưởng</button>
-                  ${!inMatch ? `<button type="button" class="btn-xs btn-secondary" id="fm-bench-slot" data-slot="${selectedSlot.slotIndex}">↓ Đưa xuống dự bị</button>` : ''}
-                  <div class="tac-num-edit">
-                    <input id="fm-num-inp" type="number" min="1" max="99" value="${activePlayer.shirtNumber}" class="input-ctrl" style="width:54px;min-width:54px;padding:4px 6px;" />
-                    <button type="button" class="btn-xs btn-secondary" id="fm-set-num" data-pid="${activePlayer.id}">Đổi số</button>
-                  </div>
-                </div>
-                <div class="tac-role-changer">
-                  <span class="muted" style="font-size:11px;">Đổi vai trò ô này:</span>
-                  <div class="tac-role-chips">
-                    ${CANONICAL_POSITIONS.map((r) => `
-                      <button type="button" class="tac-role-chip ${selectedSlot.role === r ? 'active' : ''}" data-set-slot="${selectedSlot.slotIndex}" data-new-role="${r}">
-                        ${POSITION_DISPLAY_LABEL[r] || r}
-                      </button>
-                    `).join('')}
-                  </div>
-                </div>
-              ` : `
-                <div class="tac-quick-actions">
-                  <button type="button" class="btn-xs btn-primary open-profile-btn" data-pid="${activePlayer.id}">👤 Mở Hồ sơ</button>
-                  <span class="muted" style="font-size:11px;">Chạm hoặc kéo vào 1 vị trí trên sân để đưa vào thi đấu.</span>
-                </div>
-              `}
-
-              <!-- Top 3 Vị trí Tối Ưu AI -->
-              <div class="section-label" style="margin-top:8px;">🧠 AI Đề Xuất Top 3 Vị Trí Tối Ưu</div>
-              <div class="tac-top3-list">
-                ${top3Info.top3.map((item, idx) => `
-                  <div class="tac-top3-row">
-                    <span class="tac-rank">#${idx + 1}</span>
-                    <strong style="width:36px;">${item.displayPosition}</strong>
-                    <div class="tac-score-bar-track">
-                      <div class="tac-score-bar-fill" style="width:${item.score}%;background:${item.tier.color};"></div>
-                    </div>
-                    <b style="color:${item.tier.color};min-width:28px;text-align:right;">${item.score}</b>
-                    <span class="muted" style="font-size:10.5px;min-width:96px;text-align:right;">${item.tier.label}</span>
-                  </div>
-                `).join('')}
-              </div>
-              <div class="tac-ai-explain">
-                <div><b style="color:#86efac;">Điểm mạnh:</b> ${escapeHtml(top3Info.strengths.join(', '))}</div>
-                ${top3Info.weaknessesAtCurrent.length ? `<div><b style="color:#fca5a5;">Lưu ý tại ${top3Info.currentEval.displayPosition}:</b> ${escapeHtml(top3Info.weaknessesAtCurrent.join(', '))}</div>` : ''}
-                <div style="color:#fde68a;margin-top:3px;">💡 ${escapeHtml(top3Info.recommendationText)}</div>
-              </div>
-            </div>
-          ` : `
-            <div class="card-item">
-              <strong>👆 Chạm hoặc Kéo Thả Cầu Thủ</strong>
-              <p class="muted" style="margin:4px 0;">
-                • Kéo cầu thủ dự bị vào bất kỳ ô nào trên sân để thay người.<br/>
-                • Kéo cầu thủ đá chính sang nhau để hoán đổi, hoặc kéo vào vùng chiến thuật trống để đổi vai trò.<br/>
-                • Chạm vào cầu thủ để xem AI phân tích 3 vị trí tối ưu nhất.
-              </p>
-            </div>
-          `}
-
-          <!-- Đánh giá Tổng Thể Toàn Đội của AI -->
-          <div class="card-item tac-team-ai-card">
-            <div class="card-head">
-              <strong>📊 AI Đánh Giá Toàn Đội (${data.formation})</strong>
-              <span class="tag" style="background:${teamTier.bg};color:${teamTier.color};border:1px solid ${teamTier.border};">
-                ${squadEval.overallScore}/100 · ${teamTier.label}
-              </span>
-            </div>
-            <div class="tac-kpi-4">
-              <div class="tac-mini-kpi"><span>Phù hợp TB</span><b>${squadEval.avgSuitability}%</b></div>
-              <div class="tac-mini-kpi"><span>Công / Giữa</span><b>${squadEval.ratings.attack} / ${squadEval.ratings.midfield}</b></div>
-              <div class="tac-mini-kpi"><span>Thủ / GK</span><b>${squadEval.ratings.defense} / ${squadEval.ratings.gk}</b></div>
-              <div class="tac-mini-kpi"><span>Cân bằng / HLV</span><b>${squadEval.balanceScore}% / ${squadEval.coachTacticFit}%</b></div>
-            </div>
-            <div class="tac-pos-counts muted">
-              <span style="color:#4ade80;">● ${squadEval.naturalCount} đúng sở trường</span> ·
-              <span style="color:#facc15;">● ${squadEval.secondaryCount} kiêm nhiệm</span> ·
-              <span style="color:#f87171;">● ${squadEval.outOfPosCount} trái sở trường</span>
-              ${squadEval.emptySlotsCount ? ` · <span style="color:#fb923c;">● ${squadEval.emptySlotsCount} trống</span>` : ''}
-            </div>
-            <p class="muted" style="margin:5px 0;color:#e2e8f0;">${escapeHtml(squadEval.summaryText)}</p>
-
-            ${squadEval.weakPositions.length > 0 ? `
-              <div class="tac-weak-list">
-                <div class="muted" style="font-size:10.5px;margin-bottom:3px;">Vị trí cần gia cố / điều chỉnh:</div>
-                ${squadEval.weakPositions.slice(0, 4).map((w) => `
-                  <button type="button" class="tac-weak-chip" data-jump-slot="${w.slotIndex}">
-                    ${w.assignedPos}: ${escapeHtml(w.playerName)} (${w.score}/100 → hợp ${w.bestPos})
-                  </button>
-                `).join('')}
-              </div>
-            ` : ''}
-
-            <div class="section-label" style="margin-top:8px;">📐 Xếp hạng sơ đồ phù hợp nhất với PSG hiện tại</div>
-            <div class="tac-form-rank">
-              ${compFormations.slice(0, 4).map((f) => `
-                <button type="button" class="tac-form-pill ${f.isCurrent ? 'current' : ''}" data-pick-form="${f.formation}">
-                  <span>${f.formation}</span>
-                  <b>${f.score}đ</b>
-                </button>
-              `).join('')}
-            </div>
+        <div class="card-item" style="margin-bottom:0;">
+          <div class="card-head">
+            <strong>📊 Đánh giá Tổng hợp Đội hình (${escapeHtml(data.formation)})</strong>
+            <span class="tag ${teamEval.avgSuitability >= 82 ? 'ok' : teamEval.avgSuitability >= 68 ? '' : 'bad'}">Tối ưu ${teamEval.overallScore ?? teamEval.avgSuitability}/100</span>
+          </div>
+          <div class="tac-kpi-4">
+            <div class="tac-mini-kpi"><span>Phù hợp TB</span><b>${teamEval.avgSuitability}/100</b></div>
+            <div class="tac-mini-kpi"><span>Cân bằng</span><b>${teamEval.balanceScore ?? 80}/100</b></div>
+            <div class="tac-mini-kpi"><span>Hợp HLV</span><b>${teamEval.coachTacticFit ?? 82}/100</b></div>
+            <div class="tac-mini-kpi"><span>Vắng / Lệch</span><b style="color:${((teamEval.weakPositions || []).length + data.emptySlots.length) > 0 ? '#f87171' : '#4ade80'}">${(teamEval.weakPositions || []).length}</b></div>
+          </div>
+          <div class="tac-pos-counts muted">
+            <span>GK: <b>${teamEval.ratings?.gk ?? '--'}</b></span> ·
+            <span>HV: <b>${teamEval.ratings?.defense ?? '--'}</b></span> ·
+            <span>TV: <b>${teamEval.ratings?.midfield ?? '--'}</b></span> ·
+            <span>TĐ: <b>${teamEval.ratings?.attack ?? '--'}</b></span>
+          </div>
+          ${(teamEval.weakPositions || []).length > 0 ? `
+            <div class="section-label">⚠️ Điểm yếu đội hình cần điều chỉnh</div>
+            <div class="tac-weak-list">
+              ${teamEval.weakPositions.slice(0, 3).map((w) => `
+                <button type="button" class="tac-weak-chip" data-focus-slot="${w.slotIndex}">
+                  Slot #${w.slotIndex + 1} (${escapeHtml(w.assignedPos)}): <b>${escapeHtml(w.playerName)}</b> chỉ đạt ${w.score}/100 — Gợi ý: <b>${escapeHtml(w.bestPos)}</b>
+                </button>`).join('')}
+            </div>` : '<div class="muted" style="margin-top:6px;color:#86efac;">✅ Toàn bộ các tuyến đều đạt độ phù hợp chiến thuật tốt!</div>'}
+          <div class="section-label">📐 Xếp hạng sơ đồ tốt nhất cho PSG</div>
+          <div class="tac-form-rank">
+            ${formCompare.slice(0, 4).map((fc) => `
+              <button type="button" class="tac-form-pill ${fc.formation === data.formation ? 'current' : ''}" data-pickform="${fc.formation}">
+                <b>${escapeHtml(fc.formation)}</b>
+                <span>${fc.avgSuit ?? fc.avgSuitability ?? fc.score}đ</span>
+              </button>`).join('')}
           </div>
         </div>
       </div>
     </div>`;
 }
 
-// Bộ điều khiển Pointer Events Drag & Drop + Sự kiện UI
-export function bindFormationPitchEvents(state, ui, rerenderFn, extraCallbacks = {}) {
+export function bindFormationPitchEvents(state, uiState, onRerender, extraCallbacks = {}) {
   const fs = state.formationSystem;
-  const ai = fs.suitabilityAI;
-  const root = document.getElementById('tac-root');
-  if (!root) return;
+  if (!fs || typeof document === 'undefined') return;
 
-  const refresh = () => rerenderFn();
+  const rerenderNow = (extraOpts = {}) => {
+    const benchScroll = document.getElementById('tac-bench-scroll');
+    const savedBenchTop = benchScroll ? Math.round(benchScroll.scrollTop || 0) : 0;
+    onRerender({ ...extraOpts, savedBenchTop });
+  };
 
-  // 1. Toolbar & Confirmation Controls
-  document.getElementById('fm-preset')?.addEventListener('change', (e) => {
-    const nextF = e.target.value;
-    if (nextF === fs.formation) return;
-    ui.pendingFormationPreview = fs.previewFormationChange(nextF);
-    ui.confirmOptimalXI = false;
-    refresh();
+  const clearSelection = () => {
+    uiState.selectedSlotIdx = null;
+    uiState.selectedBenchId = null;
+  };
+
+  // --- Nút Hủy chọn ---
+  document.getElementById('tac-cancel-select')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearSelection();
+    uiState.audio?.playClick?.();
+    rerenderNow();
   });
 
-  document.getElementById('fm-confirm-opt')?.addEventListener('click', () => {
-    if (!ui.pendingFormationPreview) return;
-    const f = ui.pendingFormationPreview.targetFormation;
-    ui.pendingFormationPreview = null;
-    fs.setFormation(f, { autoArrange: true });
-    ui.audio?.playSuccess();
-    ui.toast?.(`✅ Đã chuyển sơ đồ ${f} & AI tối ưu hóa 11 vị trí!`, 'success');
-    refresh();
+  // --- Đổi sơ đồ (chỉ xem trước xác nhận chứ KHÔNG tự phá đội hình đang xếp) ---
+  document.getElementById('tac-form-select')?.addEventListener('change', (e) => {
+    const nextForm = e.target.value;
+    if (nextForm === fs.formation) return;
+    uiState.pendingFormationPreview = fs.previewFormationChange(nextForm);
+    uiState.confirmOptimalXI = false;
+    uiState.audio?.playClick?.();
+    rerenderNow();
   });
 
-  document.getElementById('fm-confirm-keep')?.addEventListener('click', () => {
-    if (!ui.pendingFormationPreview) return;
-    const f = ui.pendingFormationPreview.targetFormation;
-    ui.pendingFormationPreview = null;
-    fs.setFormation(f, { autoArrange: false });
-    ui.audio?.playSuccess();
-    ui.toast?.(`✅ Đã chuyển sang sơ đồ ${f} (giữ nguyên nhân sự).`, 'success');
-    refresh();
+  document.getElementById('tac-pv-auto')?.addEventListener('click', () => {
+    if (!uiState.pendingFormationPreview) return;
+    fs.setFormation(uiState.pendingFormationPreview.targetFormation, { autoArrange: true });
+    uiState.pendingFormationPreview = null;
+    clearSelection();
+    uiState.audio?.playSuccess?.();
+    uiState.toast?.(`✨ Đã đổi sang ${fs.formation} và AI tự sắp xếp 11 cầu thủ tối ưu!`, 'success');
+    rerenderNow();
+  });
+  document.getElementById('tac-pv-keep')?.addEventListener('click', () => {
+    if (!uiState.pendingFormationPreview) return;
+    fs.setFormation(uiState.pendingFormationPreview.targetFormation, { autoArrange: false });
+    uiState.pendingFormationPreview = null;
+    clearSelection();
+    uiState.audio?.playClick?.();
+    rerenderNow();
+  });
+  document.getElementById('tac-pv-cancel')?.addEventListener('click', () => {
+    uiState.pendingFormationPreview = null;
+    uiState.audio?.playClick?.();
+    rerenderNow();
   });
 
-  document.getElementById('fm-confirm-cancel')?.addEventListener('click', () => {
-    ui.pendingFormationPreview = null;
-    const sel = document.getElementById('fm-preset');
-    if (sel) sel.value = fs.formation;
-    refresh();
+  // --- Tên chiến thuật & AI tự xếp tối ưu & Hoàn tác ---
+  document.getElementById('tac-name-save')?.addEventListener('click', () => {
+    const val = document.getElementById('tac-name-input')?.value || 'Chiến thuật PSG';
+    fs.setTacticName(val);
+    uiState.audio?.playSuccess?.();
+    uiState.toast?.(`Đã cập nhật chiến thuật "${fs.tacticName}"`, 'success');
+    rerenderNow();
   });
-
-  document.getElementById('fm-save-lineup')?.addEventListener('click', () => {
-    const val = document.getElementById('fm-name')?.value || '';
-    if (val.trim()) fs.setTacticName(val);
-    else fs.notify();
-    ui.cb?.autoSaveNow?.(true);
-    ui.audio?.playSuccess();
-    ui.toast?.('💾 Đã lưu sơ đồ & đồng bộ Phòng Thay Đồ 3D!', 'success');
-    refresh();
+  document.getElementById('tac-optimal-btn')?.addEventListener('click', () => {
+    uiState.confirmOptimalXI = true;
+    uiState.pendingFormationPreview = null;
+    rerenderNow();
   });
-
-  document.getElementById('fm-undo')?.addEventListener('click', () => {
+  document.getElementById('tac-opt-yes')?.addEventListener('click', () => {
+    fs.applyOptimalXI();
+    uiState.confirmOptimalXI = false;
+    clearSelection();
+    uiState.audio?.playSuccess?.();
+    uiState.toast?.('✨ AI đã sắp xếp đội hình xuất phát tối ưu nhất!', 'success');
+    rerenderNow();
+  });
+  document.getElementById('tac-opt-no')?.addEventListener('click', () => {
+    uiState.confirmOptimalXI = false;
+    rerenderNow();
+  });
+  document.getElementById('tac-undo-btn')?.addEventListener('click', () => {
     const res = fs.undo();
     if (res.ok) {
-      ui.audio?.playClick();
-      ui.toast?.('↩️ Đã hoàn tác thao tác đội hình.', 'info');
-      refresh();
-    } else {
-      ui.toast?.(res.reason, 'warn');
+      clearSelection();
+      uiState.audio?.playClick?.();
+      uiState.toast?.('↩️ Đã hoàn tác thao tác đội hình trước đó.', 'info');
+      rerenderNow();
+    } else if (res.reason) {
+      uiState.toast?.(res.reason, 'warn');
     }
   });
-
-  document.getElementById('fm-auto-opt')?.addEventListener('click', () => {
-    ui.confirmOptimalXI = !ui.confirmOptimalXI;
-    ui.pendingFormationPreview = null;
-    refresh();
+  document.getElementById('tac-fill-empty')?.addEventListener('click', () => {
+    fs.fillEmptySlotsWithBestAvailable();
+    clearSelection();
+    uiState.audio?.playSuccess?.();
+    uiState.toast?.('Đã điền cầu thủ phù hợp vào các vị trí trống!', 'success');
+    rerenderNow();
   });
-
-  document.getElementById('fm-opt-yes')?.addEventListener('click', () => {
-    ui.confirmOptimalXI = false;
-    fs.applyOptimalXI();
-    ui.audio?.playSuccess();
-    ui.toast?.('🤖 AI đã sắp xếp đội hình tối ưu theo vị trí & phong độ!', 'success');
-    refresh();
-  });
-
-  document.getElementById('fm-opt-no')?.addEventListener('click', () => {
-    ui.confirmOptimalXI = false;
-    refresh();
-  });
-
-  document.getElementById('fm-toggle-match-mode')?.addEventListener('click', () => {
+  document.getElementById('tac-match-toggle')?.addEventListener('click', () => {
     if (fs.matchSubSession.active) {
       fs.endInMatchSession();
-      ui.toast?.('📋 Đã chuyển về Chế độ Chuẩn bị Trước Trận (chỉnh sửa tự do).', 'info');
+      uiState.toast?.('🏁 Đã kết thúc mô phỏng thay người trong trận.', 'info');
     } else {
       fs.startInMatchSession(5, 62);
-      ui.toast?.('⏱️ Đã bật Chế độ Trong Trận (phút 62 · tối đa 5 lượt thay người).', 'info');
+      uiState.toast?.('⚽ Đã bật chế độ Trong trận (tối đa 5 lượt thay người). Chạm cầu thủ trên sân rồi chạm dự bị để thay!', 'info');
     }
-    refresh();
+    clearSelection();
+    rerenderNow();
   });
 
-  // Kit switcher (Home / Away / Third)
-  root.querySelectorAll('[data-set-kit]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const kitKey = btn.dataset.setKit;
-      if (typeof state.setActiveKit === 'function') {
-        state.setActiveKit(kitKey);
-        const label = PSG_KIT_THEMES[kitKey]?.label || kitKey;
-        ui.audio?.playSuccess();
-        ui.toast?.(`👕 Đã đổi trang phục PSG sang ${label} (đồng bộ Cầu thủ 3D & Tủ đồ)!`, 'success');
-        refresh();
-      }
-    });
-  });
+  // --- Chạm-Chọn Hai Cầu Thủ: Slot trên sân ---
+  document.querySelectorAll('.tac-slot-card').forEach((card) => {
+    card.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = Number(card.dataset.slotidx);
+      const slotsNow = fs.getFormationData().slots;
+      const targetSlot = slotsNow[idx];
+      if (!targetSlot) return;
 
-  // Quick formation pills
-  root.querySelectorAll('[data-pick-form]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const targetF = btn.dataset.pickForm;
-      if (targetF === fs.formation) return;
-      ui.pendingFormationPreview = fs.previewFormationChange(targetF);
-      ui.confirmOptimalXI = false;
-      refresh();
-    });
-  });
-
-  // Bench category filters
-  root.querySelectorAll('[data-bfilter]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      ui.benchPosFilter = btn.dataset.bfilter;
-      ui.audio?.playClick();
-      refresh();
-    });
-  });
-
-  // Jump to weak position
-  root.querySelectorAll('[data-jump-slot]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      ui.selectedSlotIdx = Number(btn.dataset.jumpSlot);
-      ui.selectedBenchId = null;
-      ui.audio?.playClick();
-      refresh();
-    });
-  });
-
-  // Role changer chips
-  root.querySelectorAll('[data-new-role]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const slotIdx = Number(btn.dataset.setSlot);
-      const role = btn.dataset.newRole;
-      const res = fs.changeSlotRole(slotIdx, role);
-      if (res.ok) {
-        ui.audio?.playSuccess();
-        ui.toast?.(`Đã đổi vai trò ô thành ${POSITION_DISPLAY_LABEL[role] || role} (Phù hợp: ${res.suitability?.score ?? '--'}/100)`, 'info');
-        refresh();
-      }
-    });
-  });
-
-  document.getElementById('fm-set-cap')?.addEventListener('click', (e) => {
-    fs.setCaptain(e.currentTarget.dataset.pid);
-    ui.audio?.playSuccess();
-    ui.toast?.('©️ Đã cập nhật Đội trưởng (C) trên toàn game!', 'success');
-    refresh();
-  });
-
-  document.getElementById('fm-set-num')?.addEventListener('click', (e) => {
-    const num = document.getElementById('fm-num-inp')?.value;
-    fs.setShirtNumber(e.currentTarget.dataset.pid, num);
-    ui.audio?.playSuccess();
-    ui.toast?.(`👕 Đã đổi số áo #${num} (đồng bộ Tủ đồ 3D)!`, 'success');
-    refresh();
-  });
-
-  document.getElementById('fm-bench-slot')?.addEventListener('click', (e) => {
-    const idx = Number(e.currentTarget.dataset.slot);
-    const res = fs.benchStarter(idx);
-    if (res.ok) {
-      ui.selectedSlotIdx = null;
-      ui.audio?.playClick();
-      ui.toast?.('Đã chuyển cầu thủ xuống danh sách dự bị (để trống vị trí).', 'info');
-      refresh();
-    } else {
-      ui.toast?.(res.reason, 'error');
-    }
-  });
-
-  // 2. Pointer Events Drag & Drop + Tap-to-Swap Logic
-  const pitchBoard = document.getElementById('tac-pitch-board');
-  const dragPreviewEl = document.getElementById('fm-drag-preview');
-  const zoneLayer = document.getElementById('tac-zone-layer');
-  if (!pitchBoard) return;
-
-  const execSlotAssignment = (targetSlotIdx, incomingPid, fromSlotIdx = null) => {
-    let res;
-    if (fromSlotIdx !== null) {
-      res = fs.moveStarterToSlot(fromSlotIdx, targetSlotIdx);
-    } else if (extraCallbacks.onInMatchSub && fs.matchSubSession.active) {
-      res = extraCallbacks.onInMatchSub(targetSlotIdx, incomingPid);
-    } else {
-      res = fs.swapStarter(targetSlotIdx, incomingPid);
-    }
-
-    if (res?.ok) {
-      ui.selectedSlotIdx = targetSlotIdx;
-      ui.selectedBenchId = null;
-      ui.audio?.playSuccess();
-      const fd = fs.getFormationData({ fillEmpty: false });
-      const sl = fd.slots[targetSlotIdx];
-      const msg = res.subRecord
-        ? `🔄 Thay người ${res.subRecord.minute}': ${res.subRecord.inName} vào thay ${res.subRecord.outName} (Còn ${res.subsRemaining} lượt)`
-        : sl?.player
-          ? `✅ ${sl.player.name} → ${sl.displayRole} (Phù hợp: ${sl.suitability?.score ?? '--'}/100)`
-          : '✅ Đã cập nhật đội hình!';
-      ui.toast?.(msg, 'success');
-      refresh();
-    } else {
-      ui.audio?.playAlert();
-      ui.toast?.(res?.reason || 'Không thể thực hiện thay đổi.', 'error');
-    }
-  };
-
-  let dragState = null;
-
-  const clearDragArtifacts = () => {
-    if (dragState?.ghostEl && dragState.ghostEl.parentNode) {
-      dragState.ghostEl.parentNode.removeChild(dragState.ghostEl);
-    }
-    root.querySelectorAll('.drop-hot').forEach((el) => el.classList.remove('drop-hot'));
-    if (zoneLayer) zoneLayer.classList.remove('active');
-    if (dragPreviewEl) {
-      dragPreviewEl.classList.add('hidden');
-      dragPreviewEl.innerHTML = '';
-    }
-    dragState = null;
-  };
-
-  const updateDragPreviewBadge = (player, targetRole, targetKey) => {
-    if (!dragPreviewEl || !dragState) return;
-    if (dragState.lastTargetKey === targetKey) return;
-    dragState.lastTargetKey = targetKey;
-
-    if (!targetRole) {
-      dragPreviewEl.classList.add('hidden');
-      return;
-    }
-    const ev = ai.evaluatePlayerAtPosition(player, targetRole, fs.getContext());
-    const top3 = ai.getTop3Positions(player, fs.getContext(), targetRole);
-    const rec = top3 && top3.bestPosition !== ev.targetPosition && top3.bestScore - ev.score >= 5
-      ? ` · Khuyến nghị: <b>${top3.bestDisplayPosition}</b> (${top3.bestScore})`
-      : '';
-    dragPreviewEl.innerHTML = `
-      <span class="tac-prev-name">${escapeHtml(player.name)}</span>
-      <span>→ <b>${ev.displayPosition}</b></span>
-      <span class="tac-prev-score" style="background:${ev.tier.bg};color:${ev.tier.color};border-color:${ev.tier.border};">${ev.score}/100 · ${ev.tier.label}</span>
-      ${rec ? `<span class="tac-prev-rec">${rec}</span>` : ''}
-    `;
-    dragPreviewEl.classList.remove('hidden');
-  };
-
-  const handlePointerStart = (e, source) => {
-    // Chỉ xử lý chuột trái hoặc cảm ứng
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    e.stopPropagation();
-
-    const player = state.getPsgSquad().find((p) => p.id === source.playerId);
-    if (!player) return;
-
-    dragState = {
-      pointerId: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      source, // { type: 'starter'|'bench', slotIndex, playerId }
-      player,
-      dragging: false,
-      ghostEl: null,
-      lastTargetKey: null,
-      hoveredDrop: null
-    };
-
-    const onMove = (mv) => {
-      if (!dragState || mv.pointerId !== dragState.pointerId) return;
-      const dx = mv.clientX - dragState.startX;
-      const dy = mv.clientY - dragState.startY;
-      if (!dragState.dragging && Math.hypot(dx, dy) > 7) {
-        dragState.dragging = true;
-        if (zoneLayer && dragState.source.type === 'starter') {
-          zoneLayer.classList.add('active');
-        }
-        // Tạo thẻ ghost nổi GPU-accelerated (translate3d)
-        const ghost = document.createElement('div');
-        ghost.className = 'tac-drag-ghost';
-        ghost.innerHTML = `<img src="${getPlayerPortraitDataUrl(player)}" alt="" /><span>#${player.shirtNumber} ${escapeHtml(fs.getDisplaySurname(player.name))}</span>`;
-        document.body.appendChild(ghost);
-        dragState.ghostEl = ghost;
-      }
-
-      if (!dragState.dragging) return;
-      mv.preventDefault();
-      mv.stopPropagation();
-
-      if (dragState.ghostEl) {
-        dragState.ghostEl.style.transform = `translate3d(${mv.clientX - 34}px, ${mv.clientY - 38}px, 0)`;
-      }
-
-      // Hit-test mượt mà qua elementFromPoint
-      const elUnder = document.elementFromPoint(mv.clientX, mv.clientY);
-      const slotBtn = elUnder?.closest?.('.tac-slot-card');
-      const zoneBtn = !slotBtn ? elUnder?.closest?.('.tac-zone-anchor') : null;
-
-      root.querySelectorAll('.drop-hot').forEach((el) => el.classList.remove('drop-hot'));
-      if (slotBtn && Number(slotBtn.dataset.slot) !== dragState.source.slotIndex) {
-        slotBtn.classList.add('drop-hot');
-        const tIdx = Number(slotBtn.dataset.slot);
-        const tRole = slotBtn.dataset.role || 'CM';
-        dragState.hoveredDrop = { kind: 'slot', slotIndex: tIdx, role: tRole };
-        updateDragPreviewBadge(player, tRole, `slot_${tIdx}`);
-      } else if (zoneBtn && dragState.source.type === 'starter') {
-        zoneBtn.classList.add('drop-hot');
-        const zRole = zoneBtn.dataset.zoneRole;
-        const zx = Number(zoneBtn.dataset.zx);
-        const zy = Number(zoneBtn.dataset.zy);
-        dragState.hoveredDrop = { kind: 'zone', role: zRole, x: zx, y: zy };
-        updateDragPreviewBadge(player, zRole, `zone_${zRole}_${zx}_${zy}`);
-      } else {
-        dragState.hoveredDrop = null;
-        updateDragPreviewBadge(player, null, 'none');
-      }
-    };
-
-    const cleanupListeners = () => {
-      window.removeEventListener('pointermove', onMove, { passive: false });
-      window.removeEventListener('pointerup', onEnd);
-      window.removeEventListener('pointercancel', onCancel);
-    };
-
-    const onEnd = (up) => {
-      if (!dragState || up.pointerId !== dragState.pointerId) return;
-      cleanupListeners();
-
-      const ds = dragState;
-      const wasDragging = ds.dragging;
-      const drop = ds.hoveredDrop;
-      clearDragArtifacts();
-
-      if (!wasDragging) {
-        // Xử lý chạm/click (Select hoặc Tap-to-Swap)
-        if (ds.source.type === 'starter') {
-          const clickedSlot = ds.source.slotIndex;
-          if (ui.selectedBenchId) {
-            execSlotAssignment(clickedSlot, ui.selectedBenchId, null);
-          } else if (ui.selectedSlotIdx !== null && ui.selectedSlotIdx !== clickedSlot) {
-            execSlotAssignment(clickedSlot, ds.source.playerId, ui.selectedSlotIdx);
-          } else {
-            ui.selectedSlotIdx = ui.selectedSlotIdx === clickedSlot ? null : clickedSlot;
-            ui.selectedBenchId = null;
-            ui.audio?.playClick();
-            refresh();
-          }
-        } else {
-          // Tap bench card
-          if (ui.selectedSlotIdx !== null) {
-            execSlotAssignment(ui.selectedSlotIdx, ds.source.playerId, null);
-          } else {
-            ui.selectedBenchId = ui.selectedBenchId === ds.source.playerId ? null : ds.source.playerId;
-            ui.selectedSlotIdx = null;
-            ui.audio?.playClick();
-            refresh();
-          }
-        }
-        return;
-      }
-
-      // Xử lý thả (Drop)
-      if (!drop) return;
-      if (drop.kind === 'slot') {
-        execSlotAssignment(
-          drop.slotIndex,
-          ds.source.playerId,
-          ds.source.type === 'starter' ? ds.source.slotIndex : null
-        );
-      } else if (drop.kind === 'zone' && ds.source.type === 'starter') {
-        const res = fs.moveStarterToTacticalZone(ds.source.slotIndex, drop.role, drop.x, drop.y);
+      // Trường hợp 1: Đang chọn sẵn 1 cầu thủ dự bị -> Đưa cầu thủ dự bị vào vị trí này ngay!
+      if (uiState.selectedBenchId) {
+        const subPlayer = state.getPlayerById?.(uiState.selectedBenchId)
+          || state.getPsgSquad().find((p) => p.id === uiState.selectedBenchId);
+        const outName = targetSlot.player ? targetSlot.player.name : targetSlot.displayRole;
+        const res = fs.swapStarter(idx, uiState.selectedBenchId);
         if (res.ok) {
-          ui.selectedSlotIdx = ds.source.slotIndex;
-          ui.audio?.playSuccess();
-          ui.toast?.(`🧭 Đã chuyển ${ds.player.name} sang vùng ${POSITION_DISPLAY_LABEL[drop.role] || drop.role} (${res.suitability?.score ?? '--'}/100)`, 'success');
-          refresh();
-        }
-      }
-    };
-
-    const onCancel = (cEvt) => {
-      if (!dragState || cEvt.pointerId !== dragState.pointerId) return;
-      cleanupListeners();
-      clearDragArtifacts();
-    };
-
-    window.addEventListener('pointermove', onMove, { passive: false });
-    window.addEventListener('pointerup', onEnd);
-    window.addEventListener('pointercancel', onCancel);
-  };
-
-  // Gắn pointerdown lên các thẻ đá chính trên sân (cả filled & empty!)
-  root.querySelectorAll('.tac-slot-card').forEach((card) => {
-    const slotIdx = Number(card.dataset.slot);
-    const pid = card.dataset.pid || null;
-
-    if (pid) {
-      card.addEventListener('pointerdown', (e) => {
-        handlePointerStart(e, { type: 'starter', slotIndex: slotIdx, playerId: pid });
-      });
-    } else {
-      // Ô trống: chạm để đưa cầu thủ đang chọn (từ bench hoặc từ ô khác) vào vị trí trống!
-      card.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (ui.selectedBenchId) {
-          execSlotAssignment(slotIdx, ui.selectedBenchId, null);
-        } else if (ui.selectedSlotIdx !== null && ui.selectedSlotIdx !== slotIdx) {
-          execSlotAssignment(slotIdx, null, ui.selectedSlotIdx);
+          uiState.audio?.playSuccess?.();
+          uiState.toast?.(
+            `✅ Đã thay ${outName} bằng ${subPlayer?.name || 'cầu thủ dự bị'} (${targetSlot.displayRole} · Phù hợp ${res.suitability?.score ?? '--'}/100)`,
+            'success'
+          );
+          clearSelection();
         } else {
-          ui.selectedSlotIdx = slotIdx;
-          ui.selectedBenchId = null;
-          refresh();
+          uiState.audio?.playAlert?.();
+          uiState.toast?.(res.reason || 'Không thể thay cầu thủ này.', 'error');
         }
-      });
-    }
-  });
-
-  // Gắn pointerdown lên các thẻ cầu thủ dự bị
-  root.querySelectorAll('.tac-bench-card').forEach((card) => {
-    const pid = card.dataset.benchPid;
-    const avail = card.dataset.avail;
-    card.addEventListener('pointerdown', (e) => {
-      if (avail !== 'available') {
-        ui.audio?.playAlert();
-        const reason = avail === 'subbed_out'
-          ? 'Cầu thủ đã bị thay ra trước đó, không thể vào lại sân!'
-          : avail === 'injured'
-            ? 'Cầu thủ đang chấn thương!'
-            : 'Cầu thủ đang bị treo giò!';
-        ui.toast?.(reason, 'error');
+        rerenderNow();
         return;
       }
-      handlePointerStart(e, { type: 'bench', slotIndex: null, playerId: pid });
+
+      // Trường hợp 2: Chạm lại đúng cầu thủ đang chọn -> Hủy chọn
+      if (uiState.selectedSlotIdx === idx) {
+        clearSelection();
+        uiState.audio?.playClick?.();
+        rerenderNow();
+        return;
+      }
+
+      // Trường hợp 3: Đã chọn 1 cầu thủ trên sân (selectedSlotIdx !== null) -> Hoán đổi 2 vị trí trên sân!
+      if (Number.isInteger(uiState.selectedSlotIdx)) {
+        const fromIdx = uiState.selectedSlotIdx;
+        const fromSlot = slotsNow[fromIdx];
+        const res = fs.moveStarterToSlot(fromIdx, idx);
+        if (res.ok) {
+          uiState.audio?.playSuccess?.();
+          const aName = fromSlot?.player?.name || `#${fromIdx + 1}`;
+          const bName = targetSlot?.player?.name || targetSlot.displayRole;
+          uiState.toast?.(`🔄 Đã hoán đổi vị trí: ${aName} ↔ ${bName}`, 'success');
+          clearSelection();
+        } else {
+          uiState.audio?.playAlert?.();
+          uiState.toast?.(res.reason || 'Không thể hoán đổi hai vị trí này.', 'error');
+        }
+        rerenderNow();
+        return;
+      }
+
+      // Trường hợp 4: Chọn cầu thủ đầu tiên trên sân
+      uiState.selectedSlotIdx = idx;
+      uiState.selectedBenchId = null;
+      if (targetSlot.player) {
+        uiState.selectedPlayerId = targetSlot.player.id;
+      }
+      uiState.audio?.playClick?.();
+      rerenderNow();
     });
   });
+
+  // --- Chạm-Chọn Hai Cầu Thủ: Cầu thủ trên ghế dự bị ---
+  document.querySelectorAll('.tac-bench-card').forEach((card) => {
+    card.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pid = card.dataset.benchpid;
+      const avail = card.dataset.avail;
+      const bPlayer = state.getPlayerById?.(pid) || state.getPsgSquad().find((p) => p.id === pid);
+
+      // Kiểm tra điều kiện hợp lệ ngay khi chạm cầu thủ dự bị không khả dụng
+      if (avail !== 'available') {
+        const reason = avail === 'injured'
+          ? `${bPlayer?.name || 'Cầu thủ'} đang chấn thương (${bPlayer?.injuryDays || 1} ngày), không thể vào sân!`
+          : avail === 'suspended'
+            ? `${bPlayer?.name || 'Cầu thủ'} đang bị treo giò!`
+            : `${bPlayer?.name || 'Cầu thủ'} đã bị thay ra trước đó, theo luật không thể trở lại sân!`;
+        uiState.audio?.playAlert?.();
+        uiState.toast?.(reason, 'error');
+        return;
+      }
+
+      // Trường hợp A: Đã chọn sẵn 1 cầu thủ trên sân -> Thực hiện thay ngay!
+      if (Number.isInteger(uiState.selectedSlotIdx)) {
+        const slotIdx = uiState.selectedSlotIdx;
+        const slotInfo = fs.getFormationData().slots[slotIdx];
+        const outName = slotInfo?.player?.name || slotInfo?.displayRole || `#${slotIdx + 1}`;
+        const res = fs.swapStarter(slotIdx, pid);
+        if (res.ok) {
+          uiState.audio?.playSuccess?.();
+          uiState.toast?.(
+            `✅ Đã thay ${outName} bằng ${bPlayer?.name || 'cầu thủ dự bị'} (${slotInfo?.displayRole || ''} · Phù hợp ${res.suitability?.score ?? '--'}/100)`,
+            'success'
+          );
+          clearSelection();
+        } else {
+          uiState.audio?.playAlert?.();
+          uiState.toast?.(res.reason || 'Không thể thực hiện thay người.', 'error');
+        }
+        rerenderNow();
+        return;
+      }
+
+      // Trường hợp B: Chạm lại cầu thủ dự bị đang chọn -> Hủy chọn
+      if (uiState.selectedBenchId === pid) {
+        uiState.selectedBenchId = null;
+        uiState.audio?.playClick?.();
+        rerenderNow();
+        return;
+      }
+
+      // Trường hợp C: Chọn cầu thủ dự bị làm bước 1 -> Yêu cầu chọn cầu thủ đá chính để thay
+      uiState.selectedBenchId = pid;
+      uiState.selectedSlotIdx = null;
+      uiState.selectedPlayerId = pid;
+      uiState.audio?.playClick?.();
+      rerenderNow();
+    });
+  });
+
+  // --- Chế độ xem Thẻ (2 cột) / Danh sách & Tìm kiếm & 7 Bộ lọc ---
+  document.getElementById('tac-view-card')?.addEventListener('click', () => {
+    if (uiState.benchViewMode === 'card') return;
+    uiState.benchViewMode = 'card';
+    uiState.audio?.playClick?.();
+    rerenderNow();
+  });
+  document.getElementById('tac-view-list')?.addEventListener('click', () => {
+    if (uiState.benchViewMode === 'list') return;
+    uiState.benchViewMode = 'list';
+    uiState.audio?.playClick?.();
+    rerenderNow();
+  });
+
+  const searchInp = document.getElementById('tac-bench-search');
+  searchInp?.addEventListener('input', (e) => {
+    uiState.benchSearchQuery = e.target.value || '';
+    rerenderNow({ focusId: 'tac-bench-search' });
+  });
+  document.getElementById('tac-bench-clear-q')?.addEventListener('click', () => {
+    uiState.benchSearchQuery = '';
+    rerenderNow({ focusId: 'tac-bench-search' });
+  });
+
+  document.querySelectorAll('[data-bfilter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      uiState.benchPosFilter = btn.dataset.bfilter || 'ALL';
+      uiState.audio?.playClick?.();
+      rerenderNow();
+    });
+  });
+
+  // --- Hành động nhanh trên cầu thủ đang inspect ---
+  document.getElementById('tac-set-cap')?.addEventListener('click', (e) => {
+    const pid = e.currentTarget.dataset.pid;
+    if (fs.setCaptain(pid)) {
+      uiState.audio?.playSuccess?.();
+      uiState.toast?.('©️ Đã bổ nhiệm Đội trưởng mới & đồng bộ băng đội trưởng 3D!', 'success');
+      rerenderNow();
+    }
+  });
+  document.getElementById('tac-bench-slot')?.addEventListener('click', (e) => {
+    const sIdx = Number(e.currentTarget.dataset.slot);
+    const res = fs.benchStarter(sIdx);
+    if (res.ok) {
+      uiState.audio?.playClick?.();
+      uiState.toast?.('⬇️ Đã rút cầu thủ xuống dự bị. Chạm vào ô trống trên sân hoặc chọn dự bị để bổ sung!', 'info');
+      rerenderNow();
+    } else {
+      uiState.toast?.(res.reason || 'Không thể rút xuống dự bị.', 'warn');
+    }
+  });
+  document.getElementById('tac-num-save')?.addEventListener('click', (e) => {
+    const pid = e.currentTarget.dataset.pid;
+    const val = Number(document.getElementById('tac-num-inp')?.value);
+    if (fs.setShirtNumber(pid, val)) {
+      uiState.audio?.playSuccess?.();
+      uiState.toast?.(`Đã cập nhật số áo #${val} (Đồng bộ áo 3D & tủ đồ)!`, 'success');
+      rerenderNow();
+    }
+  });
+  document.querySelectorAll('[data-setrole]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!Number.isInteger(uiState.selectedSlotIdx)) return;
+      const res = fs.changeSlotRole(uiState.selectedSlotIdx, btn.dataset.setrole);
+      if (res.ok) {
+        uiState.audio?.playSuccess?.();
+        rerenderNow();
+      }
+    });
+  });
+  document.querySelectorAll('[data-focus-slot]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      uiState.selectedSlotIdx = Number(btn.dataset.focusSlot);
+      uiState.selectedBenchId = null;
+      uiState.audio?.playClick?.();
+      rerenderNow();
+    });
+  });
+  document.querySelectorAll('[data-pickform]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const f = btn.dataset.pickform;
+      if (f === fs.formation) return;
+      if (fs.matchSubSession.active) {
+        uiState.toast?.('Không thể đổi khung sơ đồ khi trận đấu đang diễn ra.', 'warn');
+        return;
+      }
+      uiState.pendingFormationPreview = fs.previewFormationChange(f);
+      rerenderNow();
+    });
+  });
+
+  if (typeof extraCallbacks?.onAfterBind === 'function') {
+    extraCallbacks.onAfterBind();
+  }
 }

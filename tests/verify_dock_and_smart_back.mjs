@@ -305,12 +305,20 @@ function createMockDomEnvironment() {
     ['btn-save', 'BUTTON'],
     ['btn-audio', 'BUTTON'],
     ['btn-quality', 'BUTTON'],
-    ['ceremony-sheet', 'DIV']
+    ['ceremony-sheet', 'DIV'],
+    ['task-backdrop', 'DIV'],
+    ['task-box', 'DIV'],
+    ['task-head-bar', 'DIV'],
+    ['task-smart-back', 'BUTTON'],
+    ['task-title', 'DIV'],
+    ['task-status-badge', 'SPAN'],
+    ['task-close', 'BUTTON'],
+    ['task-body', 'DIV']
   ];
   for (const [id, tag] of shellIds) {
     const el = new MockElement(tag);
     el.id = id;
-    if (id === 'modal-smart-back') {
+    if (id === 'modal-smart-back' || id === 'task-smart-back') {
       const arr = new MockElement('SPAN'); arr.className = 'smart-back-arrow'; arr.textContent = '←';
       const lbl = new MockElement('SPAN'); lbl.className = 'smart-back-label'; lbl.textContent = 'Quay lại';
       el.appendChild(arr); el.appendChild(lbl);
@@ -611,32 +619,34 @@ test('BACK-2: Quay lại đa cấp Máy tính -> Chuyển nhượng (filter, tra
   contractTabBtn.click();
   assert.equal(ui.navHistory.stack.length, depthBeforeProfileTab, 'Đổi tab trong Hồ sơ không tạo thêm entry lịch sử');
 
-  // Cấp 4: Mở Đàm phán chuyển nhượng từ Hồ sơ
+  // Cấp 4: Mở Đàm phán chuyển nhượng từ Hồ sơ (mở trong Task Window độc lập Lớp 4)
   const negBtn = mockDocument.getElementById('pp-negotiate');
   if (negBtn) {
     negBtn.click();
-    assert.equal(ui.navHistory.current.screen, 'transfer_neg');
+    assert.equal(ui.isTaskWindowOpen(), true);
+    assert.equal(ui.navHistory.current.screen, 'player_profile', 'Task Window không ghi đè lịch sử App bên dưới');
 
-    // Sửa input để kích hoạt dirty guard
+    // Sửa input trong Task Window để kích hoạt dirty guard
     const feeInput = mockDocument.getElementById('n1-fee');
     assert.ok(feeInput);
     feeInput.value = '999';
     feeInput.dispatchEvent({ type: 'input' });
 
-    // Bấm Smart Back lần 1 -> hiện #smart-confirm-overlay chứ chưa rời trang
-    mockDocument.getElementById('modal-smart-back').click();
+    // Bấm Smart Back lần 1 -> hiện #smart-confirm-overlay chứ chưa đóng Task Window
+    mockDocument.getElementById('task-smart-back').click();
     assert.equal(ui.isSmartConfirmOpen(), true);
-    assert.equal(ui.navHistory.current.screen, 'transfer_neg');
+    assert.equal(ui.isTaskWindowOpen(), true);
 
     // Bấm Smart Back lần 2 -> đóng #smart-confirm-overlay trước
-    mockDocument.getElementById('modal-smart-back').click();
+    mockDocument.getElementById('task-smart-back').click();
     assert.equal(ui.isSmartConfirmOpen(), false);
-    assert.equal(ui.navHistory.current.screen, 'transfer_neg');
+    assert.equal(ui.isTaskWindowOpen(), true);
 
-    // Bấm Smart Back lần 3 -> xác nhận rời form -> quay về Hồ sơ cầu thủ
-    mockDocument.getElementById('modal-smart-back').click();
+    // Bấm Smart Back lần 3 -> xác nhận hủy tác vụ -> đóng Task Window & vẫn ở đúng Hồ sơ cầu thủ
+    mockDocument.getElementById('task-smart-back').click();
     assert.equal(ui.isSmartConfirmOpen(), true);
     mockDocument.getElementById('sc-confirm').click();
+    assert.equal(ui.isTaskWindowOpen(), false);
     assert.equal(ui.navHistory.current.screen, 'player_profile');
     assert.equal(ui.navHistory.current.params.playerId, pickedPid);
   }

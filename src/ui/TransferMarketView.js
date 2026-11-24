@@ -126,6 +126,7 @@ export function renderTransferMarketHTML(state, uiState) {
             </div>
             <div class="muted" style="margin-bottom:6px;">Chiến lược đối tác: ${b.buyerStrategy || 'Cạnh tranh châu Âu'} · Vòng thương lượng: ${b.rounds || 0}</div>
             <div class="btn-row">
+              <button class="btn-xs btn-primary tr-review-bid" data-bid="${b.id}">📋 Xử lý tác vụ</button>
               <button class="btn-xs btn-primary tr-accept-bid" data-bid="${b.id}">✅ Chấp nhận (+€${b.fee}M)</button>
               <button class="btn-xs btn-accent tr-counter-bid" data-bid="${b.id}" data-fee="${Math.round(b.fee * 1.15)}">💬 Ép giá (+15%)</button>
               <button class="btn-xs btn-danger tr-reject-bid" data-bid="${b.id}">❌ Từ chối</button>

@@ -26,6 +26,7 @@ import {
   renderApprovalsQueueHTML
 } from './ComputerAppsView.js';
 import { DockStateManager, NavigationHistoryManager } from './DockAndNavManager.js';
+import { SmartTaskManager, TASK_STATUS, TASK_STATUS_LABEL } from './TaskManager.js';
 // src/ui/UIManager.js
 // Giao diện cảm ứng iPhone Landscape/Portrait tối ưu + Trung tâm Điều hành Chủ tịch (Máy tính 17 ứng dụng, TV 9 kênh, Điện thoại thông minh)
 export class UIManager {
@@ -53,6 +54,8 @@ export class UIManager {
     this.selectedSlotIdx = null;
     this.selectedBenchId = null;
     this.benchPosFilter = 'ALL';
+    this.benchViewMode = 'card';
+    this.benchSearchQuery = '';
     this.pendingFormationPreview = null;
     this.confirmOptimalXI = false;
     this.pitchZoom = 1.0;
@@ -66,6 +69,13 @@ export class UIManager {
     if (state?.uiPrefs?.navState) {
       this.navHistory.importState(state.uiPrefs.navState);
     }
+    // Quản lý Tác vụ thông minh tách lớp Desktop -> App -> Task Window -> Modal -> Notification
+    this.taskManager = new SmartTaskManager();
+    this._activeTaskMeta = null;
+    this._taskNavStack = [];
+    this._taskDirtyBaseline = new Map();
+    this._taskDirtyFlag = false;
+
     this._navRestoring = false;
     this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
     this._pendingConfirmAction = null;
@@ -105,6 +115,8 @@ export class UIManager {
     if (typeof document !== 'undefined') {
       const body = document.getElementById('modal-body');
       if (body && body.innerHTML !== '') body.innerHTML = '';
+      const taskBody = document.getElementById('task-body');
+      if (taskBody && taskBody.innerHTML !== '') taskBody.innerHTML = '';
       const sheet = document.getElementById('ceremony-sheet');
       if (sheet && sheet.innerHTML !== '') sheet.innerHTML = '';
     }
@@ -178,12 +190,61 @@ export class UIManager {
     });
     on('modal-close', () => this.requestCloseModal());
     on('modal-smart-back', () => this.handleSmartBack());
+    on('task-close', () => this.requestCloseTaskWindow());
+    on('task-smart-back', () => this.handleTaskWindowBack());
     on('sc-cancel', () => this.hideSmartConfirmDialog());
     on('sc-confirm', () => {
       const fn = this._pendingConfirmAction;
       this.hideSmartConfirmDialog();
       if (typeof fn === 'function') fn();
     });
+
+    // Phím tắt điều hướng Desktop: ESC (đóng lớp trên cùng / lùi) & Alt + ArrowLeft (Quay lại)
+    if (typeof document !== 'undefined') {
+      document.addEventListener('keydown', (e) => {
+        if (!this.isSmartConfirmOpen() && !this.isTaskWindowOpen() && !this.isModalOpen()) return;
+        if (e.key === 'Escape') {
+          e.preventDefault?.();
+          this.handleEscShortcut();
+        } else if (e.altKey && e.key === 'ArrowLeft') {
+          e.preventDefault?.();
+          if (this.isTaskWindowOpen()) this.handleTaskWindowBack();
+          else this.handleSmartBack();
+        }
+      }, opts);
+
+      // Vuốt cạnh trái trên iPhone Safari: CHỈ kích hoạt khi đang mở modal/ứng dụng hoặc Task Window (không xung đột camera 3D & scroll dọc)
+      let edgeSwipe = null;
+      document.addEventListener('touchstart', (e) => {
+        if ((!this.isModalOpen() && !this.isTaskWindowOpen()) || !e.touches || e.touches.length !== 1) {
+          edgeSwipe = null;
+          return;
+        }
+        const t = e.touches[0];
+        if (t.clientX <= 28) {
+          edgeSwipe = { x: t.clientX, y: t.clientY, time: Date.now() };
+        } else {
+          edgeSwipe = null;
+        }
+      }, { passive: true, ...(opts || {}) });
+
+      document.addEventListener('touchend', (e) => {
+        if (!edgeSwipe || (!this.isModalOpen() && !this.isTaskWindowOpen())) {
+          edgeSwipe = null;
+          return;
+        }
+        const t = e.changedTouches && e.changedTouches[0];
+        if (!t) { edgeSwipe = null; return; }
+        const dx = t.clientX - edgeSwipe.x;
+        const dy = t.clientY - edgeSwipe.y;
+        const dt = Date.now() - edgeSwipe.time;
+        edgeSwipe = null;
+        if (dt <= 600 && dx >= 62 && Math.abs(dy) <= 36 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+          if (this.isTaskWindowOpen()) this.handleTaskWindowBack();
+          else this.handleSmartBack();
+        }
+      }, { passive: true, ...(opts || {}) });
+    }
 
     // Điều khiển tốc độ & tạm dừng đồng hồ toàn game (GameTimeSystem)
     on('btn-time-pause', () => {
@@ -412,6 +473,7 @@ export class UIManager {
     const modalBody = hasDoc ? document.getElementById('modal-body') : null;
     const macMain = hasDoc ? document.querySelector('.macos-main') : null;
     const tableWrap = hasDoc ? document.querySelector('#modal-body .table-wrap') : null;
+    const benchScroll = hasDoc ? document.getElementById('tac-bench-scroll') : null;
     const scrollLists = hasDoc
       ? Array.from(document.querySelectorAll('#modal-body .scroll-list')).map((el) => Math.round(el.scrollTop || 0))
       : [];
@@ -447,8 +509,11 @@ export class UIManager {
       selectedSlotIdx: this.selectedSlotIdx,
       selectedBenchId: this.selectedBenchId,
       benchPosFilter: this.benchPosFilter,
+      benchViewMode: this.benchViewMode || 'card',
+      benchSearchQuery: this.benchSearchQuery || '',
       scrollMainTop: Math.round((macMain ? macMain.scrollTop : modalBody?.scrollTop) || 0),
       scrollTableTop: Math.round(tableWrap?.scrollTop || 0),
+      scrollBenchTop: Math.round(benchScroll?.scrollTop || 0),
       scrollListTops: scrollLists,
       expandedIds
     };
@@ -477,6 +542,8 @@ export class UIManager {
     if ('selectedSlotIdx' in snap) this.selectedSlotIdx = snap.selectedSlotIdx;
     if ('selectedBenchId' in snap) this.selectedBenchId = snap.selectedBenchId;
     if (snap.benchPosFilter) this.benchPosFilter = snap.benchPosFilter;
+    if (snap.benchViewMode) this.benchViewMode = snap.benchViewMode;
+    if (typeof snap.benchSearchQuery === 'string') this.benchSearchQuery = snap.benchSearchQuery;
   }
 
   _applyDomSnapshotAfterRender(snap, focusId = null) {
@@ -492,6 +559,10 @@ export class UIManager {
         const tableWrap = document.querySelector('#modal-body .table-wrap');
         if (tableWrap && Number.isFinite(snap.scrollTableTop)) {
           tableWrap.scrollTop = snap.scrollTableTop;
+        }
+        const benchScroll = document.getElementById('tac-bench-scroll');
+        if (benchScroll && Number.isFinite(snap.scrollBenchTop)) {
+          benchScroll.scrollTop = snap.scrollBenchTop;
         }
         if (Array.isArray(snap.scrollListTops)) {
           const lists = document.querySelectorAll('#modal-body .scroll-list');
@@ -541,12 +612,17 @@ export class UIManager {
     if (typeof document === 'undefined') return;
     const syncSnap = () => {
       if (this._navRestoring) return;
-      this.navHistory.updateCurrentSnapshot(this._captureCurrentUiSnapshot());
+      const snap = this._captureCurrentUiSnapshot();
+      this.navHistory.updateCurrentSnapshot(snap);
+      if (this.activeTab) {
+        this.taskManager.saveAppViewState(this.activeTab, snap);
+      }
     };
     const targets = [
       document.querySelector('.macos-main'),
       document.getElementById('modal-body'),
       document.querySelector('#modal-body .table-wrap'),
+      document.getElementById('tac-bench-scroll'),
       ...Array.from(document.querySelectorAll('#modal-body .scroll-list'))
     ].filter(Boolean);
     targets.forEach((el) => {
@@ -564,7 +640,23 @@ export class UIManager {
     });
   }
 
-  _snapshotFormBaselines(lockReason = null, trackedPrefixRegex = null) {
+  _snapshotFormBaselines(lockReason = null, trackedPrefixRegex = null, containerId = 'modal-body') {
+    if (containerId === 'task-body') {
+      this._taskDirtyBaseline = new Map();
+      this._taskDirtyFlag = false;
+      if (typeof document === 'undefined') return;
+      const tBody = document.getElementById('task-body');
+      if (!tBody) return;
+      tBody.querySelectorAll('input, select, textarea').forEach((ctrl) => {
+        if (!ctrl.id) return;
+        if (trackedPrefixRegex && !trackedPrefixRegex.test(ctrl.id) && ctrl.dataset.trackDirty !== 'true') return;
+        this._taskDirtyBaseline.set(ctrl.id, String(ctrl.value ?? ''));
+        ctrl.addEventListener('input', () => { this._taskDirtyFlag = this._computeTaskFormDirty(); });
+        ctrl.addEventListener('change', () => { this._taskDirtyFlag = this._computeTaskFormDirty(); });
+      });
+      return;
+    }
+
     this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: lockReason };
     if (typeof document === 'undefined') return;
     const body = document.getElementById('modal-body');
@@ -590,6 +682,39 @@ export class UIManager {
       if (el && String(el.value ?? '') !== initVal) return true;
     }
     return false;
+  }
+
+  _computeTaskFormDirty() {
+    if (typeof document === 'undefined') return !!this._taskDirtyFlag;
+    for (const [id, initVal] of this._taskDirtyBaseline.entries()) {
+      const el = document.getElementById(id);
+      if (el && String(el.value ?? '') !== initVal) return true;
+    }
+    return false;
+  }
+
+  isModalOpen() {
+    if (typeof document === 'undefined') return false;
+    return !!document.getElementById('modal-backdrop')?.classList.contains('open');
+  }
+
+  isTaskWindowOpen() {
+    if (typeof document === 'undefined') return false;
+    return !!document.getElementById('task-backdrop')?.classList.contains('open');
+  }
+
+  handleEscShortcut() {
+    if (this.isSmartConfirmOpen()) {
+      this.hideSmartConfirmDialog();
+      return;
+    }
+    if (this.isTaskWindowOpen()) {
+      this.requestCloseTaskWindow();
+      return;
+    }
+    if (this.isModalOpen()) {
+      this.handleSmartBack();
+    }
   }
 
   _getNavigationBlockReason(targetAction = 'back') {
@@ -754,11 +879,22 @@ export class UIManager {
       this.hideSmartConfirmDialog();
       return;
     }
-    // 2. Nếu đang mở hộp thoại xác nhận sơ đồ chiến thuật con trong Chiến thuật -> đóng popup con trước
+    // 2. Nếu đang mở Task Window -> xử lý Back trong Task Window trước
+    if (this.isTaskWindowOpen()) {
+      this.handleTaskWindowBack();
+      return;
+    }
+    // 3. Nếu đang mở popover cài đặt Dock -> đóng popover trước
+    if (this._dockPopoverOpen && typeof document !== 'undefined') {
+      this._dockPopoverOpen = false;
+      document.getElementById('dock-settings-popover')?.classList.remove('open');
+      return;
+    }
+    // 4. Nếu đang mở hộp thoại xác nhận sơ đồ chiến thuật con trong Chiến thuật -> đóng popup con trước
     if (this.activeTab === 'formation' && (this.pendingFormationPreview || this.confirmOptimalXI)) {
       this.pendingFormationPreview = null;
       this.confirmOptimalXI = false;
-      this.openComputer('formation', { skipHistory: true, preserveScroll: true });
+      this._refreshFormationInPlace();
       return;
     }
 
@@ -787,6 +923,10 @@ export class UIManager {
       this.hideSmartConfirmDialog();
       return;
     }
+    if (this.isTaskWindowOpen()) {
+      this.requestCloseTaskWindow();
+      return;
+    }
     const guard = this._getNavigationBlockReason('close');
     if (guard) {
       this.showSmartConfirmDialog({
@@ -796,6 +936,210 @@ export class UIManager {
       return;
     }
     this.closeModal(true);
+  }
+
+  // ==================== QUẢN LÝ TASK WINDOW ĐỘC LẬP (LỚP 4) ====================
+  _updateTaskStatusBadge(status) {
+    if (typeof document === 'undefined') return;
+    const badge = document.getElementById('task-status-badge');
+    if (!badge) return;
+    badge.textContent = TASK_STATUS_LABEL[status] || 'Đang xử lý';
+    badge.className = `task-status-badge status-${status || TASK_STATUS.IN_PROGRESS}`;
+  }
+
+  _setTaskErrorState(taskId, reasonMsg) {
+    if (taskId) {
+      this.taskManager.failTask(taskId, reasonMsg);
+    }
+    this._updateTaskStatusBadge(TASK_STATUS.FAILED);
+    if (typeof document === 'undefined') return;
+    const taskBody = document.getElementById('task-body');
+    if (!taskBody) return;
+    let banner = document.getElementById('task-error-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'task-error-banner';
+      banner.className = 'task-error-banner';
+      taskBody.prepend(banner);
+    }
+    banner.innerHTML = `<strong>❌ Tác vụ chưa thể hoàn tất:</strong> ${reasonMsg}<div class="muted" style="margin-top:4px;">Bạn có thể điều chỉnh lại thông số ngay bên dưới và thử lại.</div>`;
+  }
+
+  openTaskWindow({
+    taskId,
+    taskType = 'general',
+    title = 'Tác vụ PSG',
+    html = '',
+    narrow = false,
+    dirtyPrefix = null,
+    errorMessage = null,
+    pushStep = null,
+    replaceTopStep = false
+  }) {
+    if (!taskId) taskId = `task_${taskType}`;
+    let taskRec = this.taskManager.getTask(taskId);
+    if (!taskRec) {
+      taskRec = this.taskManager.createTask({
+        id: taskId,
+        type: taskType,
+        title,
+        sourceApp: this.activeTab || 'overview'
+      });
+    }
+    this.taskManager.startTask(taskId);
+    this._activeTaskMeta = {
+      taskId,
+      taskType,
+      sourceApp: this.activeTab || 'overview',
+      hadModalUnderneath: this.isModalOpen()
+    };
+
+    if (pushStep) {
+      if (replaceTopStep && this._taskNavStack.length > 0) {
+        this._taskNavStack[this._taskNavStack.length - 1] = pushStep;
+      } else {
+        const last = this._taskNavStack[this._taskNavStack.length - 1];
+        if (!last || last.key !== pushStep.key) {
+          this._taskNavStack.push(pushStep);
+        }
+      }
+    }
+
+    const backdrop = document.getElementById('task-backdrop');
+    const box = document.getElementById('task-box');
+    const tEl = document.getElementById('task-title');
+    const body = document.getElementById('task-body');
+    if (backdrop && box && tEl && body) {
+      this.hideSmartConfirmDialog();
+      tEl.textContent = title;
+      box.className = narrow ? 'task-box narrow' : 'task-box';
+      const errBlock = errorMessage
+        ? `<div id="task-error-banner" class="task-error-banner"><strong>❌ Lỗi xử lý tác vụ:</strong> ${errorMessage}</div>`
+        : '';
+      body.innerHTML = `${errBlock}${html}`;
+      this._updateTaskStatusBadge(errorMessage ? TASK_STATUS.FAILED : TASK_STATUS.IN_PROGRESS);
+      const backBtn = document.getElementById('task-smart-back');
+      if (backBtn) {
+        const lbl = backBtn.querySelector('.smart-back-label');
+        if (lbl) lbl.textContent = this._taskNavStack.length > 1 ? 'Quay lại' : 'Đóng tác vụ';
+      }
+      backdrop.classList.add('open');
+      this._snapshotFormBaselines(null, dirtyPrefix, 'task-body');
+    }
+    return taskRec;
+  }
+
+  _refreshActiveAppAfterTask(forceTab = null) {
+    if (typeof document === 'undefined') return;
+    const modalWrap = document.getElementById('modal-backdrop');
+    const isComputer = !!document.getElementById('macos-desktop') && modalWrap?.classList.contains('open');
+    if (isComputer) {
+      const targetTab = forceTab || this.activeTab || 'overview';
+      this.openComputer(targetTab, { skipHistory: true, preserveScroll: true });
+      return;
+    }
+    const curNav = this.navHistory.current;
+    if (modalWrap?.classList.contains('open') && curNav) {
+      this._restoreRoute({ ...curNav, uiSnapshot: this._captureCurrentUiSnapshot() });
+    }
+  }
+
+  _closeTaskWindowDomOnly() {
+    this.hideSmartConfirmDialog();
+    this._taskDirtyBaseline = new Map();
+    this._taskDirtyFlag = false;
+    this._activeTaskMeta = null;
+    this._taskNavStack = [];
+    if (typeof document !== 'undefined') {
+      const backdrop = document.getElementById('task-backdrop');
+      if (backdrop) backdrop.classList.remove('open');
+      const body = document.getElementById('task-body');
+      if (body && body.innerHTML !== '') body.innerHTML = '';
+    }
+    if (!this.isModalOpen()) {
+      this.state.timeSystem?.clearAutoPause();
+      this.cb.endBoard?.();
+      this.cb.dismissPlayer?.();
+    } else {
+      this.cb.endBoard?.();
+      this.cb.dismissPlayer?.();
+    }
+  }
+
+  completeAndCloseTaskWindow(taskId, toastMsg = null, opts = {}) {
+    const id = taskId || this._activeTaskMeta?.taskId;
+    if (id) {
+      this.taskManager.completeTask(id, opts.result || {});
+    }
+    this._closeTaskWindowDomOnly();
+    if (toastMsg) {
+      this.toast(toastMsg, opts.toastType || 'success');
+    }
+    this._refreshActiveAppAfterTask(opts.targetTab || null);
+  }
+
+  cancelAndCloseTaskWindow(reason = 'Người dùng đã hủy tác vụ') {
+    const id = this._activeTaskMeta?.taskId;
+    if (id) {
+      this.taskManager.cancelTask(id, reason);
+    }
+    this._closeTaskWindowDomOnly();
+    this._refreshActiveAppAfterTask(null);
+  }
+
+  requestCloseTaskWindow() {
+    if (this.isSmartConfirmOpen()) {
+      this.hideSmartConfirmDialog();
+      return;
+    }
+    const meta = this._activeTaskMeta;
+    const taskRec = meta?.taskId ? this.taskManager.getTask(meta.taskId) : null;
+    const dirty = this._computeTaskFormDirty();
+    if (dirty || (taskRec && taskRec.status === TASK_STATUS.IN_PROGRESS && meta?.taskType === 'transfer_neg')) {
+      this.showSmartConfirmDialog({
+        title: '⚠️ Tác vụ chưa hoàn tất',
+        message: dirty
+          ? 'Bạn đã chỉnh sửa dữ liệu trong tác vụ này nhưng chưa gửi xác nhận. Đóng cửa sổ sẽ hủy tác vụ và giữ nguyên ứng dụng đang mở.'
+          : 'Tác vụ đàm phán đang tiến hành chưa hoàn tất. Bạn muốn tạm đóng cửa sổ tác vụ và quay lại ứng dụng?',
+        confirmLabel: 'Hủy tác vụ & Quay lại App',
+        cancelLabel: 'Tiếp tục xử lý',
+        onConfirm: () => this.cancelAndCloseTaskWindow('Đóng trước khi hoàn tất')
+      });
+      return;
+    }
+    this.cancelAndCloseTaskWindow('Đóng cửa sổ tác vụ');
+  }
+
+  handleTaskWindowBack() {
+    this.audio?.playClick?.();
+    if (this.isSmartConfirmOpen()) {
+      this.hideSmartConfirmDialog();
+      return;
+    }
+    if (this._taskNavStack.length > 1) {
+      const executePop = () => {
+        this._taskNavStack.pop();
+        const prevStep = this._taskNavStack[this._taskNavStack.length - 1];
+        if (prevStep && typeof prevStep.restore === 'function') {
+          prevStep.restore();
+        } else {
+          this.cancelAndCloseTaskWindow('Quay lại');
+        }
+      };
+      if (this._computeTaskFormDirty()) {
+        this.showSmartConfirmDialog({
+          title: '⚠️ Biểu mẫu chưa lưu',
+          message: 'Quay lại bước trước sẽ bỏ các thông số vừa nhập. Tiếp tục?',
+          confirmLabel: 'Quay lại bước trước',
+          cancelLabel: 'Ở lại xử lý',
+          onConfirm: executePop
+        });
+        return;
+      }
+      executePop();
+      return;
+    }
+    this.requestCloseTaskWindow();
   }
 
   openModal(title, html, mode = 'normal', opts = {}) {
@@ -823,6 +1167,7 @@ export class UIManager {
   }
 
   closeModal(clearNav = true) {
+    this._closeTaskWindowDomOnly();
     this.hideSmartConfirmDialog();
     this._outgoingSnapshotFrozen = false;
     if (typeof this._dockDragCleanup === 'function') {
@@ -833,6 +1178,7 @@ export class UIManager {
     this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
     if (clearNav) {
       this.navHistory.clear();
+      this.taskManager.clearOpenApps();
     }
     const wrap = document.getElementById('modal-backdrop');
     if (wrap) wrap.classList.remove('open');
@@ -1165,8 +1511,8 @@ export class UIManager {
     });
   }
 
-  // --- 3. HỌP BAN LÃNH ĐẠO & HỌP RIÊNG CẦU THỦ ---
-  openBoardMeeting(topicIdx = 0, opts = {}) {
+  // --- 3. HỌP BAN LÃNH ĐẠO & HỌP RIÊNG CẦU THỦ (CHẠY TRONG TASK WINDOW ĐỂ KHÔNG THOÁT APP) ---
+  openBoardMeeting(topicIdx = 0) {
     this.state.timeSystem?.pushAutoPause('board_meeting');
     this.cb.summonBoard();
     const agendas = [
@@ -1205,31 +1551,48 @@ export class UIManager {
 
     const html = `
       <div class="tab-strip">
-        ${agendas.map((_, i) => `<button class="tab-btn ${i === topicIdx ? 'active' : ''}" data-ag="${i}">Chủ đề ${i + 1}</button>`).join('')}
+        ${agendas.map((_, i) => `<button type="button" class="tab-btn ${i === topicIdx ? 'active' : ''}" data-ag="${i}">Chủ đề ${i + 1}</button>`).join('')}
       </div>
       <div class="card-item"><h4>📌 ${ag.title}</h4></div>
-      <div class="scroll-list">${ag.opinions.map(([w, v, t]) => `<div class="card-item"><div class="card-head"><strong>${w}</strong><span class="tag ${v === 'Ủng hộ' ? 'ok' : v === 'Phản đối' ? 'bad' : ''}">${v}</span></div><p>"${t}"</p></div>`).join('')}</div>
+      <div class="scroll-list" style="max-height:36vh;">${ag.opinions.map(([w, v, t]) => `<div class="card-item"><div class="card-head"><strong>${w}</strong><span class="tag ${v === 'Ủng hộ' ? 'ok' : v === 'Phản đối' ? 'bad' : ''}">${v}</span></div><p>"${t}"</p></div>`).join('')}</div>
       <div class="vote-bar">Biểu quyết: <b>${approveCnt} Đồng ý</b> · <b>${rejectCnt} Phản đối</b> · <b>${absCnt} Trắng</b></div>
       <div class="grid-2">
-        <button class="btn-primary" id="bm-approve">✅ Chủ tịch Phê duyệt</button>
-        <button class="btn-danger" id="bm-reject">❌ Chủ tịch Bác bỏ</button>
+        <button type="button" class="btn-primary" id="bm-approve">✅ Chủ tịch Phê duyệt</button>
+        <button type="button" class="btn-danger" id="bm-reject">❌ Chủ tịch Bác bỏ</button>
       </div>`;
-    this.openModal('🏛️ HỌP BAN LÃNH ĐẠO PARIS SAINT-GERMAIN', html, 'wide', { skipRefreshBack: true });
-    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
-    this._recordNavigation({ routeKey: 'board_meeting', screen: 'board_meeting', label: 'Họp Ban Lãnh Đạo', params: { topicIdx } }, opts);
-    this._bindScrollAndCollapseTrackers();
-    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
-    document.querySelectorAll('[data-ag]').forEach((b) => b.addEventListener('click', () => this.openBoardMeeting(Number(b.dataset.ag), { skipHistory: true })));
+
+    const taskId = `board_meeting_${topicIdx}`;
+    this.openTaskWindow({
+      taskId,
+      taskType: 'board_meeting',
+      title: '🏛️ HỌP BAN LÃNH ĐẠO PARIS SAINT-GERMAIN',
+      html,
+      pushStep: { key: `board_${topicIdx}`, restore: () => this.openBoardMeeting(topicIdx) },
+      replaceTopStep: this._taskNavStack.some((s) => s.key.startsWith('board_'))
+    });
+
+    document.querySelectorAll('#task-body [data-ag]').forEach((b) => {
+      b.addEventListener('click', () => this.openBoardMeeting(Number(b.dataset.ag)));
+    });
     const done = (label, ok) => {
       if (ok) ag.applyApprove(); else ag.applyReject();
-      this.state.meetingMinutes.unshift({ id: `mm_${Date.now()}`, date: `Tuần ${this.state.week} · ${this.state.season}`, topic: ag.title, attendees: ag.opinions.map((o) => o[0]), votes: { approve: approveCnt, reject: rejectCnt, abstain: absCnt }, decision: `${label} (Chủ tịch Phạm Minh Chiêu)`, owner: 'Ban Điều Hành PSG' });
-      this.audio.playSuccess(); this.toast(`Đã lưu Biên bản họp: ${label}`, 'success'); this.closeModal(true);
+      this.state.meetingMinutes.unshift({
+        id: `mm_${Date.now()}`,
+        date: `Tuần ${this.state.week} · ${this.state.season}`,
+        topic: ag.title,
+        attendees: ag.opinions.map((o) => o[0]),
+        votes: { approve: approveCnt, reject: rejectCnt, abstain: absCnt },
+        decision: `${label} (Chủ tịch Phạm Minh Chiêu)`,
+        owner: 'Ban Điều Hành PSG'
+      });
+      this.audio.playSuccess();
+      this.completeAndCloseTaskWindow(taskId, `Đã lưu Biên bản họp: ${label}`);
     };
     document.getElementById('bm-approve')?.addEventListener('click', () => done('PHÊ DUYỆT', true));
     document.getElementById('bm-reject')?.addEventListener('click', () => done('BÁC BỎ', false));
   }
 
-  openPlayerMeetingSelector(preselectedId = null, opts = {}) {
+  openPlayerMeetingSelector(preselectedId = null) {
     const squad = this.state.getPsgSquad();
     const chosen = squad.find((p) => p.id === preselectedId) || squad[0];
     if (!chosen) return;
@@ -1247,14 +1610,21 @@ export class UIManager {
         <select id="pm-select" class="input-ctrl">${squad.map((p) => `<option value="${p.id}" ${p.id === chosen.id ? 'selected' : ''}>${p.name} (${p.position} · OVR ${p.ovr})</option>`).join('')}</select>
         <div class="kpi-mini" style="margin-top:8px;"><span>Lương: <b>€${chosen.wage}k</b></span><span>HĐ: <b>${chosen.contractYears} năm</b></span><span>Hài lòng: <b>${chosen.satisfaction}%</b></span></div>
       </div>
-      <div class="scroll-list">${topics.map(([k, txt]) => `<button class="btn-secondary pm-topic" data-topic="${k}" style="width:100%;text-align:left;margin-bottom:5px;">${txt}</button>`).join('')}</div>`;
-    this.openModal(`🗣️ HỌP RIÊNG CẦU THỦ · ${chosen.name.toUpperCase()}`, html, 'normal', { skipRefreshBack: true });
-    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
-    this._recordNavigation({ routeKey: `player_meeting:${chosen.id}`, screen: 'player_meeting', label: `Họp riêng ${chosen.name}`, params: { playerId: chosen.id } }, opts);
-    this._bindScrollAndCollapseTrackers();
-    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
-    document.getElementById('pm-select')?.addEventListener('change', (e) => this.openPlayerMeetingSelector(e.target.value, { skipHistory: true }));
-    document.querySelectorAll('.pm-topic').forEach((b) => {
+      <div class="scroll-list">${topics.map(([k, txt]) => `<button type="button" class="btn-secondary pm-topic" data-topic="${k}" style="width:100%;text-align:left;margin-bottom:5px;">${txt}</button>`).join('')}</div>`;
+
+    const taskId = `player_meeting_${chosen.id}`;
+    this.openTaskWindow({
+      taskId,
+      taskType: 'player_meeting',
+      title: `🗣️ HỌP RIÊNG CẦU THỦ · ${chosen.name.toUpperCase()}`,
+      html,
+      narrow: true,
+      pushStep: { key: `pm_${chosen.id}`, restore: () => this.openPlayerMeetingSelector(chosen.id) },
+      replaceTopStep: this._taskNavStack.some((s) => s.key.startsWith('pm_'))
+    });
+
+    document.getElementById('pm-select')?.addEventListener('change', (e) => this.openPlayerMeetingSelector(e.target.value));
+    document.querySelectorAll('#task-body .pm-topic').forEach((b) => {
       b.addEventListener('click', () => {
         const t = b.dataset.topic;
         if (t === 'motivate') { chosen.morale = Math.min(100, chosen.morale + 8); chosen.loyalty = Math.min(100, chosen.loyalty + 4); }
@@ -1263,8 +1633,7 @@ export class UIManager {
         else if (t === 'captain') chosen.loyalty = Math.min(100, chosen.loyalty + 10);
         else chosen.form = Math.min(99, chosen.form + 5);
         this.audio.playSuccess();
-        this.toast(`${chosen.name} đã ghi nhận trao đổi riêng với Chủ tịch!`, 'success');
-        this.closeModal(true);
+        this.completeAndCloseTaskWindow(taskId, `${chosen.name} đã ghi nhận trao đổi riêng với Chủ tịch!`);
       });
     });
   }
@@ -1580,8 +1949,13 @@ export class UIManager {
     else if (tab === 'events') { resolvedTab = 'media'; this.mediaSubTab = 'ceremony'; }
     else if (tab === 'history') { resolvedTab = 'reports'; this.reportsSubTab = 'save'; }
 
+    const prevTabBeforeSwitch = this.activeTab;
+    if (prevTabBeforeSwitch && prevTabBeforeSwitch !== resolvedTab && !opts.skipHistory && !this._navRestoring) {
+      this.taskManager.saveAppViewState(prevTabBeforeSwitch, this._captureCurrentUiSnapshot());
+    }
     const prevSnap = opts.preserveScroll ? this._captureCurrentUiSnapshot() : null;
     this.activeTab = resolvedTab;
+    this.taskManager.markAppOpen(resolvedTab);
     const pendingTotal = this.state.getTotalPendingApprovalsCount?.() ?? this.state.pendingReports.length;
     const activeCrisisCnt = (this.state.rumorCrisisSystem?.crises || []).filter((c) => c.status === 'active').length;
     const bidsCnt = this.state.transferSystem?.incomingBids?.length || 0;
@@ -1795,6 +2169,48 @@ export class UIManager {
     return renderFormationPitchTabHTML(this.state, this);
   }
 
+  _refreshFormationInPlace({ focusId = null, savedBenchTop = null } = {}) {
+    if (typeof document === 'undefined') return;
+    const root = document.getElementById('tac-root');
+    if (!root) {
+      this.openComputer('formation', { skipHistory: true, preserveScroll: true, focusId });
+      return;
+    }
+    const prevBench = document.getElementById('tac-bench-scroll');
+    const benchTop = Number.isFinite(savedBenchTop) ? savedBenchTop : (prevBench ? prevBench.scrollTop : 0);
+    root.outerHTML = this.renderFormationTab();
+    const syncFormationSnap = () => {
+      if (this._navRestoring) return;
+      const snap = this._captureCurrentUiSnapshot();
+      this.navHistory.updateCurrentSnapshot(snap);
+      this.taskManager.saveAppViewState('formation', snap);
+    };
+    const newBench = document.getElementById('tac-bench-scroll');
+    if (newBench) {
+      newBench.scrollTop = benchTop;
+      newBench.addEventListener('scroll', syncFormationSnap, { passive: true });
+    }
+    document.querySelectorAll('#tac-root .open-profile-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.selectedPlayerId = b.dataset.pid || null;
+        this.navHistory.updateCurrentSnapshot({ selectedPlayerId: this.selectedPlayerId });
+        this.openPlayerProfileModal(b.dataset.pid, 'overview');
+      });
+    });
+    bindFormationPitchEvents(this.state, this, (opts) => this._refreshFormationInPlace(opts));
+    syncFormationSnap();
+    if (focusId) {
+      const fEl = document.getElementById(focusId);
+      if (fEl && typeof fEl.focus === 'function') {
+        fEl.focus();
+        if (typeof fEl.setSelectionRange === 'function' && typeof fEl.value === 'string') {
+          const len = fEl.value.length;
+          try { fEl.setSelectionRange(len, len); } catch (_) {}
+        }
+      }
+    }
+  }
+
   renderSquadTab() {
     const squad = this.state.getPsgSquad();
     return `<div class="table-wrap"><table class="data-table">
@@ -1864,31 +2280,122 @@ export class UIManager {
     this.selectedPlayerId = p.id;
     const askFee = Math.round(p.value * 1.12);
     const askWage = Math.round(p.wage * 1.15);
+    const taskId = `quick_transfer_${p.id}`;
     const html = `
-      <div class="card-item"><h4>📋 ${p.name} (${p.club}) · OVR ${p.ovr}/${p.pot}</h4><p class="muted">Định giá: €${askFee}M · Kỳ vọng lương: €${askWage}k/tuần</p></div>
+      <div class="card-item"><h4>📋 ${p.name} (${p.club}) · OVR ${p.ovr}/${p.pot}</h4><p class="muted">Định giá: €${askFee}M · Kỳ vọng lương: €${askWage}k/tuần · Quỹ chuyển nhượng: <b>€${this.state.finance.transferBudget.toFixed(1)}M</b></p></div>
       <div class="form-row"><label>Hình thức:</label><select id="neg-type" class="input-ctrl"><option value="buy">Mua đứt</option><option value="loan">Cho mượn (18% phí)</option><option value="loan_buy">Mượn kèm mua đứt</option></select></div>
       <div class="form-row"><label>Phí đề nghị (€M):</label><input id="neg-fee" type="number" class="input-ctrl" value="${askFee}" /></div>
       <div class="form-row"><label>Lương (k€/tuần):</label><input id="neg-wage" type="number" class="input-ctrl" value="${askWage}" /></div>
-      <div class="btn-row" style="margin-top:10px;"><button class="btn-primary" id="neg-submit">✅ Phê duyệt & Ký</button><button class="btn-secondary" id="neg-back">↩️ Quay lại</button></div>`;
-    this.openModal(`🤝 ĐÀM PHÁN · ${p.name.toUpperCase()}`, html, 'normal', { skipRefreshBack: true });
-    this._recordNavigation({ routeKey: `transfer_quick:${p.id}`, screen: 'computer', label: `Đàm phán ${p.name}`, params: { tab: 'transfers' } }, opts);
-    this._snapshotFormBaselines(null, /^neg-/);
-    document.getElementById('neg-back')?.addEventListener('click', () => this.handleSmartBack());
+      <div class="btn-row" style="margin-top:10px;"><button type="button" class="btn-primary" id="neg-submit">✅ Phê duyệt & Ký</button><button type="button" class="btn-secondary" id="neg-back">↩️ Đóng tác vụ</button></div>`;
+
+    this.openTaskWindow({
+      taskId,
+      taskType: 'transfer_quick',
+      title: `🤝 ĐÀM PHÁN NHANH · ${p.name.toUpperCase()}`,
+      html,
+      dirtyPrefix: /^neg-/,
+      pushStep: { key: `quick_tr_${p.id}`, restore: () => this.openTransferNegotiation(playerId, opts) },
+      replaceTopStep: true
+    });
+
+    document.getElementById('neg-back')?.addEventListener('click', () => this.requestCloseTaskWindow());
     document.getElementById('neg-submit')?.addEventListener('click', () => {
       const type = document.getElementById('neg-type')?.value || 'buy';
-      const rawFee = Number(document.getElementById('neg-fee')?.value || askFee);
+      const rawFee = Number(document.getElementById('neg-fee')?.value || 0);
       const offerWage = Number(document.getElementById('neg-wage')?.value || askWage);
+      if (!Number.isFinite(rawFee) || rawFee <= 0) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, 'Phí chuyển nhượng đề nghị phải lớn hơn €0M.');
+        return;
+      }
       const fee = type === 'buy' ? rawFee : Math.max(2, Math.round(rawFee * 0.18));
-      if (fee > this.state.finance.transferBudget) { this.audio.playAlert(); this.toast('Không đủ quỹ chuyển nhượng!', 'error'); return; }
-      if (type === 'buy' && rawFee < p.value * 0.92) { this.audio.playAlert(); this.toast(`${p.club} từ chối mức giá quá thấp!`, 'error'); return; }
+      if (fee > this.state.finance.transferBudget) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, `Không đủ quỹ chuyển nhượng (€${fee}M > €${this.state.finance.transferBudget.toFixed(1)}M)!`);
+        return;
+      }
+      if (type === 'buy' && rawFee < p.value * 0.92) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, `${p.club} từ chối mức giá €${rawFee}M (tối thiểu khoảng €${Math.ceil(p.value * 0.92)}M)!`);
+        return;
+      }
       const oldClub = p.club;
-      p.club = 'Paris Saint-Germain'; p.wage = offerWage; p.contractYears = type === 'buy' ? 5 : 1;
+      p.club = 'Paris Saint-Germain';
+      p.wage = offerWage;
+      p.contractYears = type === 'buy' ? 5 : 1;
       this.state.addLedger(`${type === 'buy' ? 'Mua' : 'Mượn'} ${p.name} từ ${oldClub}`, -fee);
       PressNewsSystem.generateTransferNews(this.state, p.name, oldClub, fee, true);
       this.state.formationSystem.notify();
-      this._dirtyTracker.dirty = false;
-      this.audio.playSuccess(); this.toast(`🎉 Chào mừng ${p.name} gia nhập PSG!`, 'success');
-      this.openComputer('squad');
+      this.audio.playSuccess();
+      this.completeAndCloseTaskWindow(taskId, `🎉 Chào mừng ${p.name} gia nhập PSG!`, { result: { playerId: p.id, fee } });
+    });
+  }
+
+  openIncomingBidTaskModal(bidId) {
+    const bid = (this.state.transferSystem?.incomingBids || []).find((b) => b.id === bidId);
+    if (!bid) {
+      this.toast('Đề nghị chuyển nhượng này đã được xử lý.', 'info');
+      return;
+    }
+    const taskId = `incoming_bid_${bid.id}`;
+    const suggestedCounter = Math.round(bid.offerFee * 1.15);
+    const html = `
+      <div class="card-item">
+        <div class="card-head"><strong>${bid.playerName} (${bid.position} · OVR ${bid.ovr})</strong><span class="tag">${bid.type === 'loan' ? 'Mượn' : 'Mua đứt'}</span></div>
+        <p>CLB đề nghị: <b>${bid.fromClub}</b> · Giá đưa ra: <b style="color:#4ade80;">€${bid.offerFee}M</b> (Định giá cầu thủ: €${bid.marketValue}M)</p>
+      </div>
+      <div class="form-row">
+        <label>Mức giá phản đề nghị (€M):</label>
+        <input id="bid-counter-fee" type="number" class="input-ctrl" value="${suggestedCounter}" />
+      </div>
+      <div class="btn-row" style="margin-top:10px;">
+        <button type="button" class="btn-primary" id="bid-accept">✅ Chấp nhận bán/mượn (€${bid.offerFee}M)</button>
+        <button type="button" class="btn-accent" id="bid-counter">💬 Phản đề nghị</button>
+        <button type="button" class="btn-danger" id="bid-reject">❌ Từ chối</button>
+        <button type="button" class="btn-secondary" id="bid-close">↩️ Đóng</button>
+      </div>`;
+
+    this.openTaskWindow({
+      taskId,
+      taskType: 'incoming_bid',
+      title: `📨 XỬ LÝ ĐỀ NGHỊ · ${bid.playerName.toUpperCase()}`,
+      html,
+      dirtyPrefix: /^bid-/,
+      pushStep: { key: `bid_${bid.id}`, restore: () => this.openIncomingBidTaskModal(bid.id) },
+      replaceTopStep: true
+    });
+
+    document.getElementById('bid-close')?.addEventListener('click', () => this.requestCloseTaskWindow());
+    document.getElementById('bid-accept')?.addEventListener('click', () => {
+      const res = this.state.transferSystem.acceptIncomingBid(bid.id);
+      if (res.ok) {
+        this.audio.playSuccess();
+        this.completeAndCloseTaskWindow(taskId, `💰 Đã chốt bán/mượn ${res.deal.playerName} sang ${res.deal.to}!`);
+      } else {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, res.error || 'Không thể chấp nhận đề nghị này.');
+      }
+    });
+    document.getElementById('bid-counter')?.addEventListener('click', () => {
+      const fee = Number(document.getElementById('bid-counter-fee')?.value || 0);
+      if (!Number.isFinite(fee) || fee <= 0) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, 'Mức phí phản đề nghị phải lớn hơn €0M.');
+        return;
+      }
+      const res = this.state.transferSystem.counterIncomingBid(bid.id, fee);
+      if (res.ok) {
+        this.audio.playSuccess();
+        this.completeAndCloseTaskWindow(taskId, res.message, { toastType: res.outcome === 'rejected' ? 'warn' : 'info' });
+      } else {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, res.error || 'Không thể gửi phản đề nghị.');
+      }
+    });
+    document.getElementById('bid-reject')?.addEventListener('click', () => {
+      this.state.transferSystem.rejectIncomingBid(bid.id);
+      this.audio.playClick();
+      this.completeAndCloseTaskWindow(taskId, `Đã từ chối đề nghị từ ${bid.fromClub}.`, { toastType: 'info' });
     });
   }
 
@@ -1905,11 +2412,100 @@ export class UIManager {
       </div>`;
   }
 
+  _getFinanceProposals() {
+    return [
+      {
+        id: 'fin_camp',
+        title: 'Bổ sung Quỹ Chuyển Nhượng PSG (+€25M)',
+        dept: 'Ban Tài chính & Thể thao',
+        cost: 25,
+        detail: 'Điều chuyển ngân sách CLB sang Quỹ Chuyển Nhượng để sẵn sàng cho thương vụ ngôi sao.',
+        apply: (amt) => {
+          this.state.addLedger('Điều chuyển bổ sung Quỹ Chuyển Nhượng', -amt);
+          this.state.finance.transferBudget = +(this.state.finance.transferBudget + amt).toFixed(1);
+        }
+      },
+      {
+        id: 'fin_bonus',
+        title: 'Quỹ thưởng thành tích & tinh thần Đội một (€6M)',
+        dept: 'Ban Điều hành & Phòng thay đồ',
+        cost: 6,
+        detail: 'Tăng tinh thần toàn đội (+6) và lòng trung thành (+4) trước giai đoạn quyết định.',
+        apply: (amt) => {
+          this.state.addLedger('Giải ngân quỹ thưởng thành tích Đội một', -amt);
+          this.state.getPsgSquad().forEach((p) => {
+            p.morale = Math.min(100, (p.morale || 75) + 6);
+            p.loyalty = Math.min(100, (p.loyalty || 75) + 4);
+          });
+        }
+      },
+      {
+        id: 'fin_tech',
+        title: 'Đầu tư hệ thống Phân tích Chiến thuật AI (€4.5M)',
+        dept: 'Phân tích Dữ liệu & Tuyển trạch',
+        cost: 4.5,
+        detail: 'Nâng cấp dữ liệu tuyển trạch cầu thủ trẻ & tối ưu phân tích trận đấu.',
+        apply: (amt) => {
+          this.state.addLedger('Đầu tư hạ tầng Phân tích Dữ liệu AI PSG', -amt);
+          this.state.president.prestige = Math.min(100, (this.state.president.prestige || 75) + 2);
+        }
+      }
+    ];
+  }
+
+  openBudgetApprovalTaskModal(proposalId) {
+    const prop = this._getFinanceProposals().find((x) => x.id === proposalId);
+    if (!prop) return;
+    const taskId = `fin_budget_${prop.id}`;
+    const html = `
+      <div class="card-item">
+        <div class="card-head"><strong>💶 ${prop.title}</strong><span class="tag">${prop.dept}</span></div>
+        <p>${prop.detail}</p>
+        <div class="muted">Ngân sách CLB khả dụng: <b>€${this.state.finance.budget.toFixed(1)}M</b></div>
+      </div>
+      <div class="form-row"><label>Số tiền phê duyệt (€M):</label><input id="fin-amount" type="number" step="0.5" class="input-ctrl" value="${prop.cost}" /></div>
+      <div class="form-row"><label>Ghi chú Chủ tịch:</label><input id="fin-note" class="input-ctrl" value="Phê duyệt theo đề xuất của Ban Tài chính PSG" /></div>
+      <div class="btn-row" style="margin-top:10px;">
+        <button type="button" class="btn-primary" id="fin-approve">✅ Phê duyệt giải ngân</button>
+        <button type="button" class="btn-secondary" id="fin-cancel">↩️ Đóng tác vụ</button>
+      </div>`;
+
+    this.openTaskWindow({
+      taskId,
+      taskType: 'finance_approval',
+      title: `💶 PHÊ DUYỆT TÀI CHÍNH · ${prop.dept.toUpperCase()}`,
+      html,
+      narrow: true,
+      dirtyPrefix: /^fin-/,
+      pushStep: { key: `fin_${prop.id}`, restore: () => this.openBudgetApprovalTaskModal(prop.id) },
+      replaceTopStep: true
+    });
+
+    document.getElementById('fin-cancel')?.addEventListener('click', () => this.requestCloseTaskWindow());
+    document.getElementById('fin-approve')?.addEventListener('click', () => {
+      const amount = Number(document.getElementById('fin-amount')?.value || 0);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, 'Số tiền giải ngân phải lớn hơn €0M.');
+        return;
+      }
+      if (amount > this.state.finance.budget) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, `Ngân sách CLB hiện chỉ còn €${this.state.finance.budget.toFixed(1)}M, không đủ giải ngân €${amount}M!`);
+        return;
+      }
+      prop.apply(amount);
+      this.audio.playSuccess();
+      this.completeAndCloseTaskWindow(taskId, `💶 Đã phê duyệt chi €${amount}M cho: ${prop.title}!`, { result: { amount } });
+    });
+  }
+
   renderFinanceTab() {
     const f = this.state.finance;
     const comm = this.state.commercialSystem;
     const sponsorAnnual = comm?.getTotalSponsorAnnualRevenue?.() ?? f.income?.sponsors ?? 145;
     const weeklyUpkeep = comm?.getTotalWeeklyFacilityUpkeep?.() ?? 1.36;
+    const proposals = this._getFinanceProposals();
     return `
       <div class="kpi-grid">
         <div class="kpi-card"><span>Ngân sách CLB</span><strong class="tabular-nums">€${f.budget.toFixed(1)}M</strong></div>
@@ -1925,6 +2521,21 @@ export class UIManager {
           <span>Vé & VIP SVĐ: <b>€${f.income?.matchday ?? 95}M</b></span>
           <span>Bảo trì CSVC: <b>€${weeklyUpkeep}M/tuần</b></span>
         </div>
+      </div>
+      <div class="section-label">📋 Tác vụ Phê duyệt Ngân sách & Đầu tư (${proposals.length})</div>
+      <div class="grid-3" style="margin-bottom:8px;">
+        ${proposals.map((p) => {
+          const tRec = this.taskManager.getTask(`fin_budget_${p.id}`);
+          const done = tRec?.status === TASK_STATUS.COMPLETED;
+          return `
+            <div class="card-item">
+              <div class="card-head"><strong>${p.title}</strong><span class="tag ${done ? 'ok' : ''}">${done ? 'Đã hoàn tất' : `€${p.cost}M`}</span></div>
+              <p class="muted">${p.detail}</p>
+              <button type="button" class="btn-xs ${done ? 'btn-secondary' : 'btn-primary'} fin-open-task" data-fid="${p.id}">
+                ${done ? '🔄 Mở lại tác vụ' : '📋 Mở tác vụ duyệt'}
+              </button>
+            </div>`;
+        }).join('')}
       </div>
       <div class="section-label">Sổ cái Giao dịch Tài chính PSG (${f.ledger.length})</div>
       <div class="scroll-list">${f.ledger.map((l) => `<div class="card-item"><div class="card-head"><span>${l.date} — ${l.desc}</span><b class="tabular-nums" style="color:${l.amount >= 0 ? '#4ade80' : '#f87171'}">${l.amount >= 0 ? '+' : ''}€${l.amount}M</b></div></div>`).join('')}</div>`;
@@ -2069,7 +2680,7 @@ export class UIManager {
         });
       });
     } else if (tab === 'formation') {
-      bindFormationPitchEvents(this.state, this, () => this.openComputer('formation', stayOpts));
+      bindFormationPitchEvents(this.state, this, (opts) => this._refreshFormationInPlace(opts));
     }
 
     // Sự kiện dùng chung trên mọi tab macOS: bấm vào tên cầu thủ mở Hồ sơ 8 tab & ghi nhận selectedPlayerId!
@@ -2230,6 +2841,9 @@ export class UIManager {
           this.audio.playClick(); this.toast('Đã từ chối đề nghị.', 'info'); this.openComputer('transfers', stayOpts);
         });
       });
+      document.querySelectorAll('.tr-review-bid').forEach((b) => {
+        b.addEventListener('click', () => this.openIncomingBidTaskModal(b.dataset.bid));
+      });
       document.querySelectorAll('.tr-toggle-list').forEach((b) => {
         b.addEventListener('click', () => {
           const p = this.state.getPlayerById(b.dataset.pid);
@@ -2386,6 +3000,10 @@ export class UIManager {
           }
           this.openComputer('commercial', stayOpts);
         });
+      });
+    } else if (tab === 'finance') {
+      document.querySelectorAll('.fin-open-task').forEach((b) => {
+        b.addEventListener('click', () => this.openBudgetApprovalTaskModal(b.dataset.fid));
       });
     } else if (tab === 'coach') {
       document.querySelectorAll('[data-stftab]').forEach((b) => b.addEventListener('click', () => { this.staffSubTab = b.dataset.stftab; this.openComputer('coach', { skipHistory: true }); }));
@@ -2974,12 +3592,13 @@ export class UIManager {
     });
   }
 
-  // ==================== SA THẢI & TUYỂN DỤNG NHÂN SỰ / HLV TRƯỞNG (PHẦN III) ====================
+  // ==================== SA THẢI & TUYỂN DỤNG NHÂN SỰ / HLV TRƯỞNG (TASK WINDOW) ====================
   openFireStaffModal(roleKey, opts = {}) {
     this.state.timeSystem?.pushAutoPause('staff_decision');
     const staff = this.state.managerSystem.getActiveByRole(roleKey);
     if (!staff) return;
     const sev = this.state.managerSystem.calculateSeverance(staff);
+    const taskId = `staff_recruit_${roleKey}`;
     const html = `
       <div class="card-item urgent">
         <h4>⚠️ Xác nhận Miễn nhiệm / Sa thải: ${staff.name} (${staff.role})</h4>
@@ -2993,22 +3612,31 @@ export class UIManager {
           </select>
         </div>
         <div class="btn-row" style="margin-top:10px;">
-          <button class="btn-danger" id="confirm-fire-btn">🔥 Xác nhận Sa thải & Mở tuyển dụng mới</button>
-          <button class="btn-secondary" id="cancel-fire-btn">↩️ Hủy bỏ</button>
+          <button type="button" class="btn-danger" id="confirm-fire-btn">🔥 Xác nhận Sa thải & Mở tuyển dụng mới</button>
+          <button type="button" class="btn-secondary" id="cancel-fire-btn">↩️ Hủy bỏ</button>
         </div>
       </div>`;
-    this.openModal(`🔥 SA THẢI ${staff.role.toUpperCase()}`, html, 'normal', { skipRefreshBack: true });
-    this._recordNavigation({ routeKey: `fire_staff:${roleKey}`, screen: 'fire_staff', label: `Sa thải ${staff.role}`, params: { roleKey } }, opts);
-    this._snapshotFormBaselines(null, /^fire-/);
-    document.getElementById('cancel-fire-btn')?.addEventListener('click', () => this.handleSmartBack());
+
+    this.openTaskWindow({
+      taskId,
+      taskType: 'staff_decision',
+      title: `🔥 SA THẢI ${staff.role.toUpperCase()}`,
+      html,
+      dirtyPrefix: /^fire-/,
+      pushStep: { key: `fire_${roleKey}`, restore: () => this.openFireStaffModal(roleKey, opts) },
+      replaceTopStep: this._taskNavStack.some((s) => s.key === `fire_${roleKey}`)
+    });
+
+    document.getElementById('cancel-fire-btn')?.addEventListener('click', () => this.handleTaskWindowBack());
     document.getElementById('confirm-fire-btn')?.addEventListener('click', () => {
       const reason = document.getElementById('fire-reason')?.value || 'Quyết định của Chủ tịch';
       const res = this.state.managerSystem.fireStaff(roleKey, reason);
       if (res.ok) {
-        this._dirtyTracker.dirty = false;
         this.audio.playAlert();
         this.toast(`🔥 Đã sa thải ${staff.name} (-€${res.severance}M). Mời chọn ứng viên mới!`, 'info');
         this.openRoleCandidatesModal(roleKey);
+      } else {
+        this._setTaskErrorState(taskId, res.error || 'Không thể miễn nhiệm nhân sự này.');
       }
     });
   }
@@ -3017,6 +3645,7 @@ export class UIManager {
     this.state.timeSystem?.pushAutoPause('staff_decision');
     const meta = STAFF_ROLE_META[roleKey] || { title: roleKey };
     const cands = this.state.managerSystem.getCandidatesForRole(roleKey);
+    const taskId = `staff_recruit_${roleKey}`;
     const html = `
       <div class="muted" style="margin-bottom:8px;">Chọn ứng viên cho vị trí <b>${meta.title}</b> (${meta.dept || 'PSG'}) để đàm phán lương & hợp đồng:</div>
       <div class="scroll-list" style="max-height:48vh;">
@@ -3025,17 +3654,22 @@ export class UIManager {
             <div class="card-head"><strong>${c.name} (${c.age}t · ${c.nationality})</strong><span class="tag ok">OVR ${c.overall} · Yêu cầu €${c.wage}k/tuần</span></div>
             <div class="muted">CLB hiện tại: <b>${c.currentClub}</b> · Kinh nghiệm: ${c.experience} · Danh tiếng: ${c.reputation} · Thời hạn mong muốn: ${c.contractYears} năm</div>
             <p>${c.tacticalStyle}</p>
-            <div class="btn-row"><button class="btn-xs btn-primary cand-pick-btn" data-sid="${c.staffId}">🤝 Đàm phán hợp đồng</button></div>
+            <div class="btn-row"><button type="button" class="btn-xs btn-primary cand-pick-btn" data-sid="${c.staffId}">🤝 Đàm phán hợp đồng</button></div>
           </div>`).join('')}
       </div>
-      <div class="btn-row" style="margin-top:8px;"><button class="btn-secondary" id="cand-back-btn">↩️ Quay lại Quản lý Nhân sự</button></div>`;
-    this.openModal(`📋 DANH SÁCH ỨNG VIÊN · ${meta.title.toUpperCase()}`, html, 'wide', { skipRefreshBack: true });
-    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
-    this._recordNavigation({ routeKey: `role_candidates:${roleKey}`, screen: 'role_candidates', label: `Ứng viên ${meta.title}`, params: { roleKey } }, opts);
-    this._bindScrollAndCollapseTrackers();
-    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
-    document.getElementById('cand-back-btn')?.addEventListener('click', () => this.handleSmartBack());
-    document.querySelectorAll('.cand-pick-btn').forEach((b) => {
+      <div class="btn-row" style="margin-top:8px;"><button type="button" class="btn-secondary" id="cand-back-btn">↩️ Quay lại</button></div>`;
+
+    this.openTaskWindow({
+      taskId,
+      taskType: 'staff_decision',
+      title: `📋 DANH SÁCH ỨNG VIÊN · ${meta.title.toUpperCase()}`,
+      html,
+      pushStep: { key: `cands_${roleKey}`, restore: () => this.openRoleCandidatesModal(roleKey, opts) },
+      replaceTopStep: this._taskNavStack.some((s) => s.key === `cands_${roleKey}`)
+    });
+
+    document.getElementById('cand-back-btn')?.addEventListener('click', () => this.handleTaskWindowBack());
+    document.querySelectorAll('#task-body .cand-pick-btn').forEach((b) => {
       b.addEventListener('click', () => this.openStaffNegotiationModal(b.dataset.sid));
     });
   }
@@ -3047,6 +3681,7 @@ export class UIManager {
     const buyout = this.state.managerSystem.calculateBuyout(c);
     const wVal = prefill?.wage ?? c.wage;
     const yVal = prefill?.contractYears ?? c.contractYears;
+    const taskId = `staff_recruit_${c.roleKey || c.staffId}`;
     const html = `
       <div class="card-item">
         <div class="card-head"><strong>👔 ${c.name} (${c.role})</strong><span class="tag ok">OVR ${c.overall} · ${c.currentClub}</span></div>
@@ -3060,48 +3695,66 @@ export class UIManager {
       <div class="form-row"><label>Mục tiêu mùa giải Chủ tịch giao:</label><input id="sn-obj" class="input-ctrl" value="Vô địch Ligue 1, Bán kết UEFA Champions League & phát triển cầu thủ trẻ" /></div>
       <div class="form-row"><label>Yêu cầu chuyên môn:</label><input id="sn-req" class="input-ctrl" value="${c.tacticalStyle}" /></div>
       <div class="btn-row" style="margin-top:10px;">
-        <button class="btn-primary" id="sn-submit">📩 Gửi lời mời & Đàm phán</button>
-        <button class="btn-secondary" id="sn-back">↩️ Quay lại danh sách</button>
+        <button type="button" class="btn-primary" id="sn-submit">📩 Gửi lời mời & Đàm phán</button>
+        <button type="button" class="btn-secondary" id="sn-back">↩️ Quay lại danh sách</button>
       </div>`;
-    this.openModal(`🤝 ĐÀM PHÁN BỔ NHIỆM · ${c.name.toUpperCase()}`, html, 'normal', { skipRefreshBack: true });
-    this._recordNavigation({ routeKey: `staff_neg:${c.staffId}`, screen: 'staff_neg', label: `Đàm phán ${c.name}`, params: { staffId: c.staffId } }, opts);
-    this._snapshotFormBaselines(null, /^sn-/);
-    this._bindScrollAndCollapseTrackers();
-    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
-    document.getElementById('sn-back')?.addEventListener('click', () => this.handleSmartBack());
+
+    this.openTaskWindow({
+      taskId,
+      taskType: 'staff_decision',
+      title: `🤝 ĐÀM PHÁN BỔ NHIỆM · ${c.name.toUpperCase()}`,
+      html,
+      dirtyPrefix: /^sn-/,
+      errorMessage: opts.errorMessage || null,
+      pushStep: { key: `neg_${c.staffId}`, restore: () => this.openStaffNegotiationModal(c.staffId, null, prefill) },
+      replaceTopStep: this._taskNavStack.some((s) => s.key === `neg_${c.staffId}`)
+    });
+    if (opts.errorMessage) this._setTaskErrorState(taskId, opts.errorMessage);
+
+    document.getElementById('sn-back')?.addEventListener('click', () => this.handleTaskWindowBack());
     document.getElementById('sn-submit')?.addEventListener('click', () => {
       const offer = {
-        wage: Number(document.getElementById('sn-wage')?.value || c.wage),
-        contractYears: Number(document.getElementById('sn-years')?.value || c.contractYears),
+        wage: Number(document.getElementById('sn-wage')?.value || 0),
+        contractYears: Number(document.getElementById('sn-years')?.value || 0),
         objectives: [document.getElementById('sn-obj')?.value || 'Vô địch Ligue 1'],
         tacticalReq: document.getElementById('sn-req')?.value || c.tacticalStyle
       };
+      if (!Number.isFinite(offer.wage) || offer.wage <= 0 || !Number.isFinite(offer.contractYears) || offer.contractYears < 1 || offer.contractYears > 5) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, 'Mức lương phải > €0k/tuần và thời hạn hợp đồng từ 1–5 năm.');
+        return;
+      }
       const res = this.state.managerSystem.negotiateOffer(c.staffId, offer);
-      this._dirtyTracker.dirty = false;
       if (res.outcome === 'accepted') {
         const app = this.state.managerSystem.appointStaff(c.staffId, res.agreedOffer);
         if (app.ok) {
           this.audio.playSuccess();
-          this.toast(`🎉 Chính thức bổ nhiệm ${c.name} (${c.role})! NPC mới đã xuất hiện trong thế giới 3D!`, 'success');
-          this.openComputer('coach');
+          this.completeAndCloseTaskWindow(taskId, `🎉 Chính thức bổ nhiệm ${c.name} (${c.role})! NPC mới đã xuất hiện trong thế giới 3D!`, { result: { staffId: c.staffId } });
+        } else {
+          this.audio.playAlert();
+          this._setTaskErrorState(taskId, app.error || 'Không thể hoàn tất bổ nhiệm nhân sự.');
         }
       } else if (res.outcome === 'counter') {
         this.audio.playClick();
-        this.openStaffNegotiationModal(c.staffId, res.message, res.counterOffer, { skipHistory: true });
+        this.openStaffNegotiationModal(c.staffId, res.message, res.counterOffer);
       } else {
         this.audio.playAlert();
-        this.openStaffNegotiationModal(c.staffId, res.message, offer, { skipHistory: true });
+        this.openStaffNegotiationModal(c.staffId, null, offer, { errorMessage: res.message || 'Ứng viên từ chối đề nghị hợp đồng.' });
       }
     });
   }
 
-  // ==================== ĐÀM PHÁN CHUYỂN NHƯỢNG 2 GIAI ĐOẠN (CLB -> CẦU THỦ) ====================
+  // ==================== ĐÀM PHÁN CHUYỂN NHƯỢNG 2 GIAI ĐOẠN (TRONG TASK WINDOW ĐỘC LẬP) ====================
   openTwoStageTransferModal(negId, feedback = null, opts = {}) {
     this.state.timeSystem?.pushAutoPause('transfer_negotiation');
     const neg = this.state.transferSystem.activeNegotiations.find((n) => n.id === negId);
-    if (!neg) { this.openComputer('transfers', { skipHistory: true }); return; }
+    if (!neg) {
+      this._refreshActiveAppAfterTask('transfers');
+      return;
+    }
     this.selectedPlayerId = neg.playerId || this.selectedPlayerId;
     const psgSquad = this.state.getPsgSquad();
+    const taskId = `transfer_neg_${neg.id}`;
 
     let stageHtml = '';
     if (neg.stage === 1) {
@@ -3116,8 +3769,8 @@ export class UIManager {
           <div class="form-row"><label>Trao đổi cầu thủ PSG (tùy chọn):</label><select id="n1-swap" class="input-ctrl"><option value="">Không trao đổi</option>${psgSquad.map((p) => `<option value="${p.id}">${p.name} (${p.position} · €${p.value}M)</option>`).join('')}</select></div>
         </div>
         <div class="btn-row" style="margin-top:10px;">
-          <button class="btn-primary" id="n1-submit">📩 Gửi đề nghị cho ${neg.fromClub}</button>
-          <button class="btn-secondary" id="n-back">↩️ Quay lại Chuyển nhượng</button>
+          <button type="button" class="btn-primary" id="n1-submit">📩 Gửi đề nghị cho ${neg.fromClub}</button>
+          <button type="button" class="btn-secondary" id="n-back">↩️ Đóng tác vụ</button>
         </div>`;
     } else {
       stageHtml = `
@@ -3131,8 +3784,8 @@ export class UIManager {
           <div class="form-row"><label>Điều khoản giải phóng (€M):</label><input id="n2-rc" type="number" class="input-ctrl" value="${Math.round(neg.clubAskFee * 2)}" /></div>
         </div>
         <div class="btn-row" style="margin-top:10px;">
-          <button class="btn-primary" id="n2-submit">✍️ Đề xuất hợp đồng & Chốt chữ ký</button>
-          <button class="btn-secondary" id="n-back">↩️ Quay lại Chuyển nhượng</button>
+          <button type="button" class="btn-primary" id="n2-submit">✍️ Đề xuất hợp đồng & Chốt chữ ký</button>
+          <button type="button" class="btn-secondary" id="n-back">↩️ Đóng tác vụ</button>
         </div>`;
     }
 
@@ -3146,65 +3799,110 @@ export class UIManager {
       <div class="section-label">Nhật ký đàm phán</div>
       <div class="scroll-list" style="max-height:95px;">${neg.history.map((h) => `<div class="muted">• ${h}</div>`).join('')}</div>`;
 
-    this.openModal(`🤝 ĐÀM PHÁN 2 GIAI ĐOẠN · ${neg.playerName.toUpperCase()}`, html, 'wide', { skipRefreshBack: true });
-    this._recordNavigation({ routeKey: `transfer_neg:${neg.id}`, screen: 'transfer_neg', label: `Đàm phán ${neg.playerName}`, params: { negId: neg.id } }, opts);
-    this._snapshotFormBaselines(null, /^n[12]-/);
-    this._bindScrollAndCollapseTrackers();
-    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
-    document.getElementById('n-back')?.addEventListener('click', () => this.handleSmartBack());
+    this.openTaskWindow({
+      taskId,
+      taskType: 'transfer_neg',
+      title: `🤝 ĐÀM PHÁN 2 GIAI ĐOẠN · ${neg.playerName.toUpperCase()}`,
+      html,
+      dirtyPrefix: /^n[12]-/,
+      pushStep: { key: `tr_neg_${neg.id}`, restore: () => this.openTwoStageTransferModal(neg.id, feedback, opts) },
+      replaceTopStep: this._taskNavStack.some((s) => s.key === `tr_neg_${neg.id}`)
+    });
+
+    const renderDealBrokenState = (reasonMsg) => {
+      this.audio.playAlert();
+      const failHtml = `
+        <div class="card-item urgent">
+          <div class="card-head"><strong>${neg.playerName} (${neg.fromClub})</strong><span class="tag bad">Thất bại</span></div>
+          <p class="muted">${reasonMsg}</p>
+        </div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button type="button" class="btn-primary" id="n-retry-new">🔄 Mở lại bàn đàm phán mới</button>
+          <button type="button" class="btn-secondary" id="n-fail-close">↩️ Quay lại ứng dụng</button>
+        </div>`;
+      this.openTaskWindow({
+        taskId,
+        taskType: 'transfer_neg',
+        title: `🤝 ĐÀM PHÁN THẤT BẠI · ${neg.playerName.toUpperCase()}`,
+        html: failHtml,
+        errorMessage: reasonMsg
+      });
+      this._setTaskErrorState(taskId, reasonMsg);
+      document.getElementById('n-retry-new')?.addEventListener('click', () => {
+        const retryRes = this.state.transferSystem.startNegotiation(neg.playerId, neg.dealType || 'buy');
+        if (retryRes.ok) {
+          this.openTwoStageTransferModal(retryRes.negotiation.id);
+        } else {
+          this._setTaskErrorState(taskId, retryRes.error || 'Không thể mở lại đàm phán lúc này.');
+        }
+      });
+      document.getElementById('n-fail-close')?.addEventListener('click', () => {
+        this._closeTaskWindowDomOnly();
+        this._refreshActiveAppAfterTask(null);
+      });
+    };
+
+    document.getElementById('n-back')?.addEventListener('click', () => this.requestCloseTaskWindow());
 
     document.getElementById('n1-submit')?.addEventListener('click', () => {
       neg.dealType = document.getElementById('n1-type')?.value || 'buy';
+      const rawFee = Number(document.getElementById('n1-fee')?.value || 0);
+      if (!Number.isFinite(rawFee) || rawFee <= 0) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, 'Mức phí đề nghị phải lớn hơn €0M.');
+        return;
+      }
       const res = this.state.transferSystem.submitClubOffer(neg.id, {
-        fee: Number(document.getElementById('n1-fee')?.value || neg.clubAskFee),
+        fee: rawFee,
         installments: Number(document.getElementById('n1-inst')?.value || 0),
         perfBonus: Number(document.getElementById('n1-bonus')?.value || 0),
         sellOnPct: Number(document.getElementById('n1-sellon')?.value || 0),
         swapPlayerId: document.getElementById('n1-swap')?.value || null
       });
-      this._dirtyTracker.dirty = false;
-      if (!res.ok) { this.audio.playAlert(); this.toast(res.error, 'error'); return; }
+      if (!res.ok) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, res.error || 'Đề nghị không hợp lệ!');
+        return;
+      }
       if (res.outcome === 'accepted') {
         this.audio.playSuccess();
-        this.openTwoStageTransferModal(neg.id, res.message, { skipHistory: true });
+        this.openTwoStageTransferModal(neg.id, res.message);
       } else if (res.outcome === 'counter') {
         this.audio.playClick();
-        this.openTwoStageTransferModal(neg.id, res.message, { skipHistory: true });
+        this.openTwoStageTransferModal(neg.id, res.message);
       } else {
-        this.audio.playAlert();
-        this.toast(res.message, 'error');
-        this.openComputer('transfers');
+        renderDealBrokenState(res.message);
       }
     });
 
     document.getElementById('n2-submit')?.addEventListener('click', () => {
+      const wage = Number(document.getElementById('n2-wage')?.value || 0);
+      if (!Number.isFinite(wage) || wage <= 0) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, 'Mức lương tuần đề nghị phải lớn hơn €0k.');
+        return;
+      }
       const res = this.state.transferSystem.submitPlayerOffer(neg.id, {
-        weeklyWage: Number(document.getElementById('n2-wage')?.value || neg.playerAskWage),
+        weeklyWage: wage,
         contractYears: Number(document.getElementById('n2-years')?.value || 5),
         signingBonus: Number(document.getElementById('n2-sbonus')?.value || 0),
         squadRole: document.getElementById('n2-role')?.value || 'Đá chính thường xuyên',
         playtimeGuarantee: document.getElementById('n2-play')?.value || 'Cao',
         releaseClause: Number(document.getElementById('n2-rc')?.value || 150)
       });
-      this._dirtyTracker.dirty = false;
-      if (!res.ok) { this.audio.playAlert(); this.toast(res.error, 'error'); return; }
+      if (!res.ok) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, res.error || 'Điều khoản hợp đồng cá nhân không hợp lệ!');
+        return;
+      }
       if (res.outcome === 'accepted') {
         this.audio.playSuccess();
-        this.toast(res.message, 'success');
-        const pendingEvt = this.state.signingEventSystem?.pendingEvents?.[0];
-        if (pendingEvt) {
-          this.eventSubTab = 'pending';
-          this.openComputer('events');
-        } else {
-          this.openComputer('squad');
-        }
+        this.completeAndCloseTaskWindow(taskId, res.message, { result: { negId: neg.id, playerId: neg.playerId } });
       } else if (res.outcome === 'counter') {
         this.audio.playClick();
-        this.openTwoStageTransferModal(neg.id, res.message, { skipHistory: true });
+        this.openTwoStageTransferModal(neg.id, res.message);
       } else {
-        this.audio.playAlert();
-        this.toast(res.message, 'error');
-        this.openComputer('transfers');
+        renderDealBrokenState(res.message);
       }
     });
   }

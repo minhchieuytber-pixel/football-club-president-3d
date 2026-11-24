@@ -239,20 +239,64 @@
     .smart-back-btn.is-root { background: rgba(255, 255, 255, 0.08); color: #cbd5e1; border-color: rgba(255, 255, 255, 0.14); }
     .smart-back-arrow { font-size: 14px; line-height: 1; }
 
-    /* Hộp thoại xác nhận inline (bảo vệ biểu mẫu chưa lưu & giao dịch quan trọng) */
+    /* Hộp thoại xác nhận inline (nằm trên cả Modal & Task Window) */
     .smart-confirm-overlay {
-      position: absolute; inset: 0; z-index: 95;
-      background: rgba(3, 8, 20, 0.78); backdrop-filter: blur(6px);
+      position: fixed; inset: 0; z-index: 120;
+      background: rgba(3, 8, 20, 0.80); backdrop-filter: blur(6px);
       display: none; align-items: center; justify-content: center; padding: 16px;
     }
     .smart-confirm-overlay.open { display: flex; }
     .smart-confirm-card {
-      width: min(410px, 94%); background: #0f172a;
+      width: min(420px, 94vw); background: #0f172a;
       border: 1.5px solid var(--psg-gold); border-radius: 14px;
       padding: 14px 16px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.72);
     }
     .smart-confirm-card h4 { margin: 0 0 6px; font-size: 14px; color: #fde68a; }
     .smart-confirm-card p { margin: 0 0 12px; font-size: 12px; line-height: 1.5; color: #e2e8f0; }
+
+    /* Task Window độc lập (Lớp 4: nằm trên Application, đóng xong không thoát App) */
+    #task-backdrop {
+      position: fixed; inset: 0; z-index: 80;
+      background: rgba(2, 6, 18, 0.74); backdrop-filter: blur(7px);
+      display: none; align-items: center; justify-content: center;
+      padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    }
+    #task-backdrop.open { display: flex; }
+    .task-box {
+      width: min(740px, 95vw); max-height: 88vh; background: #0f172a;
+      border: 1.5px solid rgba(56, 189, 248, 0.42); border-radius: 16px;
+      display: flex; flex-direction: column; overflow: hidden;
+      box-shadow: 0 28px 70px rgba(0, 0, 0, 0.78);
+    }
+    .task-box.narrow { width: min(520px, 94vw); }
+    .task-head {
+      padding: 9px 12px; background: linear-gradient(90deg, #00205b, #0f172a);
+      border-bottom: 2px solid var(--psg-gold); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-shrink: 0;
+    }
+    .task-head-left { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+    #task-title { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: #f8fafc; }
+    .task-head-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .task-status-badge {
+      padding: 3px 8px; border-radius: 7px; font-size: 10.5px; font-weight: 700; white-space: nowrap;
+      border: 1px solid rgba(255,255,255,0.2); background: rgba(30,41,59,0.9); color: #cbd5e1;
+    }
+    .task-status-badge.status-pending { background: rgba(51,65,85,0.85); color: #e2e8f0; }
+    .task-status-badge.status-in_progress { background: rgba(29,78,216,0.45); border-color: #60a5fa; color: #dbeafe; }
+    .task-status-badge.status-completed { background: rgba(20,83,45,0.8); border-color: #4ade80; color: #bbf7d0; }
+    .task-status-badge.status-failed { background: rgba(127,29,29,0.85); border-color: #f87171; color: #fecaca; }
+    .task-status-badge.status-cancelled { background: rgba(71,85,105,0.75); border-color: #94a3b8; color: #e2e8f0; }
+    #task-close {
+      background: rgba(255,255,255,0.12); color: #fff; border: none; border-radius: 8px;
+      width: 32px; height: 32px; font-size: 15px; cursor: pointer; flex-shrink: 0;
+    }
+    #task-body {
+      flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      touch-action: pan-y; overscroll-behavior: contain; padding: 12px 14px; font-size: 12.5px; user-select: text;
+    }
+    .task-error-banner {
+      background: rgba(127, 29, 29, 0.45); border: 1.5px solid #f87171; border-radius: 10px;
+      padding: 9px 11px; margin-bottom: 10px; color: #fecaca; font-size: 12px; line-height: 1.45;
+    }
 
     .macos-desktop {
       width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between;
@@ -433,16 +477,21 @@
     .toast-box.error { border-color: #ef4444; color: #fecaca; }
     .toast-box.success { border-color: #22c55e; color: #dcfce7; }
 
-    /* Sơ đồ sân chiến thuật Kéo Thả + AI Position Suitability (Mobile Portrait & Desktop) */
-    .tac-root { display: flex; flex-direction: column; gap: 9px; max-width: 100%; overflow-x: hidden; }
+    /* Sơ đồ sân chiến thuật Chạm-Chọn-Thay + Sân cố định + Dự bị cuộn độc lập + AI Position Suitability */
+    .tac-root { display: flex; flex-direction: column; gap: 10px; max-width: 100%; overflow-x: clip; }
+    .tac-header-bar {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
+      background: rgba(15, 23, 42, 0.85); border: 1px solid var(--border-glass); border-radius: 11px; padding: 8px 11px;
+    }
+    .tac-header-title { font-size: 13.5px; font-weight: 800; color: #f8fafc; }
     .tac-toolbar { display: flex; flex-direction: column; gap: 6px; }
     .tac-toolbar-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-    .tac-select { flex: 0 0 auto; min-width: 120px; max-width: 155px; min-height: 36px; }
-    .tac-name-input { flex: 1 1 130px; min-width: 110px; min-height: 36px; }
-    .tac-btn { min-height: 36px; padding: 6px 10px; font-size: 11.5px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+    .tac-select { flex: 0 0 auto; min-width: 120px; max-width: 165px; min-height: 38px; }
+    .tac-name-input { flex: 1 1 135px; min-width: 110px; min-height: 38px; }
+    .tac-btn { min-height: 38px; padding: 6px 10px; font-size: 11.5px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; touch-action: manipulation; }
     .tac-btn:disabled { opacity: 0.45; cursor: not-allowed; }
     .tac-btn-live { background: linear-gradient(135deg, #b91c1c, #7f1d1d) !important; border: 1px solid #fca5a5 !important; color: #fff !important; }
-    .tac-sync-bar { font-size: 11px; padding: 4px 8px; background: rgba(15,23,42,0.65); border-radius: 8px; border: 1px solid var(--border-glass); }
+    .tac-sync-bar { font-size: 11px; padding: 5px 9px; background: rgba(15,23,42,0.65); border-radius: 8px; border: 1px solid var(--border-glass); }
     .tac-match-banner {
       background: rgba(127, 29, 29, 0.35); border: 1px solid rgba(248, 113, 113, 0.65);
       border-radius: 10px; padding: 7px 10px; font-size: 11.5px; display: flex; flex-direction: column; gap: 4px;
@@ -453,76 +502,67 @@
       border-radius: 11px; padding: 9px 11px; box-shadow: 0 8px 22px rgba(0,0,0,0.42);
     }
 
-    .tac-main-grid { display: grid; grid-template-columns: minmax(320px, 1.15fr) minmax(270px, 1fr); gap: 10px; align-items: start; }
-    @media (max-width: 780px) { .tac-main-grid { grid-template-columns: 1fr; } }
-    .tac-pitch-col, .tac-side-col { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-
-    .tac-pitch-wrap {
-      position: relative; border-radius: 13px; border: 1px solid rgba(255,255,255,0.2);
-      background: #0a2e17; padding: 6px; overflow: hidden;
+    /* Banner hướng dẫn 2 bước Chạm-Chọn-Thay */
+    .tac-selection-banner {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+      background: rgba(15, 23, 42, 0.92); border: 1.5px solid rgba(56, 189, 248, 0.45);
+      border-radius: 10px; padding: 7px 10px; font-size: 11.5px; color: #e2e8f0;
     }
-    .tac-drag-preview {
-      position: sticky; top: 0; z-index: 25; margin-bottom: 5px;
-      background: rgba(7, 15, 32, 0.94); border: 1px solid var(--psg-gold);
-      border-radius: 8px; padding: 5px 8px; font-size: 11px;
-      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    .tac-selection-banner.is-active {
+      border-color: var(--psg-gold); background: rgba(0, 32, 91, 0.9);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
     }
-    .tac-prev-name { font-weight: 700; color: #fff; }
-    .tac-prev-score { padding: 1px 6px; border-radius: 999px; border: 1px solid transparent; font-weight: 700; font-size: 10.5px; }
-    .tac-prev-rec { color: #fde68a; font-size: 10.5px; }
+    .tac-selection-text { flex: 1; min-width: 0; line-height: 1.4; }
+    .tac-selection-text strong { color: #fde68a; }
 
+    /* Bố cục Sân cố định (không cuộn cùng danh sách dự bị) & Dự bị cuộn độc lập */
+    .tac-board-layout { display: grid; grid-template-columns: minmax(320px, 1.08fr) minmax(290px, 1fr); gap: 10px; align-items: start; }
+    @media (max-width: 820px) { .tac-board-layout { grid-template-columns: 1fr; } }
+
+    .tac-pitch-sticky {
+      position: sticky; top: 0; z-index: 12;
+      display: flex; flex-direction: column; gap: 7px;
+      border-radius: 13px; border: 1px solid rgba(255,255,255,0.2);
+      background: #0a2e17; padding: 7px;
+    }
     .tac-pitch-board {
-      position: relative; width: 100%; aspect-ratio: 100 / 136; min-height: 410px; max-height: 540px;
+      position: relative; width: 100%; aspect-ratio: 100 / 130; min-height: 380px; max-height: 495px;
       border-radius: 10px; overflow: hidden;
-      background: repeating-linear-gradient(180deg, #1f6f35 0px, #1f6f35 34px, #195d2c 34px, #195d2c 68px);
+      background: repeating-linear-gradient(180deg, #1f6f35 0px, #1f6f35 32px, #195d2c 32px, #195d2c 64px);
       box-shadow: inset 0 0 28px rgba(0,0,0,0.45);
     }
     .tac-pitch-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
     .tac-goal-label {
       position: absolute; left: 50%; transform: translateX(-50%); z-index: 2; pointer-events: none;
-      font-size: 8.5px; font-weight: 800; letter-spacing: 0.8px; color: rgba(255,255,255,0.55);
-      background: rgba(0,0,0,0.28); padding: 1px 6px; border-radius: 99px;
+      font-size: 8.5px; font-weight: 800; letter-spacing: 0.8px; color: rgba(255,255,255,0.58);
+      background: rgba(0,0,0,0.32); padding: 1px 6px; border-radius: 6px;
     }
     .tac-goal-label.top { top: 4px; }
     .tac-goal-label.bot { bottom: 4px; }
-
-    .tac-zone-layer { position: absolute; inset: 0; z-index: 3; opacity: 0; pointer-events: none; transition: opacity 0.14s ease; }
-    .tac-zone-layer.active { opacity: 1; pointer-events: auto; }
-    .tac-zone-anchor {
-      position: absolute; transform: translate(-50%, -50%); min-width: 38px; min-height: 26px;
-      padding: 2px 6px; border-radius: 8px; border: 1.5px dashed rgba(250, 204, 21, 0.72);
-      background: rgba(15, 23, 42, 0.7); color: #fde68a; font-size: 9.5px; font-weight: 800;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .tac-zone-anchor.drop-hot {
-      background: rgba(250, 204, 21, 0.34); border-style: solid; transform: translate(-50%, -50%) scale(1.12);
-    }
 
     .tac-slot-card {
       position: absolute; transform: translate(-50%, -50%); z-index: 5;
       min-width: 58px; max-width: 78px; min-height: 48px; padding: 3px 4px;
       border-radius: 9px; border: 1.5px solid var(--suit-border, rgba(255,255,255,0.45));
-      background: rgba(7, 15, 32, 0.9); color: #fff; cursor: grab;
+      background: rgba(7, 15, 32, 0.92); color: #fff; cursor: pointer;
       display: flex; flex-direction: column; align-items: center; gap: 1px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5); transition: transform 0.12s ease, box-shadow 0.12s ease;
-      touch-action: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5); transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+      touch-action: manipulation;
     }
+    .tac-slot-card:active { transform: translate(-50%, -50%) scale(0.95); }
     .tac-slot-card.empty {
-      border-style: dashed; border-color: rgba(148, 163, 184, 0.75);
-      background: rgba(15, 23, 42, 0.62); min-width: 52px; min-height: 46px; justify-content: center;
-      cursor: pointer; touch-action: manipulation;
+      border-style: dashed; border-color: rgba(148, 163, 184, 0.78);
+      background: rgba(15, 23, 42, 0.65); min-width: 52px; min-height: 46px; justify-content: center;
     }
     .tac-empty-plus { font-size: 14px; font-weight: 900; color: #38bdf8; line-height: 1; }
     .tac-slot-role-pill { font-size: 9px; font-weight: 800; color: #fde68a; }
     .tac-empty-lbl { font-size: 8px; color: #94a3b8; }
     .tac-slot-card.selected {
-      transform: translate(-50%, -50%) scale(1.09); z-index: 8;
-      border-color: #facc15 !important; box-shadow: 0 0 0 2px rgba(250,204,21,0.45), 0 6px 16px rgba(0,0,0,0.65);
+      transform: translate(-50%, -50%) scale(1.1); z-index: 9;
+      border-color: #facc15 !important; box-shadow: 0 0 0 2.5px rgba(250,204,21,0.55), 0 6px 18px rgba(0,0,0,0.7);
     }
-    .tac-slot-card.drop-candidate { box-shadow: 0 0 0 2px rgba(56,189,248,0.55), 0 4px 12px rgba(0,0,0,0.5); }
-    .tac-slot-card.drop-hot {
-      transform: translate(-50%, -50%) scale(1.15); z-index: 12;
-      border-color: #4ade80 !important; box-shadow: 0 0 0 3px rgba(74,222,128,0.65), 0 8px 20px rgba(0,0,0,0.75);
+    .tac-slot-card.swap-target {
+      border-color: #38bdf8 !important; box-shadow: 0 0 0 2px rgba(56,189,248,0.5), 0 4px 12px rgba(0,0,0,0.5);
     }
     .tac-slot-card.mismatch-warn { box-shadow: 0 0 0 1.5px rgba(248,113,113,0.75), 0 4px 12px rgba(0,0,0,0.55); }
 
@@ -530,7 +570,7 @@
     .tac-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; border: 1.5px solid rgba(255,255,255,0.65); background: #00205b; pointer-events: none; }
     .tac-num-badge {
       position: absolute; left: 0; top: -2px; min-width: 14px; height: 14px; padding: 0 3px;
-      border-radius: 99px; background: #00205b; color: #fff; font-size: 8.5px; font-weight: 800;
+      border-radius: 5px; background: #00205b; color: #fff; font-size: 8.5px; font-weight: 800;
       display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.45);
     }
     .tac-cap-badge {
@@ -540,7 +580,7 @@
     }
     .tac-suit-pill {
       position: absolute; right: 0; top: -2px; min-width: 18px; height: 14px; padding: 0 3px;
-      border-radius: 99px; border: 1px solid transparent; font-size: 8.5px; font-weight: 800;
+      border-radius: 5px; border: 1px solid transparent; font-size: 8.5px; font-weight: 800;
       display: flex; align-items: center; justify-content: center;
     }
     .tac-card-name {
@@ -550,44 +590,55 @@
     .tac-card-meta { display: flex; align-items: center; gap: 3px; font-size: 8.5px; color: #fde68a; line-height: 1; }
     .tac-card-meta b { color: #93c5fd; }
 
-    .tac-drag-ghost {
-      position: fixed; left: 0; top: 0; z-index: 220; pointer-events: none; will-change: transform;
-      display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px;
-      background: rgba(0, 32, 91, 0.95); border: 2px solid #facc15; color: #fff;
-      font-size: 11.5px; font-weight: 800; box-shadow: 0 12px 26px rgba(0,0,0,0.68);
-    }
-    .tac-drag-ghost img { width: 24px; height: 24px; border-radius: 50%; border: 1px solid #fff; }
-
+    /* Khu vực Dự bị cuộn độc lập (hỗ trợ 30-45+ cầu thủ, tối ưu iPhone Safari) */
     .tac-bench-section {
-      background: rgba(15, 23, 42, 0.82); border: 1px solid var(--border-glass);
-      border-radius: 12px; padding: 8px 9px; display: flex; flex-direction: column; gap: 7px;
+      background: rgba(15, 23, 42, 0.88); border: 1px solid var(--border-glass);
+      border-radius: 12px; padding: 9px 10px; display: flex; flex-direction: column; gap: 7px; min-width: 0;
     }
     .tac-bench-header { display: flex; flex-direction: column; gap: 6px; }
-    .tac-bench-tabs { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
-    .tac-filter-pill {
+    .tac-bench-top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .tac-bench-view-toggle { display: inline-flex; gap: 4px; background: rgba(2, 6, 23, 0.7); padding: 3px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); }
+    .tac-view-btn {
+      background: transparent; color: #94a3b8; border: none; border-radius: 6px; padding: 4px 8px;
+      font-size: 11px; font-weight: 700; cursor: pointer; min-height: 30px; touch-action: manipulation;
+    }
+    .tac-view-btn.active { background: #1d4ed8; color: #fff; }
+    .tac-bench-search-row { display: flex; gap: 6px; align-items: center; }
+    .tac-bench-search { min-height: 36px; font-size: 12px; }
+    .tac-bench-tabs { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; touch-action: pan-x; }
+    .tac-filter-btn {
       background: #1e293b; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 700;
-      cursor: pointer; white-space: nowrap; min-height: 32px;
+      border-radius: 8px; padding: 5px 10px; font-size: 11px; font-weight: 700;
+      cursor: pointer; white-space: nowrap; min-height: 34px; touch-action: manipulation;
     }
-    .tac-filter-pill.active { background: var(--psg-navy); color: #fff; border-color: var(--psg-gold); }
-    .tac-bench-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
-      gap: 6px; max-height: 230px; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 2px;
-    }
-    .tac-bench-card {
-      display: flex; align-items: center; gap: 7px; padding: 6px 8px; min-height: 46px;
-      border-radius: 9px; background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(255,255,255,0.12);
-      cursor: grab; transition: border-color 0.14s ease, background 0.14s ease;
-    }
-    .tac-bench-card:not(.disabled) { touch-action: none; }
-    .tac-bench-card.selected { border-color: #facc15; background: rgba(0, 65, 112, 0.52); }
-    .tac-bench-card.disabled { opacity: 0.48; cursor: not-allowed; }
-    .tac-bench-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(255,255,255,0.35); flex-shrink: 0; background: #00205b; }
-    .tac-bench-info { flex: 1; min-width: 0; }
-    .tac-bench-title { font-size: 11.5px; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tac-bench-sub { font-size: 10px; color: var(--text-muted); }
-    .tac-bench-right { flex-shrink: 0; }
+    .tac-filter-btn.active { background: var(--psg-navy); color: #fff; border-color: var(--psg-gold); }
 
+    .tac-bench-scroll {
+      overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; overscroll-behavior: contain;
+      max-height: 330px; min-height: 170px; padding-right: 2px;
+    }
+    .tac-bench-grid { display: grid; gap: 6px; }
+    .tac-bench-grid.mode-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tac-bench-grid.mode-list { grid-template-columns: 1fr; }
+
+    .tac-bench-card {
+      display: flex; align-items: center; gap: 7px; padding: 7px 8px; min-height: 48px;
+      border-radius: 9px; background: rgba(30, 41, 59, 0.88); border: 1.5px solid rgba(255,255,255,0.12);
+      cursor: pointer; transition: border-color 0.14s ease, background 0.14s ease;
+      touch-action: manipulation; text-align: left; width: 100%; color: inherit;
+    }
+    .tac-bench-card:hover { border-color: rgba(147, 197, 253, 0.45); }
+    .tac-bench-card.selected { border-color: #facc15; background: rgba(0, 65, 112, 0.58); }
+    .tac-bench-card.top-fit-rec { border-color: #4ade80; background: rgba(20, 83, 45, 0.36); }
+    .tac-bench-card.disabled { opacity: 0.48; cursor: not-allowed; }
+    .tac-bench-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(255,255,255,0.35); flex-shrink: 0; background: #00205b; pointer-events: none; }
+    .tac-bench-info { flex: 1; min-width: 0; }
+    .tac-bench-title { font-size: 11.5px; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
+    .tac-bench-sub { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tac-bench-right { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+    .tac-fit-badge { font-size: 9.5px; font-weight: 800; padding: 2px 5px; border-radius: 6px; border: 1px solid transparent; }
+
+    .tac-eval-section { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 9px; align-items: start; }
     .tac-player-hero { display: flex; gap: 9px; align-items: center; margin-bottom: 7px; }
     .tac-hero-img { width: 52px; height: 52px; border-radius: 10px; border: 1.5px solid var(--psg-gold); background: #00205b; flex-shrink: 0; }
     .tac-quick-actions { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
@@ -596,7 +647,7 @@
     .tac-role-chips { display: flex; gap: 4px; flex-wrap: wrap; }
     .tac-role-chip {
       background: #1e293b; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.14);
-      border-radius: 7px; padding: 3px 7px; font-size: 10px; font-weight: 700; cursor: pointer;
+      border-radius: 7px; padding: 4px 8px; font-size: 10.5px; font-weight: 700; cursor: pointer; touch-action: manipulation;
     }
     .tac-role-chip.active { background: #1d4ed8; color: #fff; border-color: #93c5fd; }
 
@@ -614,13 +665,13 @@
     .tac-weak-list { display: flex; flex-direction: column; gap: 4px; margin-top: 5px; }
     .tac-weak-chip {
       text-align: left; background: rgba(127, 29, 29, 0.35); border: 1px solid rgba(248, 113, 113, 0.5);
-      color: #fecaca; border-radius: 7px; padding: 5px 8px; font-size: 10.5px; cursor: pointer;
+      color: #fecaca; border-radius: 7px; padding: 6px 8px; font-size: 10.5px; cursor: pointer; touch-action: manipulation;
     }
     .tac-form-rank { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
     .tac-form-pill {
       display: flex; justify-content: space-between; align-items: center;
       background: #1e293b; color: #e2e8f0; border: 1px solid rgba(255,255,255,0.14);
-      border-radius: 8px; padding: 6px 9px; font-size: 11px; cursor: pointer;
+      border-radius: 8px; padding: 6px 9px; font-size: 11px; cursor: pointer; touch-action: manipulation;
     }
     .tac-form-pill.current { background: rgba(0, 65, 112, 0.65); border-color: var(--psg-gold); color: #fff; }
 
@@ -638,14 +689,17 @@
       .mac-menu-item { display: none; }
       .mac-menu-right { gap: 6px; flex-shrink: 0; }
       .mac-exit-btn { flex-shrink: 0; padding: 3px 8px; }
-      .macos-main { padding: 8px 8px; overflow-x: hidden; }
-      .tac-pitch-board { min-height: 365px; max-height: 450px; }
+      .macos-main { padding: 8px 8px; overflow-x: clip; }
+      .tac-pitch-sticky { position: sticky; top: 0; }
+      .tac-pitch-board { min-height: 345px; max-height: 410px; }
       .tac-slot-card { min-width: 52px; max-width: 68px; min-height: 44px; padding: 2px 3px; }
       .tac-avatar { width: 22px; height: 22px; }
       .tac-card-name { max-width: 56px; font-size: 8.5px; }
-      .tac-bench-grid { grid-template-columns: 1fr; max-height: 220px; }
+      .tac-bench-scroll { max-height: 265px; }
+      .tac-bench-grid.mode-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .tac-bench-grid.mode-list { grid-template-columns: 1fr; }
       .tac-btn { min-height: 44px; padding: 6px 10px; }
-      .tac-filter-pill { min-height: 38px; padding: 6px 11px; }
+      .tac-filter-btn { min-height: 38px; padding: 6px 10px; }
     }
     /* Presidential Intelligence Center: TV Truyền Thông, Uy tín 6 trụ cột & Launcher 17 ứng dụng */
     .tabular-nums { font-variant-numeric: tabular-nums; }
@@ -837,15 +891,37 @@
         <button id="modal-close" aria-label="Đóng">✕</button>
       </div>
       <div id="modal-body"></div>
-      <div id="smart-confirm-overlay" class="smart-confirm-overlay" role="dialog" aria-modal="true">
-        <div class="smart-confirm-card">
-          <h4 id="sc-title">⚠️ Xác nhận rời trang</h4>
-          <p id="sc-msg">Bạn có thay đổi hoặc giao dịch chưa hoàn tất.</p>
-          <div class="btn-row" style="justify-content:flex-end;">
-            <button type="button" class="btn-secondary" id="sc-cancel">Ở lại xử lý</button>
-            <button type="button" class="btn-danger" id="sc-confirm">Rời đi</button>
-          </div>
+    </div>
+  </div>
+
+  <!-- Task Window (Lớp 4: tác vụ thực thi nằm trên App, đóng xong quay lại đúng App) -->
+  <div id="task-backdrop" role="dialog" aria-modal="true">
+    <div class="task-box" id="task-box">
+      <div class="task-head" id="task-head-bar">
+        <div class="task-head-left">
+          <button type="button" class="smart-back-btn" id="task-smart-back" aria-label="Quay lại">
+            <span class="smart-back-arrow">←</span>
+            <span class="smart-back-label">Quay lại</span>
+          </button>
+          <span id="task-title">Tác vụ điều hành PSG</span>
         </div>
+        <div class="task-head-right">
+          <span id="task-status-badge" class="task-status-badge status-in_progress">Đang xử lý</span>
+          <button type="button" id="task-close" aria-label="Đóng tác vụ">✕</button>
+        </div>
+      </div>
+      <div id="task-body"></div>
+    </div>
+  </div>
+
+  <!-- Hộp thoại xác nhận inline (Lớp 5: nằm trên cả Modal & Task Window) -->
+  <div id="smart-confirm-overlay" class="smart-confirm-overlay" role="dialog" aria-modal="true">
+    <div class="smart-confirm-card">
+      <h4 id="sc-title">⚠️ Xác nhận rời trang</h4>
+      <p id="sc-msg">Bạn có thay đổi hoặc giao dịch chưa hoàn tất.</p>
+      <div class="btn-row" style="justify-content:flex-end;">
+        <button type="button" class="btn-secondary" id="sc-cancel">Ở lại xử lý</button>
+        <button type="button" class="btn-danger" id="sc-confirm">Rời đi</button>
       </div>
     </div>
   </div>

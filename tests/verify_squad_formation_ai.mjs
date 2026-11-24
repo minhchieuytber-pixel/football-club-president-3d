@@ -383,8 +383,8 @@ test('Case 12: Cache AI hoạt động đúng (hit/invalidate) & Giao diện sâ
   ai.invalidateCache();
   assert.equal(ai.getCacheStats().size, 0);
 
-  // Kiểm tra HTML Sân bóng chiến thuật render đủ vạch sân + bench 4 nhóm
-  const mockUi = { selectedSlotIdx: 0, selectedBenchId: null, benchPosFilter: 'ALL', pendingFormationPreview: null, confirmOptimalXI: false };
+  // Kiểm tra HTML Sân bóng chiến thuật render đủ vạch sân + bench đầy đủ nhóm lọc
+  const mockUi = { selectedSlotIdx: 0, selectedBenchId: null, benchPosFilter: 'ALL', benchViewMode: 'card', benchSearchQuery: '', pendingFormationPreview: null, confirmOptimalXI: false };
   const html = renderFormationPitchTabHTML(gs, mockUi);
   assert.match(html, /tac-pitch-svg/, 'Phải render sân bóng SVG từ trên xuống');
   assert.match(html, /circle cx="50" cy="70" r="12"/, 'Phải có vòng tròn giữa sân');
@@ -395,11 +395,14 @@ test('Case 12: Cache AI hoạt động đúng (hit/invalidate) & Giao diện sâ
   assert.match(html, /DEF \(/, 'Phải có bộ lọc dự bị DEF');
   assert.match(html, /MID \(/, 'Phải có bộ lọc dự bị MID');
   assert.match(html, /ATT \(/, 'Phải có bộ lọc dự bị ATT');
+  assert.match(html, /YOUTH \(/, 'Phải có bộ lọc cầu thủ trẻ');
+  assert.match(html, /MULTI \(/, 'Phải có bộ lọc cầu thủ đa năng');
 
-  // Kiểm tra CSS mobile portrait & touch-action trong index.html
+  // Kiểm tra CSS mobile portrait & đã xóa bỏ Drag & Drop (thay bằng chạm 2 bước + cuộn dự bị độc lập)
   const indexHtml = fs.readFileSync(path.resolve('index.html'), 'utf8');
-  assert.match(indexHtml, /\.tac-slot-card\s*\{[\s\S]*touch-action:\s*none/, 'Thẻ cầu thủ trên sân phải có touch-action: none chống cuộn khi kéo');
-  assert.match(indexHtml, /\.tac-bench-card:not\(\.disabled\)\s*\{\s*touch-action:\s*none/, 'Thẻ dự bị kéo được phải có touch-action: none');
+  assert.doesNotMatch(indexHtml, /tac-drag-ghost|tac-zone-layer/, 'Không được còn CSS kéo thả cũ');
+  assert.match(indexHtml, /\.tac-slot-card\s*\{[\s\S]*touch-action:\s*manipulation/, 'Thẻ cầu thủ trên sân phải hỗ trợ chạm nhanh touch-action: manipulation');
+  assert.match(indexHtml, /\.tac-bench-scroll\s*\{[\s\S]*touch-action:\s*pan-y/, 'Danh sách dự bị phải cuộn dọc mượt mà với touch-action: pan-y');
   assert.match(indexHtml, /@media \(orientation: portrait\), \(max-width: 520px\)/, 'Phải có responsive iPhone portrait');
 
   // Kiểm tra MatchSimulationEngine tích hợp avgSuitability
