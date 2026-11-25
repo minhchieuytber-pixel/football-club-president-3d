@@ -991,10 +991,33 @@
     </p>
   </div>
   <script>
-    if (window.location.protocol === 'file:') {
-      var b = document.getElementById('boot-error-banner');
-      if (b) b.style.display = 'flex';
-    }
+    (function () {
+      function showBootErr(title, msg) {
+        var b = document.getElementById('boot-error-banner');
+        var t = document.getElementById('boot-error-text');
+        var h = b ? b.querySelector('h2') : null;
+        if (h && title) h.textContent = title;
+        if (t && msg) t.innerHTML = msg;
+        if (b) b.style.display = 'flex';
+      }
+      if (window.location.protocol === 'file:') {
+        showBootErr();
+        return;
+      }
+      window.addEventListener('error', function (ev) {
+        if (!window.__PSG_GAME__ && ev && ev.message) {
+          showBootErr('⚠️ Lỗi khởi chạy game trên trình duyệt', String(ev.message));
+        }
+      });
+      setTimeout(function () {
+        if (!window.__PSG_GAME__) {
+          showBootErr(
+            '⚠️ Game chưa khởi chạy được (thiếu bản build Vite)',
+            'Trang web đang chạy từ mã nguồn chưa đóng gói (<code>src/main.js</code> chưa qua <code>npm run build</code>). Trên GitHub, hãy bật <b>Settings → Pages → Source: GitHub Actions</b> để chạy workflow <code>deploy.yml</code>, hoặc chạy <code>npm run build</code> trước khi deploy.'
+          );
+        }
+      }, 6000);
+    })();
   </script>
   <script type="module" src="./src/main.js"></script>
 </body>

@@ -1,6 +1,6 @@
 // public/sw.js
-// Network-First Service Worker (v2): Luôn ưu tiên bản mới nhất từ server để không bao giờ kẹt ở màn hình index cũ!
-const CACHE_NAME = 'psg-president-3d-v2';
+// Network-First Service Worker (v3): Luôn ưu tiên bản mới nhất từ server để không bao giờ kẹt ở màn hình index cũ!
+const CACHE_NAME = 'psg-president-3d-v3';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
