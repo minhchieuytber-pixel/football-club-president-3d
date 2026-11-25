@@ -35,6 +35,30 @@ export const RELATIONSHIP_METRIC_DEFS = [
   { key: 'satisfactionDevelopment', label: 'Hài lòng kế hoạch phát triển' }
 ];
 
+export const EXTRA_RELATIONSHIP_TARGETS = [
+  { key: 'trustAssistants', label: 'Tin tưởng Ban Trợ lý HLV' },
+  { key: 'respectAssistants', label: 'Tôn trọng Trợ lý HLV' },
+  { key: 'trustCaptain', label: 'Tin tưởng Đội trưởng' },
+  { key: 'respectCaptain', label: 'Tôn trọng Đội trưởng' },
+  { key: 'dressingRoomHarmony', label: 'Hòa hợp phòng thay đồ' },
+  { key: 'professionalism', label: 'Tính chuyên nghiệp' }
+];
+
+export const DRESSING_ROOM_LEVELS = {
+  1: { level: 1, label: 'Cấp 1 – Ổn định', color: '#4ade80', matchMod: 1.5 },
+  2: { level: 2, label: 'Cấp 2 – Bất mãn nhẹ', color: '#facc15', matchMod: 0 },
+  3: { level: 3, label: 'Cấp 3 – Căng thẳng âm ỉ', color: '#fb923c', matchMod: -1.2 },
+  4: { level: 4, label: 'Cấp 4 – Mâu thuẫn nghiêm trọng', color: '#ef4444', matchMod: -3.0 },
+  5: { level: 5, label: 'Cấp 5 – Khủng hoảng phòng thay đồ', color: '#dc2626', matchMod: -5.5 }
+};
+
+export const DRESSING_ROOM_GROUPS = {
+  core_leaders: 'Nhóm Trụ cột & Thủ lĩnh',
+  senior_pros: 'Nhóm Cựu binh & Đội một',
+  young_prospects: 'Nhóm Tài năng trẻ',
+  new_signings: 'Nhóm Tân binh hòa nhập'
+};
+
 export const PLAYER_MOODS = [
   'Rất hài lòng',
   'Hài lòng',
@@ -47,16 +71,16 @@ export const PLAYER_MOODS = [
 ];
 
 export const PLAYER_TRAITS = {
-  professional: { key: 'professional', label: 'Chuyên nghiệp', benchMult: 0.65, subMult: 0.6, criticismMult: 0.7, stayBonus: 8 },
-  ambitious:    { key: 'ambitious', label: 'Tham vọng', benchMult: 1.35, subMult: 1.25, criticismMult: 1.15, stayBonus: -6 },
-  patient:      { key: 'patient', label: 'Kiên nhẫn', benchMult: 0.55, subMult: 0.65, criticismMult: 0.75, stayBonus: 10 },
-  sensitive:    { key: 'sensitive', label: 'Nhạy cảm', benchMult: 1.3, subMult: 1.4, criticismMult: 1.45, stayBonus: -5 },
-  loyal:        { key: 'loyal', label: 'Trung thành', benchMult: 0.75, subMult: 0.8, criticismMult: 0.85, stayBonus: 14 },
-  competitive:  { key: 'competitive', label: 'Cạnh tranh', benchMult: 1.25, subMult: 1.2, criticismMult: 1.0, stayBonus: 0 },
-  leader:       { key: 'leader', label: 'Lãnh đạo', benchMult: 0.9, subMult: 0.95, criticismMult: 0.9, stayBonus: 6 },
-  strong_ego:   { key: 'strong_ego', label: 'Cá tính mạnh', benchMult: 1.4, subMult: 1.45, criticismMult: 1.35, stayBonus: -8 },
-  pragmatic:    { key: 'pragmatic', label: 'Thực dụng', benchMult: 1.0, subMult: 0.9, criticismMult: 0.85, stayBonus: -2 },
-  driven:       { key: 'driven', label: 'Cầu tiến', benchMult: 1.15, subMult: 1.05, criticismMult: 0.8, stayBonus: 4 }
+  professional: { key: 'professional', label: 'Chuyên nghiệp', benchMult: 0.65, subMult: 0.6, criticismMult: 0.7, stayBonus: 8, patienceMatches: 5, selfResolveChance: 0.45, agentProbeMonths: 4, tensionMult: 0.75 },
+  ambitious:    { key: 'ambitious', label: 'Tham vọng', benchMult: 1.35, subMult: 1.25, criticismMult: 1.15, stayBonus: -6, patienceMatches: 2, selfResolveChance: 0.12, agentProbeMonths: 2, tensionMult: 1.3 },
+  patient:      { key: 'patient', label: 'Kiên nhẫn', benchMult: 0.55, subMult: 0.65, criticismMult: 0.75, stayBonus: 10, patienceMatches: 6, selfResolveChance: 0.42, agentProbeMonths: 5, tensionMult: 0.65 },
+  sensitive:    { key: 'sensitive', label: 'Nhạy cảm', benchMult: 1.3, subMult: 1.4, criticismMult: 1.45, stayBonus: -5, patienceMatches: 2, selfResolveChance: 0.1, agentProbeMonths: 3, tensionMult: 1.35 },
+  loyal:        { key: 'loyal', label: 'Trung thành', benchMult: 0.75, subMult: 0.8, criticismMult: 0.85, stayBonus: 14, patienceMatches: 5, selfResolveChance: 0.36, agentProbeMonths: 5, tensionMult: 0.75 },
+  competitive:  { key: 'competitive', label: 'Cạnh tranh', benchMult: 1.25, subMult: 1.2, criticismMult: 1.0, stayBonus: 0, patienceMatches: 2, selfResolveChance: 0.18, agentProbeMonths: 3, tensionMult: 1.2 },
+  leader:       { key: 'leader', label: 'Lãnh đạo', benchMult: 0.9, subMult: 0.95, criticismMult: 0.9, stayBonus: 6, patienceMatches: 4, selfResolveChance: 0.32, agentProbeMonths: 4, tensionMult: 0.9 },
+  strong_ego:   { key: 'strong_ego', label: 'Cá tính mạnh', benchMult: 1.4, subMult: 1.45, criticismMult: 1.35, stayBonus: -8, patienceMatches: 1, selfResolveChance: 0.08, agentProbeMonths: 2, tensionMult: 1.4 },
+  pragmatic:    { key: 'pragmatic', label: 'Thực dụng', benchMult: 1.0, subMult: 0.9, criticismMult: 0.85, stayBonus: -2, patienceMatches: 3, selfResolveChance: 0.25, agentProbeMonths: 3, tensionMult: 1.0 },
+  driven:       { key: 'driven', label: 'Cầu tiến', benchMult: 1.15, subMult: 1.05, criticismMult: 0.8, stayBonus: 4, patienceMatches: 2, selfResolveChance: 0.28, agentProbeMonths: 3, tensionMult: 1.1 }
 };
 
 export const DIRECTIVE_STATUS = {
@@ -164,6 +188,10 @@ export class ClubRelationshipSystem {
     this.reset();
   }
 
+  get profiles() {
+    return this.playerRelations;
+  }
+
   reset() {
     this.playerRelations = {};
     this.coachRelations = {};
@@ -175,7 +203,25 @@ export class ClubRelationshipSystem {
     this.privateMeetingSessions = {};
     this.chairmanCoachTrust = 84;
     this.recentInterferenceWeeks = [];
+    this.recentResolutionLog = [];
+    this.dressingRoomState = {
+      level: 1,
+      label: DRESSING_ROOM_LEVELS[1].label,
+      harmonyScore: 84,
+      avgTension: 0,
+      dissatisfiedCount: 0,
+      simmeringCount: 0,
+      severeCount: 0,
+      coachConfidenceBySquad: 82,
+      captainId: null,
+      captainName: 'Đội trưởng PSG',
+      captainAlertedBoard: false,
+      affectedGroups: [],
+      lastUpdatedWeek: 1
+    };
     this._matchCounter = 0;
+    this._lastDailyKey = '';
+    this._lastMonthlyKey = this._monthKey();
 
     // Khởi tạo hồ sơ cho toàn bộ cầu thủ PSG & Học viện
     const all = this.state?.getAllPlayers ? this.state.getAllPlayers() : [];
@@ -184,6 +230,8 @@ export class ClubRelationshipSystem {
         this.ensurePlayerProfile(p.id);
       }
     });
+    this._seedTeammateBondsForSquad();
+    this.recomputeDressingRoomState();
   }
 
   _dateStr() {
@@ -192,8 +240,68 @@ export class ClubRelationshipSystem {
       : `Tuần ${this.state?.week || 1}`;
   }
 
+  _monthKey() {
+    const ts = this.state?.timeSystem;
+    if (ts && ts.year && ts.month) {
+      return `${ts.year}-${String(ts.month).padStart(2, '0')}`;
+    }
+    return `S${this.state?.seasonNum || 1}_M${Math.ceil((this.state?.week || 1) / 4)}`;
+  }
+
   _week() {
     return this.state?.week || 1;
+  }
+
+  getCaptainPlayer() {
+    const squad = this.state?.getPsgSquad ? this.state.getPsgSquad() : [];
+    if (!squad.length) return null;
+    const capId = this.state?.formationSystem?.captainId;
+    if (capId) {
+      const found = squad.find((p) => p.id === capId);
+      if (found) return found;
+    }
+    const explicit = squad.find((p) => p.isCaptain);
+    if (explicit) return explicit;
+    const veterans = [...squad].sort((a, b) => {
+      const aScore = (a.age >= 27 ? 15 : 0) + (a.mentality || 75) * 0.4 + (a.ovr || 75) * 0.6;
+      const bScore = (b.age >= 27 ? 15 : 0) + (b.mentality || 75) * 0.4 + (b.ovr || 75) * 0.6;
+      return bScore - aScore;
+    });
+    return veterans[0] || null;
+  }
+
+  _classifyDressingRoomGroup(p) {
+    if (!p) return 'senior_pros';
+    if (p.justJoined) return 'new_signings';
+    if (p.age <= 21 || p.squadLevel === 'Đội trẻ') return 'young_prospects';
+    if (p.ovr >= 86 || p.isCaptain || String(p.psychology?.squadRole || '').includes('Trụ cột')) return 'core_leaders';
+    return 'senior_pros';
+  }
+
+  _seedTeammateBondsForSquad() {
+    const squad = this.state?.getPsgSquad ? this.state.getPsgSquad() : [];
+    if (squad.length < 2) return;
+    const cap = this.getCaptainPlayer();
+    squad.forEach((p, idx) => {
+      const prof = this.playerRelations[p.id];
+      if (!prof) return;
+      if (!prof.teammateBonds) prof.teammateBonds = {};
+      if (Object.keys(prof.teammateBonds).length >= 3) return;
+      const rng = hashSeed(`bonds_${p.id}`);
+      const samePos = squad.filter((x) => x.id !== p.id && normalizePosition(x.position) === normalizePosition(p.position));
+      const sameNat = squad.filter((x) => x.id !== p.id && x.nationality && x.nationality === p.nationality);
+      const picks = [];
+      if (cap && cap.id !== p.id) picks.push({ peer: cap, type: 'mentor', score: Math.round(78 + rng() * 14) });
+      if (sameNat[0]) picks.push({ peer: sameNat[0], type: 'friendship', score: Math.round(80 + rng() * 14) });
+      if (samePos[0]) picks.push({ peer: samePos[0], type: 'rivalry', score: Math.round(64 + rng() * 16) });
+      const other = squad[(idx + 3) % squad.length];
+      if (other && other.id !== p.id) picks.push({ peer: other, type: 'friendship', score: Math.round(74 + rng() * 14) });
+      picks.slice(0, 4).forEach(({ peer, type, score }) => {
+        if (!prof.teammateBonds[peer.id]) {
+          prof.teammateBonds[peer.id] = { playerId: peer.id, name: peer.name, score: clamp(score, 25, 98), type };
+        }
+      });
+    });
   }
 
   // ==================== 1. PHONG CÁCH & TÂM LÝ HLV TRƯỞNG ====================
@@ -293,14 +401,20 @@ export class ClubRelationshipSystem {
     const baseSat = clamp(p.psychology?.satisfaction ?? p.satisfaction ?? (74 + rng() * 18), 35, 96);
     const baseMorale = clamp(p.psychology?.morale ?? p.morale ?? (76 + rng() * 16), 35, 96);
     const baseLoyalty = clamp(p.psychology?.loyalty ?? p.loyalty ?? (p.squad ? 86 : 74 + rng() * 16), 35, 98);
+    const baseProf = clamp(p.professionalism || 76 + rng() * 14, 45, 98);
 
     const profile = {
       playerId: p.id,
       coachId: this.state?.coach?.staffId || 'stf_hc_01',
       traits: this._generateTraitsForPlayer(p),
+      dressingRoomGroup: this._classifyDressingRoomGroup(p),
       metrics: {
         trustCoach: baseCoach,
         respectCoach: clamp(baseCoach + 2, 35, 98),
+        trustAssistants: clamp(78 + (rng() - 0.3) * 14, 40, 96),
+        respectAssistants: clamp(79 + (rng() - 0.3) * 14, 40, 96),
+        trustCaptain: clamp(80 + (rng() - 0.3) * 14, 45, 98),
+        respectCaptain: clamp(82 + (rng() - 0.3) * 12, 45, 98),
         satisfactionRole: baseSat,
         satisfactionPlaytime: clamp(baseSat + (p.ovr >= 84 ? 2 : -2), 30, 96),
         satisfactionTactics: clamp(baseCoach + (rng() - 0.5) * 10, 35, 96),
@@ -308,11 +422,23 @@ export class ClubRelationshipSystem {
         trustChairman: clamp(82 + (rng() - 0.5) * 10, 40, 96),
         satisfactionBoard: clamp(80 + (rng() - 0.5) * 10, 40, 96),
         teamIntegration: clamp(p.psychology?.teammateRelation ?? (p.justJoined ? 66 : 80 + rng() * 14), 35, 98),
-        satisfactionDevelopment: clamp(p.age <= 22 ? 78 + rng() * 12 : 76 + rng() * 14, 35, 96)
+        dressingRoomHarmony: clamp(80 + (rng() - 0.3) * 14, 40, 98),
+        satisfactionDevelopment: clamp(p.age <= 22 ? 78 + rng() * 12 : 76 + rng() * 14, 35, 96),
+        professionalism: baseProf
       },
+      teammateBonds: {},
       mood: 'Hài lòng',
       wantsToLeave: false,
       transferRequestSent: false,
+      tensionScore: 0,
+      patienceBuffer: 0,
+      weeksDissatisfied: 0,
+      monthsDissatisfied: 0,
+      agentProbing: false,
+      lostSpotTo: null,
+      lastCoachTalkWeek: -10,
+      lastCaptainMediationWeek: -10,
+      monthlyHistory: [],
       benchStreak: 0,
       earlySubStreak: 0,
       outOfPosStreak: 0,
@@ -336,6 +462,10 @@ export class ClubRelationshipSystem {
     let subMult = 1;
     let criticismMult = 1;
     let stayBonus = 0;
+    let patienceSum = 0;
+    let selfResolveSum = 0;
+    let agentMonthSum = 0;
+    let tensionMult = 1;
     traits.forEach((tk) => {
       const def = PLAYER_TRAITS[tk];
       if (!def) return;
@@ -343,12 +473,21 @@ export class ClubRelationshipSystem {
       subMult *= def.subMult;
       criticismMult *= def.criticismMult;
       stayBonus += def.stayBonus;
+      patienceSum += def.patienceMatches || 3;
+      selfResolveSum += def.selfResolveChance || 0.2;
+      agentMonthSum += def.agentProbeMonths || 3;
+      tensionMult *= def.tensionMult || 1;
     });
+    const cnt = Math.max(1, traits.length);
     return {
       benchMult: Math.max(0.45, Math.min(1.75, benchMult)),
       subMult: Math.max(0.45, Math.min(1.75, subMult)),
       criticismMult: Math.max(0.5, Math.min(1.8, criticismMult)),
-      stayBonus
+      stayBonus,
+      patienceMatches: Math.max(1, Math.round(patienceSum / cnt)),
+      selfResolveChance: Math.max(0.05, Math.min(0.65, selfResolveSum / cnt)),
+      agentProbeMonths: Math.max(2, Math.round(agentMonthSum / cnt)),
+      tensionMult: Math.max(0.5, Math.min(1.65, tensionMult))
     };
   }
 
@@ -365,6 +504,15 @@ export class ClubRelationshipSystem {
     if (profile.eventLog.length > 36) profile.eventLog.length = 36;
   }
 
+  _adjustTension(profile, delta, reason = '') {
+    if (!profile || !delta) return;
+    const prev = profile.tensionScore || 0;
+    profile.tensionScore = clamp(prev + delta, 0, 100);
+    if (delta <= -10 && reason) {
+      this._logPlayerEvent(profile, 'tension_eased', reason, `Căng thẳng ${prev} → ${profile.tensionScore}`);
+    }
+  }
+
   getActiveConflict(playerId) {
     return this.conflicts.find((c) => c.playerId === playerId && c.status === 'active') || null;
   }
@@ -375,12 +523,27 @@ export class ClubRelationshipSystem {
     if (!profile || !p) return null;
 
     const m = profile.metrics;
+    // Bổ sung các trường mới an toàn cho bản save cũ
+    if (m.trustAssistants === undefined) m.trustAssistants = 80;
+    if (m.respectAssistants === undefined) m.respectAssistants = 80;
+    if (m.trustCaptain === undefined) m.trustCaptain = 82;
+    if (m.respectCaptain === undefined) m.respectCaptain = 82;
+    if (m.dressingRoomHarmony === undefined) m.dressingRoomHarmony = m.teamIntegration ?? 82;
+    if (m.professionalism === undefined) m.professionalism = p.professionalism || 78;
+    if (profile.tensionScore === undefined) profile.tensionScore = 0;
+    if (profile.weeksDissatisfied === undefined) profile.weeksDissatisfied = 0;
+    if (profile.monthsDissatisfied === undefined) profile.monthsDissatisfied = 0;
+    if (!profile.dressingRoomGroup) profile.dressingRoomGroup = this._classifyDressingRoomGroup(p);
+    if (!profile.teammateBonds) profile.teammateBonds = {};
+    if (!Array.isArray(profile.monthlyHistory)) profile.monthlyHistory = [];
+
     const activeConflict = this.getActiveConflict(playerId);
     const conflictLvl = activeConflict?.level || 0;
     const avgPlay = (m.satisfactionPlaytime + m.satisfactionRole + m.satisfactionTactics) / 3;
     const avgCoach = (m.trustCoach + m.respectCoach) / 2;
     const avgClub = (m.clubAttachment + m.trustChairman + m.satisfactionBoard) / 3;
-    const composite = Math.round(avgPlay * 0.42 + avgCoach * 0.32 + avgClub * 0.26);
+    const avgPeer = ((m.teamIntegration || 80) + (m.dressingRoomHarmony || 80) + (m.trustCaptain || 80)) / 3;
+    const composite = Math.round(avgPlay * 0.38 + avgCoach * 0.28 + avgClub * 0.22 + avgPeer * 0.12);
 
     let mood = 'Bình thường';
     if (profile.wantsToLeave || conflictLvl >= 5 || (composite <= 32 && m.clubAttachment <= 46)) {
@@ -994,9 +1157,12 @@ export class ClubRelationshipSystem {
     }
 
     this._logPlayerEvent(profile, 'conflict', `Mâu thuẫn Cấp ${conflict.level}: ${CONFLICT_LEVELS[conflict.level]?.label}`, cause);
+    this._adjustTension(profile, conflict.level * 6);
 
-    // Từ Cấp 3 trở lên có nguy cơ rò rỉ báo chí; Cấp 4-5 hoặc mất niềm tin -> Yêu cầu ra đi
-    if (conflict.level >= 2) {
+    // NGUYÊN TẮC TỰ NHIÊN: Mâu thuẫn nhẹ Cấp 1–2 (và Cấp 3 mới âm ỉ) tuyệt đối KHÔNG rò rỉ báo chí hay gửi cảnh báo ồ ạt!
+    // Chỉ rò rỉ báo chí khi đạt Cấp 4–5 (nghiêm trọng/khủng hoảng) hoặc Cấp 3 kéo dài nhiều tháng chưa xử lý.
+    const prolongedSevereSimmer = conflict.level >= 3 && (profile.monthsDissatisfied || 0) >= 3 && (profile.tensionScore || 0) >= 70;
+    if (conflict.level >= 4 || prolongedSevereSimmer) {
       this._triggerOrEscalatePressLeak(conflict);
     }
     if (conflict.level >= 4 || (conflict.level >= 3 && profile.brokenPromisesCount >= 1 && profile.metrics.trustChairman < 45)) {
@@ -1004,22 +1170,35 @@ export class ClubRelationshipSystem {
     }
 
     this.recomputeMoodAndSyncPlayer(playerId);
+    this.recomputeDressingRoomState();
     return conflict;
   }
 
   _deescalateConflict(playerId, dropLevels = 1, resolutionNote = 'Đã trao đổi giải tỏa') {
     const conflict = this.getActiveConflict(playerId);
-    if (!conflict) return null;
+    const prof = this.ensurePlayerProfile(playerId);
+    if (prof) {
+      this._adjustTension(prof, -14 * dropLevels, resolutionNote);
+    }
+    if (!conflict) {
+      this.recomputeDressingRoomState();
+      return null;
+    }
     conflict.resolutions.push({ date: this._dateStr(), week: this._week(), note: resolutionNote });
     if (conflict.level - dropLevels <= 0) {
       conflict.status = 'resolved';
       conflict.outcome = resolutionNote;
-      const prof = this.ensurePlayerProfile(playerId);
-      if (prof && prof.metrics.satisfactionPlaytime >= 50) prof.wantsToLeave = false;
+      if (prof) {
+        prof.weeksDissatisfied = 0;
+        prof.monthsDissatisfied = 0;
+        prof.agentProbing = false;
+        if (prof.metrics.satisfactionPlaytime >= 50) prof.wantsToLeave = false;
+      }
     } else {
       conflict.level = Math.max(1, conflict.level - dropLevels);
     }
     this.recomputeMoodAndSyncPlayer(playerId);
+    this.recomputeDressingRoomState();
     return conflict;
   }
 
@@ -1211,6 +1390,15 @@ export class ClubRelationshipSystem {
     const subbedOutIds = new Set(matchRes.subbedOutIds || []);
     const ctx = this.state.formationSystem?.getContext?.() || { formation: '4-3-3' };
 
+    // Tìm các cầu thủ đá chính ở từng vị trí để nhận diện trường hợp bị đồng đội chiếm suất đá chính
+    const starterByNormPos = {};
+    squad.forEach((sp) => {
+      if (starters.has(sp.id)) {
+        const np = normalizePosition(sp.position);
+        if (!starterByNormPos[np]) starterByNormPos[np] = sp;
+      }
+    });
+
     squad.forEach((p) => {
       const profile = this.ensurePlayerProfile(p.id);
       if (!profile) return;
@@ -1232,7 +1420,9 @@ export class ClubRelationshipSystem {
         const outOfPos = suit.score < 70 && normalizePosition(playedRole) !== normalizePosition(p.position);
 
         profile.benchStreak = 0;
+        profile.patienceBuffer = 0;
         profile.weeksWithoutFirstTeamApps = 0;
+        profile.lostSpotTo = null;
         profile.recentMinutes.unshift({ week, minutes: mins, starter: wasStarter, rating: playedRec.rating, outOfPos });
         if (profile.recentMinutes.length > 8) profile.recentMinutes.length = 8;
 
@@ -1243,6 +1433,7 @@ export class ClubRelationshipSystem {
             satisfactionPlaytime: Math.round(-4 * mods.subMult),
             trustCoach: Math.round(-3 * mods.subMult)
           }, `Bị thay ra sớm (${mins}') dù điểm chuyên môn ${playedRec.rating}`);
+          this._adjustTension(profile, Math.round(7 * mods.tensionMult));
           if (profile.earlySubStreak >= 2) {
             this._escalateOrCreateConflict(p.id, {
               scenario: 'early_sub',
@@ -1262,6 +1453,7 @@ export class ClubRelationshipSystem {
             satisfactionTactics: -5,
             trustCoach: -3
           }, `Phải đá trái sở trường (${playedRole} thay vì ${p.position}, tương thích ${suit.score}%)`);
+          this._adjustTension(profile, Math.round(6 * mods.tensionMult));
           if (profile.outOfPosStreak >= 2) {
             this._escalateOrCreateConflict(p.id, {
               scenario: 'out_of_position',
@@ -1281,6 +1473,7 @@ export class ClubRelationshipSystem {
             satisfactionBoard: -3,
             trustCoach: -4
           }, `Thi đấu quá tải (Mệt mỏi ${fatigueNow}%) không được xoay tua nghỉ ngơi`);
+          this._adjustTension(profile, Math.round(5 * mods.tensionMult));
           if (profile.overworkStreak >= 2) {
             this._escalateOrCreateConflict(p.id, {
               scenario: 'overworked_star',
@@ -1292,18 +1485,20 @@ export class ClubRelationshipSystem {
           profile.overworkStreak = 0;
         }
 
-        // 4. Khi được ra sân và chơi tốt -> cải thiện sự hài lòng
+        // 4. Khi được ra sân và chơi tốt -> tự cải thiện thực sự & giảm căng thẳng tích lũy
         if (!earlySub && !outOfPos) {
-          const playGain = mins >= 65 ? +5 : +3;
+          const playGain = mins >= 65 ? +6 : +3;
           this._applyMetricDeltas(p.id, {
             satisfactionPlaytime: playGain,
             satisfactionRole: mins >= 65 ? +4 : +2,
             trustCoach: playedRec.rating >= 7.2 ? +4 : +2,
             respectCoach: matchRes.psgWon ? +3 : +1,
             satisfactionTactics: matchRes.psgWon ? +3 : 0,
+            dressingRoomHarmony: matchRes.psgWon ? +2 : 0,
             satisfactionDevelopment: p.age <= 22 ? +5 : +2
           });
-          if (profile.metrics.satisfactionPlaytime >= 62 && !fromActiveSevere(this.getActiveConflict(p.id))) {
+          this._adjustTension(profile, mins >= 65 ? -14 : -8, `Được trao cơ hội thi đấu thực tế (${mins}')`);
+          if (mins >= 45 && profile.metrics.satisfactionPlaytime >= 58 && !fromActiveSevere(this.getActiveConflict(p.id))) {
             this._deescalateConflict(p.id, 1, `${p.name} đã được ra sân (${mins}') và cải thiện tâm lý.`);
           }
         }
@@ -1344,15 +1539,17 @@ export class ClubRelationshipSystem {
             this._fulfillCommitment(restCommitment, `${p.name} đã được cho nghỉ ngơi bảo toàn thể lực.`);
           }
         } else {
-          // Dự bị không có lý do bảo toàn thể lực
+          // Phân biệt rõ: cầu thủ xoay tua/dự bị vai trò phụ không bị tụt tâm lý ảo; chỉ cầu thủ kỳ vọng ra sân mới tích lũy dần
+          const roleText = String(p.psychology?.squadRole || '');
+          const isRotationRole = roleText.includes('Dự bị') || roleText.includes('Xoay tua') || roleText.includes('Học viện');
           const expectsMinutes =
-            p.ovr >= 82 ||
+            (!isRotationRole && p.ovr >= 82) ||
             (p.age <= 21 && (p.pot || 80) >= 84 && p.form >= 74) ||
-            String(p.psychology?.squadRole || '').includes('Trụ cột') ||
-            String(p.psychology?.squadRole || '').includes('Đá chính');
+            roleText.includes('Trụ cột') ||
+            roleText.includes('Đá chính');
 
           if (expectsMinutes) {
-            const benchPenalty = Math.round((p.form >= 76 ? -7 : -4) * mods.benchMult);
+            const benchPenalty = Math.round((p.form >= 76 ? -7 : -3) * mods.benchMult);
             this._applyMetricDeltas(p.id, {
               satisfactionPlaytime: benchPenalty,
               satisfactionRole: Math.round(-4 * mods.benchMult),
@@ -1360,13 +1557,41 @@ export class ClubRelationshipSystem {
               satisfactionDevelopment: p.age <= 22 ? -5 : -2
             }, `Ngồi dự bị trọn trận (Chuỗi ${profile.benchStreak} trận liên tiếp, phong độ ${p.form})`);
 
-            // Chỉ tạo/leo thang mâu thuẫn dần dần sau >= 2 trận dự bị liên tiếp!
-            if (profile.benchStreak >= 2) {
+            // Nhận diện bị đồng đội cùng vị trí chiếm suất đá chính
+            const rival = starterByNormPos[normalizePosition(p.position)];
+            if (rival && rival.id !== p.id) {
+              profile.lostSpotTo = { playerId: rival.id, playerName: rival.name, position: p.position };
+              if (profile.teammateBonds?.[rival.id]) {
+                profile.teammateBonds[rival.id].score = clamp(profile.teammateBonds[rival.id].score - 2, 20, 98);
+                profile.teammateBonds[rival.id].type = 'rivalry';
+              }
+            }
+
+            // Tích lũy căng thẳng từ tốn theo tính cách (patient/professional/loyal chịu đựng lâu hơn)
+            const tensionGain = Math.round((p.form >= 78 ? 8 : 5) * mods.tensionMult);
+            this._adjustTension(profile, tensionGain);
+
+            // Ngưỡng phát sinh xung đột tự nhiên:
+            // - Tài năng trẻ phong độ cao (>=86 POT, >=80 form) hoặc cá tính mạnh: sau >=2 trận
+            // - Cầu thủ kiên nhẫn/chuyên nghiệp thông thường: cần tích lũy lâu hơn theo patienceMatches
+            const isHighFormYouth = p.age <= 21 && (p.pot || 80) >= 86 && p.form >= 80;
+            const triggerThreshold = isHighFormYouth ? 2 : Math.max(2, mods.patienceMatches);
+            const activeCnf = this.getActiveConflict(p.id);
+            if (!activeCnf && profile.benchStreak >= triggerThreshold) {
               this._escalateOrCreateConflict(p.id, {
                 scenario: p.age <= 21 ? 'youth_ignored' : 'bench_frustration',
-                cause: p.age <= 21
-                  ? `Tài năng trẻ ${p.name} (POT ${p.pot}, phong độ ${p.form}) không được trao phút thi đấu suốt ${profile.benchStreak} trận.`
-                  : `${p.name} (OVR ${p.ovr}) liên tục phải ngồi dự bị ${profile.benchStreak} trận dù sẵn sàng ra sân.`,
+                cause: profile.lostSpotTo
+                  ? `${p.name} mất suất đá chính vào tay ${profile.lostSpotTo.playerName} và dự bị ${profile.benchStreak} trận liên tiếp.`
+                  : (p.age <= 21
+                    ? `Tài năng trẻ ${p.name} (POT ${p.pot}, phong độ ${p.form}) không được trao phút thi đấu suốt ${profile.benchStreak} trận.`
+                    : `${p.name} (OVR ${p.ovr}) liên tục phải ngồi dự bị ${profile.benchStreak} trận dù sẵn sàng ra sân.`),
+                deltaLevel: 1
+              });
+            } else if (activeCnf && profile.benchStreak >= triggerThreshold + 3 && profile.tensionScore >= activeCnf.level * 24) {
+              // Leo thang chậm khi tích lũy đủ căng thẳng qua nhiều trận, không nhảy cóc hàng ngày!
+              this._escalateOrCreateConflict(p.id, {
+                scenario: activeCnf.scenario,
+                cause: `${p.name} tiếp tục ngồi dự bị kéo dài (${profile.benchStreak} trận, tích lũy căng thẳng ${profile.tensionScore}/100).`,
                 deltaLevel: 1
               });
             }
@@ -1374,11 +1599,16 @@ export class ClubRelationshipSystem {
         }
       }
 
-      // Thua trận đậm hoặc thua liên tiếp tác động nhẹ tới niềm tin chiến thuật
+      // Thua trận đậm hoặc thua liên tiếp tác động nhẹ tới niềm tin chiến thuật; thắng liên tiếp nâng hòa hợp phòng thay đồ
       if (!matchRes.psgWon && !matchRes.psgDrew && (this.state.loseStreak || 0) >= 2) {
-        this._applyMetricDeltas(p.id, { satisfactionTactics: -4, trustCoach: -3 });
+        this._applyMetricDeltas(p.id, { satisfactionTactics: -4, trustCoach: -3, dressingRoomHarmony: -2 });
+        this._adjustTension(profile, 4);
+      } else if (matchRes.psgWon) {
+        this._applyMetricDeltas(p.id, { dressingRoomHarmony: +2, trustAssistants: +1 });
       }
     });
+
+    this.recomputeDressingRoomState();
   }
 
   _checkDirectivesAndCommitmentsOnPlay(p, mins, wasStarter, outOfPos, fixture) {
@@ -1443,6 +1673,240 @@ export class ClubRelationshipSystem {
     });
   }
 
+  // ==================== CƠ CHẾ TỰ CHỦ HÒA GIẢI & ĐÁNH GIÁ DÀI HẠN ====================
+
+  onDailyTick(dayEvt = null) {
+    // Theo nguyên tắc diễn biến tự nhiên: mỗi ngày CHỈ quan sát & kiểm tra chuyển tháng,
+    // TUYỆT ĐỐI không ép sinh mâu thuẫn hay tự động xóa mâu thuẫn chỉ vì qua ngày mới!
+    const dayKey = dayEvt?.date || this.state?.timeSystem?.getDayKey?.() || `d_${this.state?.dayNum || 0}`;
+    if (dayKey && dayKey === this._lastDailyKey) return;
+    this._lastDailyKey = dayKey;
+
+    const mKey = this._monthKey();
+    if (this._lastMonthlyKey && mKey !== this._lastMonthlyKey) {
+      this.onMonthlyTick(mKey);
+    } else if (!this._lastMonthlyKey) {
+      this._lastMonthlyKey = mKey;
+    }
+    this.recomputeDressingRoomState();
+  }
+
+  attemptCoachTalk(playerId) {
+    const p = this.state?.getPlayerById?.(playerId);
+    const prof = this.playerRelations[playerId];
+    if (!p || !prof) return { ok: false, resolved: false };
+    const curWeek = this._week();
+    if (curWeek - (prof.lastCoachTalkWeek ?? -10) < 2) return { ok: false, resolved: false };
+    if (prof.metrics.trustCoach < 42) return { ok: false, resolved: false };
+
+    const style = this.getCoachStyleProfile();
+    const conflict = this.getActiveConflict(playerId);
+    if (!conflict && (prof.tensionScore || 0) < 20) return { ok: false, resolved: false };
+
+    prof.lastCoachTalkWeek = curWeek;
+    const mods = this._getTraitModifiers(prof);
+    const rootCausePersists = (prof.benchStreak || 0) >= 3 || (prof.metrics.satisfactionPlaytime || 0) < 48;
+    if (rootCausePersists && (prof.weeksDissatisfied || 0) >= 3) {
+      return { ok: true, resolved: false };
+    }
+    const chance = clamp((style.mediationSkill * 0.55 + (prof.metrics.professionalism || 76) * 0.35 - (conflict?.level || 0) * 10) / 100, 0.15, 0.88);
+    if (prof.brokenPromisesCount > 0 && Math.random() > chance * 0.5) {
+      return { ok: true, resolved: false };
+    }
+    if (Math.random() <= chance || style.mediationSkill >= 84) {
+      this._applyMetricDeltas(playerId, {
+        trustCoach: rootCausePersists ? +2 : +5,
+        respectCoach: rootCausePersists ? +1 : +3,
+        satisfactionRole: rootCausePersists ? +1 : +4,
+        dressingRoomHarmony: +2
+      });
+      const drop = rootCausePersists ? 4 : Math.round(14 * (1 / Math.max(0.7, mods.tensionMult)));
+      this._adjustTension(prof, -drop, `HLV ${style.coachName} chủ động trao đổi nội bộ giải tỏa tâm lý`);
+      if (conflict && conflict.level <= 2 && !rootCausePersists) {
+        this._deescalateConflict(playerId, 1, `HLV ${style.coachName} chủ động đối thoại hòa giải với ${p.name}.`);
+      }
+      this.recentResolutionLog.unshift({
+        date: this._dateStr(),
+        week: curWeek,
+        type: 'coach_talk',
+        actor: style.coachName,
+        playerId,
+        playerName: p.name,
+        note: `HLV ${style.coachName} chủ động trao đổi riêng giúp ${p.name} ổn định tâm lý.`
+      });
+      if (this.recentResolutionLog.length > 24) this.recentResolutionLog.length = 24;
+      return { ok: true, resolved: true, actor: style.coachName };
+    }
+    return { ok: true, resolved: false };
+  }
+
+  attemptCaptainMediation(playerId) {
+    const cap = this.getCaptainPlayer();
+    const p = this.state?.getPlayerById?.(playerId);
+    const prof = this.playerRelations[playerId];
+    if (!cap || !p || !prof || cap.id === p.id) return { ok: false, resolved: false };
+    const curWeek = this._week();
+    if (curWeek - (prof.lastCaptainMediationWeek ?? -10) < 3) return { ok: false, resolved: false };
+
+    const conflict = this.getActiveConflict(playerId);
+    if (!conflict || conflict.level < 2) return { ok: false, resolved: false };
+
+    // Nếu nguyên nhân gốc vẫn tồn tại (ngồi dự bị dài hạn chưa được giải quyết), đội trưởng chỉ giúp kìm ở Cấp 2 chứ không xóa sạch mâu thuẫn!
+    const rootCausePersists = (prof.benchStreak || 0) >= 3 || (prof.metrics.satisfactionPlaytime || 0) < 48;
+    if (rootCausePersists && conflict.level <= 2) {
+      return { ok: true, resolved: false };
+    }
+
+    prof.lastCaptainMediationWeek = curWeek;
+    const capInfluence = ((cap.mentality || 80) + (prof.metrics.trustCaptain || 80) + (prof.metrics.teamIntegration || 80)) / 3;
+    if (capInfluence >= 68 && conflict.level <= 4) {
+      this._applyMetricDeltas(playerId, {
+        teamIntegration: +6,
+        dressingRoomHarmony: +6,
+        trustCaptain: +4,
+        respectCoach: +2
+      });
+      this._deescalateConflict(playerId, 1, `Đội trưởng ${cap.name} đứng ra hòa giải nội bộ cho ${p.name}.`);
+      this.recentResolutionLog.unshift({
+        date: this._dateStr(),
+        week: curWeek,
+        type: 'captain_mediation',
+        actor: cap.name,
+        playerId,
+        playerName: p.name,
+        note: `Đội trưởng ${cap.name} hòa giải thành công căng thẳng của ${p.name} trong phòng thay đồ.`
+      });
+      if (this.recentResolutionLog.length > 24) this.recentResolutionLog.length = 24;
+      return { ok: true, resolved: true, captain: cap.name };
+    }
+    return { ok: true, resolved: false };
+  }
+
+  attemptPlayerSelfResolution(playerId) {
+    const p = this.state?.getPlayerById?.(playerId);
+    const prof = this.playerRelations[playerId];
+    if (!p || !prof) return { ok: false, resolved: false };
+    const conflict = this.getActiveConflict(playerId);
+    if (!conflict || conflict.level > 1) return { ok: false, resolved: false };
+    // Chỉ tự giải quyết khi không đang thua chuỗi dài & thực sự có sự hài lòng tối thiểu hoặc tính cách kiên nhẫn/chuyên nghiệp
+    if ((this.state?.loseStreak || 0) >= 2 || prof.brokenPromisesCount > 0) return { ok: false, resolved: false };
+    if (prof.benchStreak >= 3) return { ok: false, resolved: false };
+
+    const mods = this._getTraitModifiers(prof);
+    if (prof.metrics.satisfactionPlaytime >= 56 && Math.random() <= mods.selfResolveChance) {
+      this._deescalateConflict(playerId, 1, `${p.name} giữ thái độ chuyên nghiệp, tự điều chỉnh tâm lý hòa nhập tập thể.`);
+      this.recentResolutionLog.unshift({
+        date: this._dateStr(),
+        week: this._week(),
+        type: 'self_resolve',
+        actor: p.name,
+        playerId,
+        playerName: p.name,
+        note: `${p.name} tự ổn định tâm lý nhờ tinh thần chuyên nghiệp.`
+      });
+      if (this.recentResolutionLog.length > 24) this.recentResolutionLog.length = 24;
+      return { ok: true, resolved: true };
+    }
+    return { ok: false, resolved: false };
+  }
+
+  recomputeDressingRoomState() {
+    const squad = this.state?.getPsgSquad ? this.state.getPsgSquad() : [];
+    const cap = this.getCaptainPlayer();
+    if (!squad.length) return this.dressingRoomState;
+
+    let harmonySum = 0;
+    let tensionSum = 0;
+    let coachConfSum = 0;
+    let dissatisfiedCount = 0;
+    let simmeringCount = 0;
+    let severeCount = 0;
+    const groupStats = {};
+
+    squad.forEach((p) => {
+      const prof = this.playerRelations[p.id] || this.ensurePlayerProfile(p.id);
+      if (!prof) return;
+      const m = prof.metrics;
+      const cnf = this.getActiveConflict(p.id);
+      const grp = prof.dressingRoomGroup || this._classifyDressingRoomGroup(p);
+      if (!groupStats[grp]) groupStats[grp] = { count: 0, harmonySum: 0, unhappy: 0 };
+
+      const pHarmony = (m.dressingRoomHarmony + m.teamIntegration + m.trustCaptain + m.satisfactionBoard) / 4;
+      const pCoach = (m.trustCoach + m.respectCoach) / 2;
+      harmonySum += pHarmony;
+      tensionSum += prof.tensionScore || 0;
+      coachConfSum += pCoach;
+
+      groupStats[grp].count++;
+      groupStats[grp].harmonySum += pHarmony;
+
+      const isUnhappy = ['Thất vọng', 'Bất mãn', 'Tức giận', 'Mất niềm tin', 'Muốn ra đi'].includes(prof.mood);
+      if (isUnhappy || cnf) {
+        dissatisfiedCount++;
+        groupStats[grp].unhappy++;
+      }
+      if ((cnf && cnf.level >= 4) || prof.wantsToLeave || prof.mood === 'Muốn ra đi' || prof.mood === 'Tức giận') {
+        severeCount++;
+      } else if ((cnf && cnf.level >= 2) || (prof.tensionScore || 0) >= 35) {
+        simmeringCount++;
+      }
+    });
+
+    const n = Math.max(1, squad.length);
+    const avgTension = Math.round(tensionSum / n);
+    const rawHarmony = harmonySum / n - severeCount * 5 - simmeringCount * 2 - avgTension * 0.12;
+    const harmonyScore = clamp(Math.round(rawHarmony), 12, 100);
+    const coachConfidenceBySquad = Math.round(coachConfSum / n);
+
+    const affectedGroups = Object.entries(groupStats)
+      .filter(([, g]) => (g.harmonySum / Math.max(1, g.count)) < 68 || g.unhappy >= 2)
+      .map(([k]) => DRESSING_ROOM_GROUPS[k] || k);
+
+    let level = 1;
+    if (severeCount >= 2 || (severeCount >= 1 && dissatisfiedCount >= 4) || harmonyScore < 44) {
+      level = 5;
+    } else if (severeCount >= 1 || dissatisfiedCount >= 4 || harmonyScore < 56) {
+      level = 4;
+    } else if (simmeringCount >= 2 || dissatisfiedCount >= 2 || harmonyScore < 68) {
+      level = 3;
+    } else if (dissatisfiedCount === 1 || simmeringCount === 1 || harmonyScore < 76) {
+      level = 2;
+    }
+
+    const prevLevel = this.dressingRoomState?.level || 1;
+    const alerted = this.dressingRoomState?.captainAlertedBoard || false;
+    this.dressingRoomState = {
+      level,
+      label: DRESSING_ROOM_LEVELS[level]?.label || DRESSING_ROOM_LEVELS[1].label,
+      harmonyScore,
+      avgTension,
+      dissatisfiedCount,
+      simmeringCount,
+      severeCount,
+      coachConfidenceBySquad,
+      captainId: cap?.id || null,
+      captainName: cap?.name || 'Đội trưởng PSG',
+      captainAlertedBoard: level === 5 ? true : (level <= 2 ? false : alerted),
+      affectedGroups,
+      lastUpdatedWeek: this._week()
+    };
+
+    if (level === 5 && prevLevel < 5 && !alerted && cap) {
+      this.state?.pushPhoneMsg?.(
+        `Đội trưởng ${cap.name}`,
+        `🔴 ĐỘI TRƯỞNG CẢNH BÁO: KHỦNG HOẢNG PHÒNG THAY ĐỒ`,
+        `Thưa Chủ tịch Phạm Minh Chiêu, phòng thay đồ PSG đang rơi vào Cấp 5 (${severeCount} ca nghiêm trọng, hòa hợp ${harmonyScore}/100). Tập thể đề nghị Chủ tịch trực tiếp can thiệp ổn định trước khi ảnh hưởng nặng tới phong độ thi đấu.`,
+        true
+      );
+    }
+
+    return this.dressingRoomState;
+  }
+
+  getDressingRoomState() {
+    return this.dressingRoomState || this.recomputeDressingRoomState();
+  }
+
   onWeeklyTick() {
     const curWeek = this._week();
 
@@ -1468,22 +1932,189 @@ export class ClubRelationshipSystem {
       const prof = this.ensurePlayerProfile(y.id);
       if (!prof) return;
       prof.weeksWithoutFirstTeamApps = (prof.weeksWithoutFirstTeamApps || 0) + 1;
-      if (prof.weeksWithoutFirstTeamApps >= 4) {
-        this._applyMetricDeltas(y.id, { satisfactionDevelopment: -4, satisfactionPlaytime: -4 }, 'Chờ đợi cơ hội thử sức cùng đội một');
+      if (prof.weeksWithoutFirstTeamApps >= 6) {
+        this._applyMetricDeltas(y.id, { satisfactionDevelopment: -3, satisfactionPlaytime: -3 }, 'Chờ đợi cơ hội thử sức cùng đội một');
       }
     });
 
-    // 4. Đánh giá lại chỉ đạo nếu có thay đổi điều kiện
+    // 4. Tích lũy thời gian bất mãn thực sự & thử cơ chế tự hòa giải (KHÔNG tự xóa mâu thuẫn nếu nguyên nhân còn nguyên!)
+    let healOps = 0;
+    const squad = this.state?.getPsgSquad ? this.state.getPsgSquad() : [];
+    squad.forEach((p) => {
+      const prof = this.ensurePlayerProfile(p.id);
+      if (!prof) return;
+      const cnf = this.getActiveConflict(p.id);
+      const isDissatisfied = !!cnf || ['Thất vọng', 'Bất mãn', 'Tức giận', 'Mất niềm tin', 'Muốn ra đi'].includes(prof.mood);
+      if (isDissatisfied) {
+        prof.weeksDissatisfied = (prof.weeksDissatisfied || 0) + 1;
+        if (healOps < 2) {
+          if (cnf && cnf.level >= 2 && cnf.level <= 4) {
+            const capRes = this.attemptCaptainMediation(p.id);
+            if (capRes.resolved) { healOps++; return; }
+          }
+          const coachRes = this.attemptCoachTalk(p.id);
+          if (coachRes.resolved) { healOps++; return; }
+          const selfRes = this.attemptPlayerSelfResolution(p.id);
+          if (selfRes.resolved) { healOps++; }
+        }
+      }
+    });
+
+    // 5. Đánh giá lại chỉ đạo nếu có thay đổi điều kiện
     this.reevaluateDirectivesOnContextChange(`cập nhật nhân sự Tuần ${curWeek}`);
 
-    // 5. Nếu cầu thủ muốn ra đi -> đẩy khả năng các CLB phù hợp gửi đề nghị hỏi mua ở kỳ chuyển nhượng
+    // 6. Nếu cầu thủ muốn ra đi -> đẩy khả năng các CLB phù hợp gửi đề nghị hỏi mua ở kỳ chuyển nhượng
     if (this.state?.transferSystem?.isWindowOpen?.()) {
-      const wantsOutPlayers = this.state.getPsgSquad().filter((p) => this.playerRelations[p.id]?.wantsToLeave);
+      const wantsOutPlayers = squad.filter((p) => this.playerRelations[p.id]?.wantsToLeave);
       if (wantsOutPlayers.length > 0 && Math.random() < 0.55) {
         wantsOutPlayers[0].transferListed = true;
         this.state.transferSystem.generateIncomingBids(1);
       }
     }
+
+    // 7. Đồng bộ chu kỳ tháng nếu advanceWeek nhảy qua ranh giới tháng
+    const mKey = this._monthKey();
+    if (mKey !== this._lastMonthlyKey) {
+      this.onMonthlyTick(mKey);
+    } else {
+      this.recomputeDressingRoomState();
+    }
+  }
+
+  onMonthlyTick(monthKey = null) {
+    const mKey = monthKey || this._monthKey();
+    if (mKey === this._lastMonthlyKey) return;
+    this._lastMonthlyKey = mKey;
+
+    const squad = this.state?.getPsgSquad ? this.state.getPsgSquad() : [];
+    const dateStr = this._dateStr();
+
+    squad.forEach((p) => {
+      const prof = this.ensurePlayerProfile(p.id);
+      if (!prof) return;
+      const mods = this._getTraitModifiers(prof);
+      const cnf = this.getActiveConflict(p.id);
+
+      // 1. Kiểm tra bất mãn hợp đồng / đãi ngộ (chỉ phát sinh âm ỉ nếu trụ cột sắp hết hạn <=1 năm)
+      if ((p.contractYears || 2) <= 1 && p.ovr >= 82 && prof.metrics.satisfactionBoard > 45) {
+        this._applyMetricDeltas(p.id, { satisfactionBoard: -3, clubAttachment: -1 });
+        this._adjustTension(prof, Math.round(4 * mods.tensionMult));
+      }
+
+      // 2. Xử lý mâu thuẫn âm ỉ kéo dài nhiều tháng (KHÔNG bao giờ tự biến mất khi chưa được xử lý!)
+      const hasDissatisfaction = !!cnf || ['Thất vọng', 'Bất mãn', 'Tức giận', 'Mất niềm tin', 'Muốn ra đi'].includes(prof.mood);
+      if (hasDissatisfaction) {
+        prof.monthsDissatisfied = (prof.monthsDissatisfied || 0) + 1;
+        this._adjustTension(prof, Math.round(6 * mods.tensionMult));
+
+        // Sau nhiều tháng không giải quyết -> Đại diện thăm dò thị trường & cân nhắc ra đi
+        if (prof.monthsDissatisfied >= mods.agentProbeMonths && (prof.tensionScore || 0) >= 35 && !prof.agentProbing) {
+          prof.agentProbing = true;
+          this._logPlayerEvent(prof, 'agent_probing', 'Người đại diện bắt đầu thăm dò bến đỗ mới', `Bất mãn kéo dài ${prof.monthsDissatisfied} tháng`);
+        }
+
+        if (prof.monthsDissatisfied >= mods.agentProbeMonths + 2 && (prof.tensionScore || 0) >= 52) {
+          if (cnf && cnf.level < 4) {
+            this._escalateOrCreateConflict(p.id, {
+              scenario: cnf.scenario,
+              cause: `Bất mãn không được tháo gỡ suốt ${prof.monthsDissatisfied} tháng; người đại diện yêu cầu làm rõ tương lai.`,
+              deltaLevel: cnf.level <= 2 ? 2 : 1,
+              fromBrokenPromise: cnf.level <= 2
+            });
+          } else if (!cnf) {
+            this._escalateOrCreateConflict(p.id, {
+              scenario: 'prolonged_dissatisfaction',
+              cause: `Tích tụ bất mãn âm ỉ kéo dài ${prof.monthsDissatisfied} tháng tại PSG.`,
+              deltaLevel: 2
+            });
+          }
+        }
+      }
+
+      // 3. Ghi nhận lịch sử theo tháng (monthlyHistory)
+      const m = prof.metrics;
+      const coachAvg = Math.round((m.trustCoach + m.respectCoach) / 2);
+      prof.monthlyHistory.unshift({
+        monthKey: mKey,
+        date: dateStr,
+        mood: prof.mood,
+        tensionScore: prof.tensionScore || 0,
+        conflictLevel: this.getActiveConflict(p.id)?.level || 0,
+        coachAvg,
+        chairmanTrust: m.trustChairman,
+        harmony: m.dressingRoomHarmony
+      });
+      if (prof.monthlyHistory.length > 18) prof.monthlyHistory.length = 18;
+      this.recomputeMoodAndSyncPlayer(p.id);
+    });
+
+    this.recomputeDressingRoomState();
+  }
+
+  onTrainingEvaluated(report) {
+    if (!report) return;
+    const standouts = new Set((report.standouts || []).map((x) => x.playerId));
+    const needRecovery = new Set((report.needRecovery || []).map((x) => x.playerId));
+    const squad = this.state?.getPsgSquad ? this.state.getPsgSquad() : [];
+    squad.forEach((p) => {
+      const prof = this.ensurePlayerProfile(p.id);
+      if (!prof) return;
+      if (standouts.has(p.id)) {
+        this._applyMetricDeltas(p.id, { trustAssistants: +2, respectAssistants: +2, satisfactionDevelopment: +2 });
+        this._adjustTension(prof, -2);
+      } else if (needRecovery.has(p.id) && (report.intensity === 'Cao' || report.intensity === 'Rất cao')) {
+        this._applyMetricDeltas(p.id, { trustAssistants: -2, satisfactionBoard: -1 });
+      }
+    });
+    this.recomputeDressingRoomState();
+  }
+
+  onTournamentEliminated(compName = 'UEFA Champions League', stage = 'Knockout') {
+    const squad = this.state?.getPsgSquad ? this.state.getPsgSquad() : [];
+    const isUcl = String(compName).toLowerCase().includes('champions');
+    squad.forEach((p) => {
+      const prof = this.ensurePlayerProfile(p.id);
+      if (!prof) return;
+      const isAmbitious = prof.traits.includes('ambitious') || prof.traits.includes('competitive');
+      if (isUcl && isAmbitious) {
+        this._applyMetricDeltas(p.id, { satisfactionBoard: -4, trustCoach: -3 }, `Thất vọng bị loại tại ${compName} (${stage})`);
+        this._adjustTension(prof, 6);
+      } else {
+        this._applyMetricDeltas(p.id, { dressingRoomHarmony: -2 });
+      }
+    });
+    this.recomputeDressingRoomState();
+  }
+
+  onSeasonEndEvaluation(eosSummary = {}) {
+    const trophies = eosSummary.earnedTrophies || [];
+    const wonAny = trophies.length > 0;
+    const wonUcl = trophies.some((t) => t.competitionId === 'ucl');
+    const squad = this.state?.getPsgSquad ? this.state.getPsgSquad() : [];
+
+    squad.forEach((p) => {
+      const prof = this.ensurePlayerProfile(p.id);
+      if (!prof) return;
+      if (wonAny) {
+        this._applyMetricDeltas(p.id, {
+          clubAttachment: wonUcl ? +8 : +4,
+          trustChairman: wonUcl ? +6 : +3,
+          trustCoach: wonUcl ? +6 : +3,
+          dressingRoomHarmony: +6,
+          satisfactionBoard: +5
+        }, `Tổng kết mùa giải ${eosSummary.season || ''}: PSG giành ${trophies.length} danh hiệu`);
+        this._adjustTension(prof, wonUcl ? -18 : -10, 'Thành công danh hiệu tập thể cuối mùa');
+      } else {
+        const isAmbitious = prof.traits.includes('ambitious') || prof.traits.includes('strong_ego');
+        this._applyMetricDeltas(p.id, {
+          satisfactionBoard: isAmbitious ? -6 : -3,
+          trustCoach: isAmbitious ? -5 : -2
+        }, `Tổng kết mùa giải ${eosSummary.season || ''}: PSG trắng tay danh hiệu`);
+        if (isAmbitious) this._adjustTension(prof, 8);
+      }
+      this.recomputeMoodAndSyncPlayer(p.id);
+    });
+    this.recomputeDressingRoomState();
   }
 
   // ==================== 8. THAY ĐỔI HLV TRƯỞNG (GIỮ LẠI LỊCH SỬ MÂU THUẪN) ====================
@@ -1959,8 +2590,11 @@ export class ClubRelationshipSystem {
       return cb - ca;
     });
 
+    this.recomputeDressingRoomState();
     return {
       kpis: this.getRelationshipSummaryKPIs(),
+      dressingRoomState: this.dressingRoomState,
+      recentResolutionLog: this.recentResolutionLog.slice(0, 10),
       rows,
       activeConflicts: this.conflicts.filter((c) => c.status === 'active'),
       pendingDirectives: this.directives,
@@ -1985,6 +2619,10 @@ export class ClubRelationshipSystem {
       pressLeaks: this.pressLeaks.slice(0, 30),
       chairmanCoachTrust: this.chairmanCoachTrust,
       recentInterferenceWeeks: [...this.recentInterferenceWeeks],
+      recentResolutionLog: this.recentResolutionLog.slice(0, 24),
+      dressingRoomState: this.dressingRoomState,
+      lastDailyKey: this._lastDailyKey,
+      lastMonthlyKey: this._lastMonthlyKey,
       matchCounter: this._matchCounter
     };
   }
@@ -2000,6 +2638,10 @@ export class ClubRelationshipSystem {
     this.pressLeaks = Array.isArray(snap.pressLeaks) ? snap.pressLeaks : [];
     this.chairmanCoachTrust = typeof snap.chairmanCoachTrust === 'number' ? snap.chairmanCoachTrust : 84;
     this.recentInterferenceWeeks = Array.isArray(snap.recentInterferenceWeeks) ? snap.recentInterferenceWeeks : [];
+    this.recentResolutionLog = Array.isArray(snap.recentResolutionLog) ? snap.recentResolutionLog : [];
+    if (snap.dressingRoomState) this.dressingRoomState = snap.dressingRoomState;
+    this._lastDailyKey = snap.lastDailyKey || '';
+    this._lastMonthlyKey = snap.lastMonthlyKey || '';
     this._matchCounter = snap.matchCounter || 0;
     this.privateMeetingSessions = {};
 
@@ -2007,6 +2649,8 @@ export class ClubRelationshipSystem {
     Object.keys(this.playerRelations).forEach((pid) => {
       this.recomputeMoodAndSyncPlayer(pid);
     });
+    this._seedTeammateBondsForSquad();
+    this.recomputeDressingRoomState();
   }
 }
 

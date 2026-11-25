@@ -2,8 +2,10 @@ import { renderMatchdayHubHTML, bindMatchdayViewEvents, renderLeaguesComputerTab
 import { PressNewsSystem } from '../media/PressNewsSystem.js';
 import { RoleDialogueDatabase, NPCPersonalitySystem, TaskAssignmentSystem } from '../dialogue/DialogueSystem.js';
 import { renderPlayerProfileHTML } from './PlayerProfileView.js';
+import { getPlayerPortraitDataUrl } from '../players/PlayerDatabase.js';
 import { renderStaffCoachTabHTML, renderTrainingTabHTML } from './StaffAndTrainingViews.js';
 import { renderTransferMarketHTML } from './TransferMarketView.js';
+import { renderMarketValueCenterHTML } from './MarketValueCenterView.js';
 import { renderSigningEventHubHTML, renderLiveCeremonySheetHTML } from './SigningEventView.js';
 import { renderFormationPitchTabHTML, bindFormationPitchEvents } from './FormationPitchView.js';
 import { STAFF_ROLE_META } from '../staff/StaffDatabase.js';
@@ -32,6 +34,11 @@ import {
   renderPrivateMeetingHTML
 } from './RelationshipViews.js';
 import { DIRECTIVE_CATEGORIES, COMMITMENT_STATUS } from '../relations/ClubRelationshipSystem.js';
+import {
+  CONSULTATION_DECISIONS,
+  formatBidClausesText,
+  normalizeBidObject
+} from '../transfers/TransferConsultationSystem.js';
 // src/ui/UIManager.js
 // Giao diện cảm ứng iPhone Landscape/Portrait tối ưu + Trung tâm Điều hành Chủ tịch (Máy tính 17 ứng dụng, TV 9 kênh, Điện thoại thông minh)
 export class UIManager {
@@ -47,6 +54,13 @@ export class UIManager {
     this.transferSubTab = 'buy';
     this.transferFilters = { search: '', club: '', nat: '', pos: 'ALL', minOvr: '', minPot: '', maxAge: '', maxVal: '', maxWage: '', maxContract: '' };
     this.transferPage = 1;
+    this.valuationViewState = {
+      category: 'top_valued',
+      filters: { search: '', club: '', league: 'ALL', pos: 'ALL', maxAge: '', maxVal: '', minPot: '' },
+      page: 1
+    };
+    this.profileChartRange = '12w';
+    this.selectedLeagueView = 'Ligue 1';
     this.selectedPlayerId = null;
     this.staffSubTab = 'head_coach';
     this.trainingSubTab = 'schedule';
@@ -182,13 +196,31 @@ export class UIManager {
     return this._hudEls;
   }
 
-  toast(msg, type = 'info') {
+  toast(msg, type = 'info', action = null) {
     const el = document.getElementById('toast-box');
     if (!el) return;
-    el.textContent = msg;
-    el.className = `toast-box show ${type}`;
+    el.innerHTML = '';
+    const span = document.createElement('span');
+    span.textContent = msg;
+    el.appendChild(span);
+    if (action && action.label && typeof action.onClick === 'function') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast-action-btn';
+      btn.textContent = action.label;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.audio?.playClick?.();
+        el.className = 'toast-box';
+        action.onClick();
+      });
+      el.appendChild(btn);
+      el.className = `toast-box show clickable ${type}`;
+    } else {
+      el.className = `toast-box show ${type}`;
+    }
     clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => { el.className = 'toast-box'; }, 3500);
+    this._toastTimer = setTimeout(() => { el.className = 'toast-box'; }, action ? 6500 : 3500);
   }
 
   bindStaticButtons() {
@@ -457,7 +489,16 @@ export class UIManager {
 
     this.audio.playSuccess();
     this.cb.autoSaveNow?.(true);
-    this.toast(`Đã sang Tuần ${this.state.week} (${this.state.dayName}) · Bản tin hằng ngày đã cập nhật!`, 'success');
+    const valRep = res?.valuationReport;
+    if (valRep) {
+      this.toast(
+        `Tuần ${this.state.week} · 📈 WEEKLY PLAYER VALUATION (${valRep.risersCount}↑ / ${valRep.fallersCount}↓)`,
+        'success',
+        { label: 'XEM CHI TIẾT', onClick: () => this.openComputer('valuation') }
+      );
+    } else {
+      this.toast(`Đã sang Tuần ${this.state.week} (${this.state.dayName}) · Bản tin hằng ngày đã cập nhật!`, 'success');
+    }
     if (this.state.incomingCall) {
       this.audio.playPhoneRing();
       this.showIncomingCall(this.state.incomingCall);
@@ -1273,6 +1314,7 @@ export class UIManager {
         <div class="card-head"><strong>${m.from}</strong><span class="tag">${m.urgent ? 'KHẨN' : 'Tin nhắn'}</span></div>
         <div class="card-sub">${m.title}</div>
         <p>${m.body}</p>
+        ${m.actionType === 'open_market_value' ? `<div class="btn-row" style="margin-top:6px;"><button type="button" class="btn-xs btn-primary ph-open-valuation">${m.actionLabel || 'XEM CHI TIẾT'}</button></div>` : ''}
       </div>`).join('');
 
     const html = `
@@ -1300,15 +1342,21 @@ export class UIManager {
           <button class="btn-xs btn-danger" id="ph-open-crisis">🏛️ Họp xử lý khủng hoảng ngay</button>
         </div>` : ''}
 
-      ${topBid ? `
+      ${topBid ? (() => {
+        const bp = s.getPlayerById?.(topBid.playerId);
+        const nb = normalizeBidObject(topBid, bp);
+        return `
         <div class="card-item urgent">
-          <div class="card-head"><strong>📩 ${topBid.buyerClub} hỏi ${topBid.dealType === 'loan' ? 'MƯỢN' : 'MUA'} ${topBid.playerName}</strong><span class="tag ok">€${topBid.fee}M</span></div>
+          <div class="card-head"><strong>📩 ${nb.buyerClub} hỏi ${nb.dealType === 'loan' ? 'MƯỢN' : 'MUA'} ${nb.playerName} (${nb.position} · ${bp?.age || '--'}t · OVR ${nb.ovr})</strong><span class="tag ok">€${nb.fee}M</span></div>
+          <div class="muted" style="font-size:11px;margin-bottom:6px;">Giá TT: €${nb.marketValue}M · Yêu cầu: €${nb.askingPrice}M · Hạn: ${nb.deadlineDate}</div>
           <div class="btn-row">
-            <button class="btn-xs btn-primary" id="ph-bid-acc" data-bid="${topBid.id}">✅ Chấp nhận</button>
-            <button class="btn-xs btn-accent" id="ph-bid-cnt" data-bid="${topBid.id}" data-fee="${Math.round(topBid.fee * 1.15)}">💬 Ép giá €${Math.round(topBid.fee * 1.15)}M</button>
-            <button class="btn-xs btn-danger" id="ph-bid-rej" data-bid="${topBid.id}">❌ Từ chối</button>
+            <button class="btn-xs btn-primary" id="ph-bid-consult" data-bid="${nb.id}">🏛️ Tham khảo ý kiến các bộ phận</button>
+            <button class="btn-xs btn-primary" id="ph-bid-acc" data-bid="${nb.id}">✅ Chấp nhận</button>
+            <button class="btn-xs btn-accent" id="ph-bid-cnt" data-bid="${nb.id}" data-fee="${Math.round(nb.fee * 1.15)}">💬 Ép giá €${Math.round(nb.fee * 1.15)}M</button>
+            <button class="btn-xs btn-danger" id="ph-bid-rej" data-bid="${nb.id}">❌ Từ chối</button>
           </div>
-        </div>` : ''}
+        </div>`;
+      })() : ''}
 
       ${topRumor ? `
         <div class="card-item">
@@ -1357,6 +1405,9 @@ export class UIManager {
     document.getElementById('ph-museum')?.addEventListener('click', () => this.openComputer('museum'));
     document.getElementById('ph-match')?.addEventListener('click', () => this.openMatchdayCenter());
 
+    document.getElementById('ph-bid-consult')?.addEventListener('click', (e) => {
+      this.openTransferConsultationModal(e.currentTarget.dataset.bid);
+    });
     document.getElementById('ph-bid-acc')?.addEventListener('click', (e) => {
       const res = s.transferSystem.acceptIncomingBid(e.currentTarget.dataset.bid);
       if (res.ok) { this.audio.playSuccess(); this.toast(`✅ Đã chấp nhận đề nghị cho ${res.deal.playerName} (+€${res.deal.fee}M)!`, 'success'); }
@@ -1381,6 +1432,9 @@ export class UIManager {
         else { this.audio.playAlert(); this.toast(res.error, 'error'); }
         this.openPhone({ skipHistory: true, preserveScroll: true });
       });
+    });
+    document.querySelectorAll('.ph-open-valuation').forEach((b) => {
+      b.addEventListener('click', () => this.openComputer('valuation'));
     });
   }
 
@@ -2038,6 +2092,7 @@ export class UIManager {
       { id: 'locker_room', icon: '🏥', name: `Phòng thay đồ${conflictsCnt > 0 ? ` (${conflictsCnt})` : ''}`, bg: 'linear-gradient(135deg,#0f766e,#115e59)' },
       { id: 'hr', icon: '🏛️', name: 'Nhân sự (12 PB)', bg: 'linear-gradient(135deg,#7c3aed,#4c1d95)' },
       { id: 'transfers', icon: '🤝', name: `Chuyển nhượng${bidsCnt > 0 ? ` (${bidsCnt})` : ''}`, bg: 'linear-gradient(135deg,#ea580c,#9a3412)' },
+      { id: 'valuation', icon: '📈', name: `Định giá TT${this.state.valuationSystem?.hasUnreadReport ? ' •' : ''}`, bg: 'linear-gradient(135deg,#0d9488,#115e59)' },
       { id: 'contracts', icon: '✍️', name: 'Đàm phán HĐ', bg: 'linear-gradient(135deg,#0369a1,#0c4a6e)' },
       { id: 'finance', icon: '💶', name: 'Tài chính', bg: 'linear-gradient(135deg,#ca8a04,#713f12)' },
       { id: 'sponsors', icon: '🏅', name: 'Nhà tài trợ', bg: 'linear-gradient(135deg,#d97706,#78350f)' },
@@ -2062,6 +2117,7 @@ export class UIManager {
     else if (resolvedTab === 'locker_room') content = renderLockerRoomReportHTML(this.state, this.lockerRoomFilters);
     else if (resolvedTab === 'hr') content = this.renderDepartmentsTab();
     else if (resolvedTab === 'transfers') content = renderTransferMarketHTML(this.state, this);
+    else if (resolvedTab === 'valuation') content = renderMarketValueCenterHTML(this.state, this);
     else if (resolvedTab === 'contracts') content = renderContractsNegotiationHTML(this.state);
     else if (resolvedTab === 'finance') content = this.renderFinanceTab();
     else if (resolvedTab === 'sponsors') content = renderSponsorsHTML(this.state);
@@ -2404,24 +2460,40 @@ export class UIManager {
   }
 
   openIncomingBidTaskModal(bidId) {
-    const bid = (this.state.transferSystem?.incomingBids || []).find((b) => b.id === bidId);
-    if (!bid) {
+    const rawBid = (this.state.transferSystem?.incomingBids || []).find((b) => b.id === bidId);
+    if (!rawBid) {
       this.toast('Đề nghị chuyển nhượng này đã được xử lý.', 'info');
       return;
     }
+    const p = this.state.getPlayerById?.(rawBid.playerId);
+    const bid = normalizeBidObject(rawBid, p);
+    const portrait = p ? getPlayerPortraitDataUrl(p) : '';
     const taskId = `incoming_bid_${bid.id}`;
-    const suggestedCounter = Math.round(bid.offerFee * 1.15);
+    const suggestedCounter = Math.round(bid.fee * 1.15);
     const html = `
       <div class="card-item">
-        <div class="card-head"><strong>${bid.playerName} (${bid.position} · OVR ${bid.ovr})</strong><span class="tag">${bid.type === 'loan' ? 'Mượn' : 'Mua đứt'}</span></div>
-        <p>CLB đề nghị: <b>${bid.fromClub}</b> · Giá đưa ra: <b style="color:#4ade80;">€${bid.offerFee}M</b> (Định giá cầu thủ: €${bid.marketValue}M)</p>
+        <div class="card-head">
+          <div style="display:flex;align-items:center;gap:10px;">
+            ${portrait ? `<img src="${portrait}" alt="${bid.playerName}" style="width:48px;height:48px;border-radius:10px;object-fit:cover;flex-shrink:0;" />` : ''}
+            <div>
+              <strong>${bid.playerName} (${bid.position} · ${p?.age || '--'} tuổi · OVR ${bid.ovr})</strong>
+              <div class="muted" style="font-size:11px;">Phong độ: <b>${p?.form ?? p?.morale ?? 78}/100</b> · Giá thị trường: <b>€${bid.marketValue}M</b> · PSG yêu cầu: <b>€${bid.askingPrice}M</b></div>
+            </div>
+          </div>
+          <span class="tag">${bid.dealType === 'loan' ? 'Mượn' : 'Mua đứt'}</span>
+        </div>
+        <p style="margin-top:8px;">CLB đề nghị: <b>${bid.buyerClub}</b> · Phí đề xuất: <b style="color:#4ade80;">€${bid.fee}M</b>${bid.dealType === 'loan' && bid.buyOptionFee ? ` · Mua đứt €${bid.buyOptionFee}M` : ''}</p>
+        <div class="muted" style="font-size:12px;">Điều khoản: <b>${formatBidClausesText(bid)}</b> · Hạn phản hồi: <b>${bid.deadlineDate}</b></div>
+      </div>
+      <div class="btn-row" style="margin-bottom:8px;">
+        <button type="button" class="btn-primary" id="bid-consult">🏛️ Tham khảo ý kiến các bộ phận</button>
       </div>
       <div class="form-row">
         <label>Mức giá phản đề nghị (€M):</label>
         <input id="bid-counter-fee" type="number" class="input-ctrl" value="${suggestedCounter}" />
       </div>
       <div class="btn-row" style="margin-top:10px;">
-        <button type="button" class="btn-primary" id="bid-accept">✅ Chấp nhận bán/mượn (€${bid.offerFee}M)</button>
+        <button type="button" class="btn-primary" id="bid-accept">✅ Chấp nhận bán/mượn (€${bid.fee}M)</button>
         <button type="button" class="btn-accent" id="bid-counter">💬 Phản đề nghị</button>
         <button type="button" class="btn-danger" id="bid-reject">❌ Từ chối</button>
         <button type="button" class="btn-secondary" id="bid-close">↩️ Đóng</button>
@@ -2437,6 +2509,7 @@ export class UIManager {
       replaceTopStep: true
     });
 
+    document.getElementById('bid-consult')?.addEventListener('click', () => this.openTransferConsultationModal(bid.id));
     document.getElementById('bid-close')?.addEventListener('click', () => this.requestCloseTaskWindow());
     document.getElementById('bid-accept')?.addEventListener('click', () => {
       const res = this.state.transferSystem.acceptIncomingBid(bid.id);
@@ -2458,7 +2531,7 @@ export class UIManager {
       const res = this.state.transferSystem.counterIncomingBid(bid.id, fee);
       if (res.ok) {
         this.audio.playSuccess();
-        this.completeAndCloseTaskWindow(taskId, res.message, { toastType: res.outcome === 'rejected' ? 'warn' : 'info' });
+        this.completeAndCloseTaskWindow(taskId, res.message, { toastType: res.outcome === 'walked_away' ? 'warn' : 'info' });
       } else {
         this.audio.playAlert();
         this._setTaskErrorState(taskId, res.error || 'Không thể gửi phản đề nghị.');
@@ -2467,7 +2540,288 @@ export class UIManager {
     document.getElementById('bid-reject')?.addEventListener('click', () => {
       this.state.transferSystem.rejectIncomingBid(bid.id);
       this.audio.playClick();
-      this.completeAndCloseTaskWindow(taskId, `Đã từ chối đề nghị từ ${bid.fromClub}.`, { toastType: 'info' });
+      this.completeAndCloseTaskWindow(taskId, `Đã từ chối đề nghị từ ${bid.buyerClub}.`, { toastType: 'info' });
+    });
+  }
+
+  openTransferConsultationModal(bidId, opts = {}) {
+    const tcs = this.state.transferConsultationSystem;
+    if (!tcs) {
+      this.toast('Hệ thống tham vấn chuyển nhượng chưa được khởi tạo.', 'error');
+      return;
+    }
+    const res = tcs.consultOffer(bidId, { forceReevaluate: Boolean(opts.forceReevaluate) });
+    if (!res.ok) {
+      this.toast(res.error || 'Không thể tham vấn đề nghị này.', 'warn');
+      return;
+    }
+    const cons = res.consultation;
+    const rawBid = (this.state.transferSystem?.incomingBids || []).find((b) => b.id === bidId);
+    const p = this.state.getPlayerById?.(cons.playerId);
+    const portrait = p ? getPlayerPortraitDataUrl(p) : '';
+    const ps = cons.playerSummary;
+    const os = cons.offerSummary;
+    const taskId = `consult_bid_${bidId}`;
+    const suggestedCounter = Math.max(Math.round(os.fee * 1.15), ps.askingPrice);
+
+    const toneBadgeStyle = (tone) => {
+      if (tone === 'positive') return 'background:rgba(34,197,94,0.18);color:#4ade80;border:1px solid rgba(74,222,128,0.4);';
+      if (tone === 'negative') return 'background:rgba(239,68,68,0.18);color:#f87171;border:1px solid rgba(248,113,113,0.4);';
+      return 'background:rgba(245,158,11,0.18);color:#fbbf24;border:1px solid rgba(251,191,36,0.4);';
+    };
+
+    const staleHtml = res.stale
+      ? `<div class="card-item urgent" style="border-color:#f59e0b;background:rgba(245,158,11,0.12);">
+          <div class="card-head"><strong>⚠️ ĐỀ NGHỊ ĐÃ THAY ĐỔI SO VỚI LẦN THAM VẤN TRƯỚC</strong><button type="button" class="btn-xs btn-primary" id="tc-reevaluate-top">🔄 Đánh giá lại ngay</button></div>
+          <div class="muted" style="font-size:12px;">${(res.staleReasons || []).join(' · ')}</div>
+        </div>`
+      : '';
+
+    const headerHtml = `
+      ${staleHtml}
+      <div class="card-item" style="background:rgba(15,23,42,0.75);">
+        <div class="card-head" style="align-items:flex-start;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            ${portrait ? `<img src="${portrait}" alt="${ps.name}" style="width:56px;height:56px;border-radius:12px;object-fit:cover;flex-shrink:0;" />` : ''}
+            <div>
+              <strong style="font-size:15px;">${ps.name} (${ps.position} · ${ps.age} tuổi · OVR ${ps.ovr}/POT ${ps.pot})</strong>
+              <div class="muted" style="font-size:12px;">Phong độ: <b>${ps.form}/100</b> · Thể lực: <b>${ps.fitness}%</b> · Vai trò: <b>${ps.isStarter ? 'Đá chính' : 'Dự bị/Xoay tua'}</b> · Tâm lý: <b>${ps.mood}</b>${ps.wantsToLeave ? ' <span style="color:#f87171;">(Muốn ra đi)</span>' : ''}</div>
+              <div class="muted" style="font-size:12px;">Giá trị TT: <b>€${ps.marketValue}M</b> · PSG yêu cầu: <b>€${ps.askingPrice}M</b> · HĐ còn: <b>${ps.contractYears} năm</b> (€${ps.wage}k/tuần)</div>
+            </div>
+          </div>
+          <span class="tag ok" style="font-size:12px;">${os.buyerClub} · ${os.dealType === 'loan' ? 'Mượn' : 'Mua đứt'} €${os.fee}M</span>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(148,163,184,0.2);">
+          <div>Điều khoản đề xuất: <b>${os.clausesText}</b></div>
+          <div>Hạn phản hồi: <b>${os.deadlineDate}</b> · Đánh giá mã: <span class="muted">${cons.consultationId} (v${cons.version || 1})</span></div>
+        </div>
+      </div>`;
+
+    const summaryTableHtml = `
+      <div class="section-label">📊 Bảng Tổng Hợp Tham Vấn Nội Bộ</div>
+      <div class="table-wrap" style="max-height:28vh;">
+        <table class="data-table">
+          <thead><tr><th>Bộ phận</th><th>Phụ trách</th><th>Quan điểm</th><th>Khuyến nghị</th></tr></thead>
+          <tbody>
+            ${cons.summaryTable.map((row) => `
+              <tr>
+                <td><b>${row.department}</b></td>
+                <td>${row.staffName}</td>
+                <td><span class="tag" style="${toneBadgeStyle(row.tone)}">${row.stance}</span></td>
+                <td><b>${row.recommendation}</b></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-item" style="border-left:3px solid #38bdf8;margin-top:8px;">
+        <div class="card-head"><strong>🏛️ KẾT LUẬN THAM VẤN</strong><span class="tag">${cons.conclusion.divergenceType === 'consensus_sell' || cons.conclusion.divergenceType === 'consensus_keep' ? 'Đồng thuận' : 'Đa chiều'}</span></div>
+        <div style="font-weight:600;margin-top:4px;">${cons.conclusion.headline}</div>
+        <p class="muted" style="margin:4px 0;">${cons.conclusion.detail}</p>
+        <div style="font-size:11px;color:#94a3b8;">${cons.conclusion.note}</div>
+      </div>`;
+
+    const opinionsHtml = `
+      <div class="section-label">🗣️ Đánh Giá Chi Tiết Từng Bộ Phận (${cons.opinions.length} đơn vị)</div>
+      <div class="scroll-list" style="max-height:30vh;">
+        ${cons.opinions.map((op) => `
+          <div class="card-item">
+            <div class="card-head">
+              <strong>${op.department} · ${op.staffName} <span class="muted" style="font-size:11px;">(${op.personality})</span></strong>
+              <span class="tag" style="${toneBadgeStyle(op.tone)}">${op.recommendation}</span>
+            </div>
+            <p style="margin:6px 0;font-style:italic;color:#e2e8f0;">"${op.quote}"</p>
+            <ul style="margin:4px 0 0 16px;padding:0;font-size:11.5px;color:#cbd5e1;">
+              ${(op.factors || []).map((f) => `<li style="margin-bottom:2px;">${f}</li>`).join('')}
+            </ul>
+          </div>`).join('')}
+      </div>`;
+
+    const followUpHtml = `
+      <div class="section-label">💬 Trao Đổi & Hỏi Thêm Các Bộ Phận</div>
+      <div class="card-item">
+        <div class="btn-row" style="margin-bottom:8px;flex-wrap:wrap;">
+          ${(cons.presetQuestions || []).map((pq) => `
+            <button type="button" class="btn-xs btn-secondary tc-preset-q" data-role="${pq.roleKey}" data-q="${pq.label.replace(/"/g, '&quot;')}">${pq.label}</button>
+          `).join('')}
+        </div>
+        <div class="form-row" style="gap:6px;align-items:center;">
+          <select id="tc-qa-role" class="input-ctrl" style="max-width:210px;">
+            ${cons.opinions.map((op) => `<option value="${op.roleKey}">${op.department} (${op.staffName})</option>`).join('')}
+          </select>
+          <input id="tc-qa-input" class="input-ctrl" placeholder="Đặt câu hỏi cụ thể cho bộ phận..." />
+          <button type="button" class="btn-xs btn-primary" id="tc-qa-send">Hỏi bộ phận</button>
+        </div>
+        ${(cons.followUps || []).length > 0 ? `
+          <div class="scroll-list" style="max-height:20vh;margin-top:8px;">
+            ${cons.followUps.slice().reverse().map((qa) => `
+              <div class="card-item" style="background:rgba(30,41,59,0.7);padding:8px;">
+                <div style="font-size:12px;color:#93c5fd;"><b>Chủ tịch hỏi ${qa.department} (${qa.staffName}):</b> ${qa.question}</div>
+                <div style="font-size:12.5px;margin-top:4px;color:#f8fafc;">↳ "${qa.answer}"</div>
+              </div>`).join('')}
+          </div>` : '<div class="muted" style="font-size:11.5px;margin-top:6px;">Chưa có câu hỏi bổ sung nào trong phiên tham vấn này.</div>'}
+      </div>`;
+
+    const decisionsHtml = `
+      <div class="section-label">⚖️ Quyết Định Cuối Cùng Của Chủ Tịch Phạm Minh Chiêu</div>
+      <div class="card-item" style="border:1px solid rgba(56,189,248,0.35);">
+        <div class="form-row" style="gap:8px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <label style="font-size:12px;">Giá mới (€M):</label>
+            <input id="tc-counter-fee" type="number" class="input-ctrl" style="width:90px;" value="${suggestedCounter}" />
+            <button type="button" class="btn-xs btn-accent" id="tc-dec-counter-fee">💬 Đưa ra mức giá mới</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <label style="font-size:12px;">% bán lại:</label>
+            <input id="tc-clause-sellon" type="number" class="input-ctrl" style="width:65px;" value="15" min="0" max="35" />
+            <label style="font-size:12px;">Thưởng (€M):</label>
+            <input id="tc-clause-bonus" type="number" class="input-ctrl" style="width:65px;" value="5" min="0" max="40" />
+            <button type="button" class="btn-xs btn-secondary" id="tc-dec-clauses">📑 Yêu cầu bổ sung điều khoản</button>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:10px;flex-wrap:wrap;">
+          <button type="button" class="btn-primary" id="tc-dec-accept">✅ Chấp nhận đề nghị (€${os.fee}M)</button>
+          <button type="button" class="btn-danger" id="tc-dec-reject">❌ Từ chối đề nghị</button>
+          <button type="button" class="btn-accent" id="tc-dec-replacement">🔎 Yêu cầu tìm người thay thế trước khi bán</button>
+          <button type="button" class="btn-secondary" id="tc-dec-defer">⏳ Tạm hoãn quyết định</button>
+          <button type="button" class="btn-secondary" id="tc-dec-reevaluate">🔄 Đánh giá lại</button>
+          <button type="button" class="btn-secondary" id="tc-dec-close">↩️ Đóng</button>
+        </div>
+      </div>`;
+
+    this.openTaskWindow({
+      taskId,
+      taskType: 'transfer_consultation',
+      title: `🏛️ THAM VẤN CHUYỂN NHƯỢNG · ${ps.name.toUpperCase()}`,
+      html: `${headerHtml}${summaryTableHtml}${opinionsHtml}${followUpHtml}${decisionsHtml}`,
+      dirtyPrefix: /^tc-ignore/,
+      pushStep: { key: `consult_${bidId}`, restore: () => this.openTransferConsultationModal(bidId) },
+      replaceTopStep: true
+    });
+
+    const reopenSelf = (forceReevaluate = false) => this.openTransferConsultationModal(bidId, { forceReevaluate });
+
+    document.getElementById('tc-reevaluate-top')?.addEventListener('click', () => {
+      this.audio.playClick();
+      reopenSelf(true);
+    });
+    document.getElementById('tc-dec-reevaluate')?.addEventListener('click', () => {
+      this.audio.playClick();
+      reopenSelf(true);
+      this.toast('🔄 Đã cập nhật đánh giá tham vấn mới nhất từ các bộ phận.', 'info');
+    });
+    document.getElementById('tc-dec-close')?.addEventListener('click', () => this.requestCloseTaskWindow());
+
+    document.querySelectorAll('.tc-preset-q').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const qaRes = tcs.askFollowUp(cons.consultationId, btn.dataset.role, btn.dataset.q);
+        if (qaRes.ok) {
+          this.audio.playClick();
+          reopenSelf(false);
+        } else {
+          this.toast(qaRes.error || 'Không thể hỏi bộ phận.', 'error');
+        }
+      });
+    });
+
+    document.getElementById('tc-qa-send')?.addEventListener('click', () => {
+      const roleKey = document.getElementById('tc-qa-role')?.value || 'head_coach';
+      const qVal = document.getElementById('tc-qa-input')?.value || '';
+      const qaRes = tcs.askFollowUp(cons.consultationId, roleKey, qVal);
+      if (qaRes.ok) {
+        this.audio.playClick();
+        reopenSelf(false);
+      } else {
+        this.toast(qaRes.error || 'Không thể gửi câu hỏi.', 'error');
+      }
+    });
+
+    document.getElementById('tc-dec-accept')?.addEventListener('click', () => {
+      const decRes = tcs.executeDecision(cons.consultationId, CONSULTATION_DECISIONS.ACCEPT);
+      if (decRes.ok) {
+        this.audio.playSuccess();
+        const extra = decRes.consequences?.coachNote ? ` (${decRes.consequences.coachNote})` : '';
+        this.completeAndCloseTaskWindow(taskId, `💰 Đã chốt chuyển nhượng ${decRes.deal.playerName} sang ${decRes.deal.to} (+€${decRes.deal.fee}M)!${extra}`);
+      } else {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, decRes.error || 'Không thể chấp nhận đề nghị này.');
+      }
+    });
+
+    document.getElementById('tc-dec-reject')?.addEventListener('click', () => {
+      const decRes = tcs.executeDecision(cons.consultationId, CONSULTATION_DECISIONS.REJECT);
+      if (decRes.ok) {
+        this.audio.playClick();
+        const extra = decRes.consequences?.coachNote || decRes.consequences?.sdNote || '';
+        this.completeAndCloseTaskWindow(taskId, `❌ Đã từ chối đề nghị từ ${os.buyerClub}.${extra ? ` ${extra}` : ''}`, { toastType: 'info' });
+      } else {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, decRes.error || 'Không thể từ chối đề nghị.');
+      }
+    });
+
+    document.getElementById('tc-dec-counter-fee')?.addEventListener('click', () => {
+      const fee = Number(document.getElementById('tc-counter-fee')?.value || 0);
+      if (!Number.isFinite(fee) || fee <= 0) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, 'Mức phí đề nghị mới phải lớn hơn €0M.');
+        return;
+      }
+      const decRes = tcs.executeDecision(cons.consultationId, CONSULTATION_DECISIONS.COUNTER_FEE, { fee });
+      if (!decRes.ok) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, decRes.error || 'Không thể gửi phản đề nghị.');
+        return;
+      }
+      if (decRes.outcome === 'walked_away') {
+        this.audio.playAlert();
+        this.completeAndCloseTaskWindow(taskId, decRes.message, { toastType: 'warn' });
+      } else {
+        this.audio.playSuccess();
+        this.toast(decRes.message, 'info');
+        reopenSelf(false);
+      }
+    });
+
+    document.getElementById('tc-dec-clauses')?.addEventListener('click', () => {
+      const sellOnPct = Number(document.getElementById('tc-clause-sellon')?.value || 0);
+      const bonusFee = Number(document.getElementById('tc-clause-bonus')?.value || 0);
+      const decRes = tcs.executeDecision(cons.consultationId, CONSULTATION_DECISIONS.COUNTER_CLAUSES, { sellOnPct, bonusFee });
+      if (!decRes.ok) {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, decRes.error || 'Không thể yêu cầu điều khoản.');
+        return;
+      }
+      if (decRes.outcome === 'walked_away') {
+        this.audio.playAlert();
+        this.completeAndCloseTaskWindow(taskId, decRes.message, { toastType: 'warn' });
+      } else {
+        this.audio.playSuccess();
+        this.toast(decRes.message, 'info');
+        reopenSelf(false);
+      }
+    });
+
+    document.getElementById('tc-dec-replacement')?.addEventListener('click', () => {
+      const decRes = tcs.executeDecision(cons.consultationId, CONSULTATION_DECISIONS.REQUIRE_REPLACEMENT);
+      if (decRes.ok) {
+        this.audio.playSuccess();
+        this.toast(decRes.message, 'info');
+        if (rawBid) reopenSelf(false);
+      } else {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, decRes.error);
+      }
+    });
+
+    document.getElementById('tc-dec-defer')?.addEventListener('click', () => {
+      const decRes = tcs.executeDecision(cons.consultationId, CONSULTATION_DECISIONS.DEFER);
+      if (decRes.ok) {
+        this.audio.playClick();
+        this.completeAndCloseTaskWindow(taskId, decRes.message, { toastType: 'info' });
+      } else {
+        this.audio.playAlert();
+        this._setTaskErrorState(taskId, decRes.error);
+      }
     });
   }
 
@@ -2578,6 +2932,11 @@ export class UIManager {
     const sponsorAnnual = comm?.getTotalSponsorAnnualRevenue?.() ?? f.income?.sponsors ?? 145;
     const weeklyUpkeep = comm?.getTotalWeeklyFacilityUpkeep?.() ?? 1.36;
     const proposals = this._getFinanceProposals();
+    const cash = Number(f.cash ?? f.budget ?? 0);
+    const recvTotal = (f.receivables || []).reduce((s, r) => s + Number(r.remainingAmount ?? r.amount ?? 0), 0);
+    const payTotal = (f.payables || []).reduce((s, p) => s + Number(p.remainingAmount ?? p.amount ?? 0), 0);
+    const pr = f.periodReports || { weeklyIn: 0, weeklyOut: 0, seasonIn: 0, seasonOut: 0 };
+    const rivals = this.state.globalClubAI?.getRivalFinanceOverview?.(10) || [];
     return `
       <div class="kpi-grid">
         <div class="kpi-card"><span>Ngân sách CLB</span><strong class="tabular-nums">€${f.budget.toFixed(1)}M</strong></div>
@@ -2588,11 +2947,18 @@ export class UIManager {
       <div class="card-item">
         <div class="card-head"><strong>📊 Cơ cấu Thu – Chi Hiện Hành</strong><span class="tag ok">Tài trợ €${sponsorAnnual}M/năm</span></div>
         <div class="kpi-mini">
-          <span>Bản quyền TV: <b>€${f.income?.tv ?? 110}M</b></span>
-          <span>Thương mại & Áo đấu: <b>€${comm?.commercial?.merchRevenueM ?? f.income?.merch ?? 54}M</b></span>
-          <span>Vé & VIP SVĐ: <b>€${f.income?.matchday ?? 95}M</b></span>
-          <span>Bảo trì CSVC: <b>€${weeklyUpkeep}M/tuần</b></span>
+          <span>Tiền mặt (Cash): <b>€${cash.toFixed(1)}M</b></span>
+          <span>Phải thu trả góp: <b style="color:#4ade80;">€${recvTotal.toFixed(1)}M</b></span>
+          <span>Phải trả trả góp: <b style="color:#f87171;">€${payTotal.toFixed(1)}M</b></span>
+          <span>Nợ vay CLB: <b>€${Number(f.debt || 0).toFixed(1)}M</b></span>
         </div>
+        <div class="kpi-mini" style="margin-top:4px;">
+          <span>Thu/Chi Tuần: <b>+€${Number(pr.weeklyIn || 0).toFixed(1)}M / -€${Number(pr.weeklyOut || 0).toFixed(1)}M</b></span>
+          <span>Thu/Chi Mùa: <b>+€${Number(pr.seasonIn || 0).toFixed(1)}M / -€${Number(pr.seasonOut || 0).toFixed(1)}M</b></span>
+          <span>Bản quyền TV: <b>€${f.income?.tv ?? 110}M</b></span>
+          <span>Vé & Thương mại: <b>€${(f.income?.matchday ?? 95) + (comm?.commercial?.merchRevenueM ?? f.income?.merch ?? 54)}M</b></span>
+        </div>
+        <div class="muted" style="margin-top:4px;">Bảo trì CSVC: <b>€${weeklyUpkeep}M/tuần</b> · Mùa hiện tại: <b>${this.state.season}</b> (Tuần ${this.state.week})</div>
       </div>
       <div class="section-label">📋 Tác vụ Phê duyệt Ngân sách & Đầu tư (${proposals.length})</div>
       <div class="grid-3" style="margin-bottom:8px;">
@@ -2609,12 +2975,20 @@ export class UIManager {
             </div>`;
         }).join('')}
       </div>
+      ${rivals.length ? `
+        <div class="section-label">🏦 Tài chính các CLB đối thủ Châu Âu (${rivals.length} CLB tiêu biểu)</div>
+        <div class="table-wrap" style="max-height:170px;margin-bottom:8px;">
+          <table class="data-table">
+            <thead><tr><th>CLB</th><th>Giải</th><th>Nhóm</th><th>Cash</th><th>Quỹ CN</th><th>Lương/t</th><th>Lãi/Lỗ Mùa</th><th>FFP</th></tr></thead>
+            <tbody>${rivals.map((c) => `<tr><td><b>${c.name}</b></td><td>${c.league}</td><td><span class="tag">${c.tier}</span></td><td>€${c.cash}M</td><td>€${c.transferBudget}M</td><td>€${c.weeklyWages}M</td><td style="color:${c.profitLoss >= 0 ? '#4ade80' : '#f87171'};">${c.profitLoss >= 0 ? '+' : ''}€${c.profitLoss}M</td><td>${c.ffpStatus}</td></tr>`).join('')}</tbody>
+          </table>
+        </div>` : ''}
       <div class="section-label">Sổ cái Giao dịch Tài chính PSG (${f.ledger.length})</div>
       <div class="scroll-list">${f.ledger.map((l) => `<div class="card-item"><div class="card-head"><span>${l.date} — ${l.desc}</span><b class="tabular-nums" style="color:${l.amount >= 0 ? '#4ade80' : '#f87171'}">${l.amount >= 0 ? '+' : ''}€${l.amount}M</b></div></div>`).join('')}</div>`;
   }
 
   renderLeaguesTab() {
-    return renderLeaguesComputerTabHTML(this.state);
+    return renderLeaguesComputerTabHTML(this.state, this.selectedLeagueView || 'Ligue 1');
   }
 
   renderMediaTab() {
@@ -2906,6 +3280,9 @@ export class UIManager {
           this.audio.playClick(); this.toast('Đã từ chối đề nghị.', 'info'); this.openComputer('transfers', stayOpts);
         });
       });
+      document.querySelectorAll('.tr-consult-bid').forEach((b) => {
+        b.addEventListener('click', () => this.openTransferConsultationModal(b.dataset.bid));
+      });
       document.querySelectorAll('.tr-review-bid').forEach((b) => {
         b.addEventListener('click', () => this.openIncomingBidTaskModal(b.dataset.bid));
       });
@@ -2964,9 +3341,52 @@ export class UIManager {
         this.state.transferSystem.openWindow('winter');
         this.audio.playSuccess(); this.toast('🟢 Đã mở kỳ chuyển nhượng Mùa Đông!', 'success'); this.openComputer('transfers', stayOpts);
       });
+    } else if (tab === 'valuation') {
+      document.querySelectorAll('[data-mvcat]').forEach((b) => b.addEventListener('click', () => {
+        this.valuationViewState.category = b.dataset.mvcat;
+        this.valuationViewState.page = 1;
+        this.audio.playClick();
+        this.openComputer('valuation', { skipHistory: true });
+      }));
+      const bindMvFilter = (id, key, evt = 'change') => {
+        document.getElementById(id)?.addEventListener(evt, (e) => {
+          this.valuationViewState.filters[key] = e.target.value;
+          this.valuationViewState.page = 1;
+          this.openComputer('valuation', { skipHistory: true, preserveScroll: true, focusId: id });
+        });
+      };
+      bindMvFilter('mv-search', 'search');
+      bindMvFilter('mv-club', 'club');
+      bindMvFilter('mv-league', 'league');
+      bindMvFilter('mv-pos', 'pos');
+      bindMvFilter('mv-maxage', 'maxAge');
+      bindMvFilter('mv-maxval', 'maxVal');
+      bindMvFilter('mv-minpot', 'minPot');
+      document.getElementById('mv-prev-page')?.addEventListener('click', () => {
+        this.valuationViewState.page = Math.max(1, (this.valuationViewState.page || 1) - 1);
+        this.audio.playClick();
+        this.openComputer('valuation', { skipHistory: true });
+      });
+      document.getElementById('mv-next-page')?.addEventListener('click', () => {
+        this.valuationViewState.page = (this.valuationViewState.page || 1) + 1;
+        this.audio.playClick();
+        this.openComputer('valuation', { skipHistory: true });
+      });
+      document.querySelectorAll('.mv-start-neg').forEach((b) => {
+        b.addEventListener('click', () => {
+          this.selectedPlayerId = b.dataset.pid || null;
+          this.navHistory.updateCurrentSnapshot({ selectedPlayerId: this.selectedPlayerId });
+          const res = this.state.transferSystem.startNegotiation(b.dataset.pid, 'buy');
+          if (!res.ok) { this.audio.playAlert(); this.toast(res.error, 'error'); return; }
+          this.openTwoStageTransferModal(res.negotiation.id);
+        });
+      });
     } else if (tab === 'contracts') {
       document.querySelectorAll('.tr-resume-neg').forEach((b) => {
         b.addEventListener('click', () => this.openTwoStageTransferModal(b.dataset.negid));
+      });
+      document.querySelectorAll('.ct-consult-bid').forEach((b) => {
+        b.addEventListener('click', () => this.openTransferConsultationModal(b.dataset.bid));
       });
       document.querySelectorAll('.ct-accept-bid').forEach((b) => {
         b.addEventListener('click', () => {
@@ -3154,6 +3574,11 @@ export class UIManager {
         this.openComputer('locker_room', stayOpts);
       }));
     } else if (tab === 'leagues') {
+      document.getElementById('lg-league-select')?.addEventListener('change', (e) => {
+        this.selectedLeagueView = e.target.value || 'Ligue 1';
+        this.audio.playClick();
+        this.openComputer('leagues', stayOpts);
+      });
       document.getElementById('lg-open-matchday')?.addEventListener('click', () => this.openMatchdayCenter());
       document.getElementById('lg-play-now')?.addEventListener('click', () => this.openMatchdayCenter());
       document.querySelectorAll('.lg-open-res').forEach((b) => {
@@ -3251,6 +3676,9 @@ export class UIManager {
           if (b.dataset.msub) this.mediaSubTab = b.dataset.msub;
           this.openComputer(b.dataset.pctab || 'overview');
         });
+      });
+      document.querySelectorAll('.app-consult-bid').forEach((b) => {
+        b.addEventListener('click', () => this.openTransferConsultationModal(b.dataset.bid));
       });
       document.querySelectorAll('.app-accept-bid').forEach((b) => {
         b.addEventListener('click', () => {
@@ -3632,7 +4060,7 @@ export class UIManager {
       conflict: rel.getActiveConflict(p.id),
       commitments: (rel.commitments || []).filter((c) => c.playerId === p.id && c.status !== COMMITMENT_STATUS.OBSOLETE)
     } : null;
-    const html = renderPlayerProfileHTML(p, activeTab, isPsgFirstTeam, relExtras);
+    const html = renderPlayerProfileHTML(p, activeTab, isPsgFirstTeam, relExtras, this.profileChartRange || '12w');
     this.openModal(`👤 HỒ SƠ CẦU THỦ · ${p.name.toUpperCase()} (${p.id})`, html, 'wide', { skipRefreshBack: true, skipHistory: !!opts.skipHistory });
     this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
     this._recordNavigation({
@@ -3648,6 +4076,13 @@ export class UIManager {
       b.addEventListener('click', () => {
         this.audio.playClick();
         this.openPlayerProfileModal(b.dataset.pid, b.dataset.pptab, { skipHistory: true });
+      });
+    });
+    document.querySelectorAll('[data-vrange]').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.audio.playClick();
+        this.profileChartRange = b.dataset.vrange || '12w';
+        this.openPlayerProfileModal(b.dataset.pid || p.id, activeTab, { skipHistory: true, preserveScroll: true });
       });
     });
     document.getElementById('pp-meet')?.addEventListener('click', () => this.openPlayerMeetingSelector(p.id));

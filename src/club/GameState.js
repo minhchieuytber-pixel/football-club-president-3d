@@ -15,6 +15,7 @@ import { createInitialStaffDatabase, STAFF_ROLE_META } from '../staff/StaffDatab
 import { ManagerManagementSystem } from '../staff/ManagerManagementSystem.js';
 import { CoachingStaffSystem } from '../staff/CoachingStaffSystem.js';
 import { TransferSystem } from '../transfers/TransferSystem.js';
+import { TransferConsultationSystem } from '../transfers/TransferConsultationSystem.js';
 import { PlayerDevelopmentSystem } from '../training/PlayerDevelopmentSystem.js';
 import { TrainingSystem } from '../training/TrainingSystem.js';
 import { GameTimeSystem } from '../time/GameTimeSystem.js';
@@ -30,6 +31,8 @@ import { MorningNewsSystem } from '../media/MorningNewsSystem.js';
 import { TelevisionSystem } from '../media/TelevisionSystem.js';
 import { ContextPressConferenceRunner } from '../media/PressConferenceSystem.js';
 import { ClubRelationshipSystem } from '../relations/ClubRelationshipSystem.js';
+import { DynamicMarketValueSystem } from '../valuation/DynamicMarketValueSystem.js';
+import { GlobalClubAISystem } from '../ai/GlobalClubAISystem.js';
 
 export class GameState {
   constructor() {
@@ -77,12 +80,22 @@ export class GameState {
 
     this.finance = {
       budget: 245.0,
+      cash: 245.0,
+      bankBalance: 245.0,
       transferBudget: 165.0,
       weeklyWages: 4.85,
       debt: 0.0,
       ffpStatus: 'An toàn (72% doanh thu)',
       income: { tv: 112, tickets: 68, sponsors: 145, merch: 54, prize: 42, sales: 0 },
       expenses: { playerWages: 215, staffWages: 28, coachWage: 10, transfers: 0, ops: 38, maintenance: 16 },
+      receivables: [],
+      payables: [],
+      processedTxIds: [],
+      financialLogs: [
+        { txKey: 'init_1', date: 'Tuần 1', category: 'Tài trợ', counterparty: 'Qatar Airways & Nike', desc: 'Tài trợ chính Qatar Airways & Nike (đợt 1)', amount: +48.0 },
+        { txKey: 'init_2', date: 'Tuần 1', category: 'Quỹ lương', counterparty: 'Nội bộ PSG', desc: 'Quỹ lương tuần đội một & 12 phòng ban', amount: -4.85 }
+      ],
+      periodReports: { weeklyIn: 0, weeklyOut: 0, monthlyIn: 0, monthlyOut: 0, seasonIn: 48.0, seasonOut: 4.85 },
       ledger: [
         { date: 'Tuần 1', desc: 'Tài trợ chính Qatar Airways & Nike (đợt 1)', amount: +48.0 },
         { date: 'Tuần 1', desc: 'Quỹ lương tuần đội một & 12 phòng ban', amount: -4.85 }
@@ -223,6 +236,7 @@ export class GameState {
     this.developmentSystem = new PlayerDevelopmentSystem(this);
     this.trainingSystem = new TrainingSystem(this);
     this.transferSystem = new TransferSystem(this);
+    this.transferConsultationSystem = new TransferConsultationSystem(this);
     this.trophySystem = new TrophySystem(this);
     this.tournamentSystem = new TournamentSystem(this, this.trophySystem);
     this.brandMetrics = null;
@@ -231,6 +245,8 @@ export class GameState {
     this.relationshipSystem = new ClubRelationshipSystem(this);
     this.matchdaySystem = new MatchdaySystem(this);
     this.matchdaySystem.syncScheduleFromState();
+    this.valuationSystem = new DynamicMarketValueSystem(this);
+    this.globalClubAI = new GlobalClubAISystem(this);
 
     this._bindCoreEventBus();
 
@@ -382,6 +398,7 @@ export class GameState {
     this.generateDailyBriefing();
     this.morningNewsSystem?.generateDigest(false);
     this.matchdaySystem?.onTimeAdvanced(this.timeSystem, { bulkJump: daysPassed > 1 });
+    this.relationshipSystem?.onDailyTick?.(evt);
 
     if (this._onNewDayToast) {
       this._onNewDayToast(`🌅 Ngày mới: ${this.timeSystem.dayNameUpper} (${evt.date}) — Bản tin sáng PSG & lịch huấn luyện đã cập nhật!`);
@@ -423,12 +440,179 @@ export class GameState {
     return rep;
   }
 
-  addLedger(desc, amount) {
-    this.finance.budget = +(this.finance.budget + amount).toFixed(2);
-    if (amount < 0) this.finance.transferBudget = Math.max(0, +(this.finance.transferBudget + amount * 0.6).toFixed(2));
-    else this.finance.transferBudget = +(this.finance.transferBudget + amount * 0.5).toFixed(2);
-    this.finance.ledger.unshift({ date: `${this.timeSystem ? this.timeSystem.getDateString() : `Tuần ${this.week}`}`, desc, amount: +amount.toFixed(2) });
-    if (this.finance.ledger.length > 40) this.finance.ledger.pop();
+  ensureFinanceIntegrity() {
+    if (!this.finance || typeof this.finance !== 'object') return;
+    const f = this.finance;
+    f.budget = +(Number(f.budget || 0)).toFixed(2);
+    f.cash = +(Number(f.cash ?? f.budget)).toFixed(2);
+    f.bankBalance = f.cash;
+    f.transferBudget = Math.max(0, +(Number(f.transferBudget ?? 0)).toFixed(2));
+    f.debt = Math.max(0, +(Number(f.debt ?? 0)).toFixed(2));
+    if (!f.income) f.income = { tv: 112, tickets: 68, sponsors: 145, merch: 54, prize: 42, sales: 0 };
+    if (!f.expenses) f.expenses = { playerWages: 215, staffWages: 28, coachWage: 10, transfers: 0, ops: 38, maintenance: 16 };
+    if (!Array.isArray(f.receivables)) f.receivables = [];
+    if (!Array.isArray(f.payables)) f.payables = [];
+    if (!Array.isArray(f.processedTxIds)) f.processedTxIds = [];
+    if (!Array.isArray(f.financialLogs)) f.financialLogs = [];
+    if (!Array.isArray(f.ledger)) f.ledger = [];
+    if (!f.periodReports) f.periodReports = { weeklyIn: 0, weeklyOut: 0, monthlyIn: 0, monthlyOut: 0, seasonIn: 0, seasonOut: 0 };
+    this._updatePsgFfpStatus();
+  }
+
+  _updatePsgFfpStatus() {
+    const f = this.finance;
+    if (!f) return;
+    const inc = Object.values(f.income || {}).reduce((s, v) => s + Number(v || 0), 0);
+    const exp = Object.values(f.expenses || {}).reduce((s, v) => s + Number(v || 0), 0);
+    const ratio = inc > 0 ? Math.round((exp / inc) * 100) : 85;
+    if ((f.cash ?? f.budget) < 10 || (f.debt || 0) > 85 || ratio > 96) {
+      f.ffpStatus = `Cảnh báo cao (${ratio}% doanh thu)`;
+    } else if (ratio > 84 || (f.debt || 0) > 35) {
+      f.ffpStatus = `Theo dõi FFP (${ratio}% doanh thu)`;
+    } else {
+      f.ffpStatus = `An toàn (${ratio}% doanh thu)`;
+    }
+  }
+
+  recordFinanceTransaction({
+    txKey = null,
+    desc,
+    amount,
+    category = 'Khác',
+    counterparty = 'Hệ thống CLB',
+    incomeField = null,
+    expenseField = null,
+    transferBudgetDelta = null,
+    noTransferBudgetScale = false
+  }) {
+    this.ensureFinanceIntegrity();
+    const f = this.finance;
+    const amt = +Number(amount || 0).toFixed(2);
+    if (!Number.isFinite(amt)) return { ok: false, duplicate: false };
+    if (txKey && f.processedTxIds.includes(txKey)) {
+      return { ok: false, duplicate: true };
+    }
+    if (txKey) {
+      f.processedTxIds.push(txKey);
+      if (f.processedTxIds.length > 350) f.processedTxIds.shift();
+    }
+
+    const dateStr = this.timeSystem ? this.timeSystem.getDateString() : `Tuần ${this.week}`;
+    f.budget = +(f.budget + amt).toFixed(2);
+    f.cash = +(f.cash + amt).toFixed(2);
+    if (f.cash < 0) {
+      f.debt = +(f.debt + Math.abs(f.cash)).toFixed(2);
+      f.cash = 0;
+    }
+    f.bankBalance = f.cash;
+    if (f.budget < 0) f.budget = 0;
+
+    if (transferBudgetDelta !== null && transferBudgetDelta !== undefined) {
+      f.transferBudget = Math.max(0, +(f.transferBudget + transferBudgetDelta).toFixed(2));
+    } else if (!noTransferBudgetScale) {
+      if (amt < 0) f.transferBudget = Math.max(0, +(f.transferBudget + amt * 0.6).toFixed(2));
+      else f.transferBudget = +(f.transferBudget + amt * 0.5).toFixed(2);
+    }
+    f.transferBudget = Math.min(f.transferBudget, +(Math.max(f.cash, f.budget) * 1.15).toFixed(2));
+
+    if (amt >= 0) {
+      f.periodReports.weeklyIn = +(f.periodReports.weeklyIn + amt).toFixed(2);
+      f.periodReports.monthlyIn = +(f.periodReports.monthlyIn + amt).toFixed(2);
+      f.periodReports.seasonIn = +(f.periodReports.seasonIn + amt).toFixed(2);
+      if (incomeField && f.income) {
+        f.income[incomeField] = +(Number(f.income[incomeField] || 0) + amt).toFixed(2);
+      }
+    } else {
+      const absAmt = Math.abs(amt);
+      f.periodReports.weeklyOut = +(f.periodReports.weeklyOut + absAmt).toFixed(2);
+      f.periodReports.monthlyOut = +(f.periodReports.monthlyOut + absAmt).toFixed(2);
+      f.periodReports.seasonOut = +(f.periodReports.seasonOut + absAmt).toFixed(2);
+      if (expenseField && f.expenses) {
+        f.expenses[expenseField] = +(Number(f.expenses[expenseField] || 0) + absAmt).toFixed(2);
+      }
+    }
+
+    f.ledger.unshift({ date: dateStr, desc, amount: amt });
+    if (f.ledger.length > 60) f.ledger.pop();
+
+    f.financialLogs.unshift({
+      txKey: txKey || `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      date: dateStr,
+      week: this.week,
+      season: this.season,
+      category,
+      counterparty,
+      desc,
+      amount: amt,
+      cashAfter: f.cash
+    });
+    if (f.financialLogs.length > 120) f.financialLogs.pop();
+
+    this._updatePsgFfpStatus();
+    this.globalClubAI?.syncPsgClubSummary?.();
+    return { ok: true, amount: amt, cash: f.cash, transferBudget: f.transferBudget };
+  }
+
+  addLedger(desc, amount, meta = {}) {
+    return this.recordFinanceTransaction({
+      txKey: meta.txKey || null,
+      desc,
+      amount,
+      category: meta.category || (amount >= 0 ? 'Thu nhập' : 'Chi phí'),
+      counterparty: meta.counterparty || 'CLB Paris Saint-Germain',
+      incomeField: meta.incomeField || null,
+      expenseField: meta.expenseField || null,
+      transferBudgetDelta: meta.transferBudgetDelta ?? null,
+      noTransferBudgetScale: !!meta.noTransferBudgetScale
+    });
+  }
+
+  processDueInstallments() {
+    this.ensureFinanceIntegrity();
+    const f = this.finance;
+    const wk = this.week;
+    const sNum = this.seasonNum;
+
+    const nextReceivables = [];
+    for (const r of f.receivables) {
+      if (r.remaining > 0.05 && wk >= (r.nextDueWeek || 0)) {
+        const amt = +Math.min(r.remaining, r.perInstallment || r.remaining).toFixed(2);
+        this.recordFinanceTransaction({
+          txKey: `psg_rcv_${r.id}_s${sNum}_w${wk}`,
+          desc: `Thu trả góp: ${r.desc} (${r.counterparty})`,
+          amount: +amt,
+          category: 'Trả góp chuyển nhượng',
+          counterparty: r.counterparty,
+          incomeField: 'sales'
+        });
+        r.remaining = +(r.remaining - amt).toFixed(2);
+        r.installmentsLeft = Math.max(0, (r.installmentsLeft || 1) - 1);
+        r.nextDueWeek = wk + (r.dueIntervalWeeks || 4);
+      }
+      if (r.remaining > 0.05) nextReceivables.push(r);
+    }
+    f.receivables = nextReceivables;
+
+    const nextPayables = [];
+    for (const p of f.payables) {
+      if (p.remaining > 0.05 && wk >= (p.nextDueWeek || 0)) {
+        const amt = +Math.min(p.remaining, p.perInstallment || p.remaining).toFixed(2);
+        this.recordFinanceTransaction({
+          txKey: `psg_pay_${p.id}_s${sNum}_w${wk}`,
+          desc: `Trả góp chuyển nhượng: ${p.desc} (${p.counterparty})`,
+          amount: -amt,
+          category: 'Trả góp chuyển nhượng',
+          counterparty: p.counterparty,
+          expenseField: 'transfers',
+          transferBudgetDelta: 0
+        });
+        p.remaining = +(p.remaining - amt).toFixed(2);
+        p.installmentsLeft = Math.max(0, (p.installmentsLeft || 1) - 1);
+        p.nextDueWeek = wk + (p.dueIntervalWeeks || 4);
+      }
+      if (p.remaining > 0.05) nextPayables.push(p);
+    }
+    f.payables = nextPayables;
   }
 
   pushSocial(author, handle, text, sentiment = 'neutral') {
@@ -436,8 +620,8 @@ export class GameState {
     if (this.socialFeed.length > 25) this.socialFeed.pop();
   }
 
-  pushPhoneMsg(from, title, body, urgent = false) {
-    this.phoneInbox.unshift({ id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`, from, title, body, urgent, read: false });
+  pushPhoneMsg(from, title, body, urgent = false, extra = {}) {
+    this.phoneInbox.unshift({ id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`, from, title, body, urgent, read: false, ...extra });
     if (this.phoneInbox.length > 30) this.phoneInbox.pop();
   }
 
@@ -448,19 +632,39 @@ export class GameState {
     }
 
     this.week++;
+    const periodId = `S${this.seasonNum}_W${this.week}`;
+    this.ensureFinanceIntegrity();
+    this.finance.periodReports.weeklyIn = 0;
+    this.finance.periodReports.weeklyOut = 0;
+    if (this.week % 4 === 1) {
+      this.finance.periodReports.monthlyIn = 0;
+      this.finance.periodReports.monthlyOut = 0;
+    }
+
     // Tua tiến đúng 7 ngày trên đồng hồ duy nhất GameTimeSystem & đặt về 09:00 sáng
     this.timeSystem.advanceGameDays(7);
     this.timeSystem.setTimeOfDay(9, 0);
     this.clockHour = this.timeSystem.clockHour;
     this.dayName = this.timeSystem.dayName;
 
+    // Thu/Chi trả góp đến hạn của PSG
+    this.processDueInstallments();
+
     this.transferSystem.recalcWeeklyWages();
     const wageM = this.finance.weeklyWages;
     const facUpkeep = this.commercialSystem?.getTotalWeeklyFacilityUpkeep() || 0;
-    this.addLedger(`Chi trả quỹ lương tuần ${this.week} (Đội một + BHL + 12 phòng ban) & bảo trì CSVC`, -(wageM + facUpkeep));
+    this.addLedger(
+      `Chi trả quỹ lương tuần ${this.week} (Đội một + BHL + 12 phòng ban) & bảo trì CSVC`,
+      -(wageM + facUpkeep),
+      { txKey: `wk_wages_${this.seasonNum}_${this.week}`, category: 'Lương & Vận hành', counterparty: 'Nội bộ PSG' }
+    );
     if (this.week % 2 === 0) {
       const jerseyRev = +(5.8 + this.president.prestige * 0.04 + ((this.commercialSystem?.commercial?.globalStores || 14) * 0.08)).toFixed(2);
-      this.addLedger(`Doanh thu thương mại & áo đấu tuần ${this.week}`, jerseyRev);
+      this.addLedger(
+        `Doanh thu thương mại & áo đấu tuần ${this.week}`,
+        jerseyRev,
+        { txKey: `wk_merch_${this.seasonNum}_${this.week}`, category: 'Thương mại', counterparty: 'Hệ thống bán lẻ PSG', incomeField: 'merch' }
+      );
     }
 
     // Tiến triển học viện & cầu thủ đang cho mượn (nhân hệ số cấp Học viện)
@@ -489,11 +693,24 @@ export class GameState {
       this.pushPhoneMsg('Lịch Thi Đấu PSG', `⚠️ Tuần ${this.week} có trận: ${newFx.home} vs ${newFx.away}`, `Giải ${newFx.comp} (${newFx.round}). Hãy vào mục Ngày Thi Đấu để chỉ đạo trước khi qua tuần.`, true);
     }
 
-    // Hoạt động AI thị trường chuyển nhượng & Tin đồn hàng tuần
+    // Hoạt động Hệ sinh thái CLB AI Toàn cầu & Định giá Cầu thủ Hàng Tuần (CHỈ chạy đúng 1 lần khi qua tuần NEXT!)
+    this.globalClubAI?.onWeeklyEcosystemTick(periodId);
     if (this.transferSystem.isWindowOpen()) {
-      this.transferSystem.runAiTransferMarketCycle(3);
       this.transferSystem.generateIncomingBids(1);
     }
+    const valRes = this.valuationSystem?.runWeeklyValuation(periodId);
+    if (valRes?.ran && valRes.report) {
+      const rep = valRes.report;
+      this.pushPhoneMsg(
+        'Trung Tâm Định Giá Toàn Cầu',
+        `📈 WEEKLY PLAYER VALUATION · Tuần ${this.week}`,
+        rep.summaryText,
+        false,
+        { actionType: 'open_market_value', actionLabel: 'XEM CHI TIẾT', periodId }
+      );
+      PressNewsSystem.generateValuationMoversNews?.(this, rep);
+    }
+
     this.rumorCrisisSystem?.generateWeeklyIntel();
     this.relationshipSystem?.onWeeklyTick();
 
@@ -534,7 +751,7 @@ export class GameState {
     this.generateDailyBriefing();
     this.morningNewsSystem?.generateDigest(true);
     if (!this.getNextFixture()) this.concludeSeason();
-    return { blocked: false };
+    return { blocked: false, valuationReport: valRes?.report || null };
   }
 
   runAutomaticMatchday(directive = 'none') {
@@ -616,7 +833,16 @@ export class GameState {
     });
     this.matchdaySystem?.resetForNewSeason();
     this.tournamentSystem.resetSeasonState();
-    this.addLedger(`Tiền thưởng kết thúc mùa ${summary.season} & bản quyền truyền hình`, 85.0);
+    this.addLedger(
+      `Tiền thưởng kết thúc mùa ${summary.season} & bản quyền truyền hình`,
+      85.0,
+      { txKey: `eos_tv_prize_${summary.season}`, category: 'Tiền thưởng & TV', counterparty: 'LFP / UEFA', incomeField: 'prize' }
+    );
+    this.globalClubAI?.onSeasonEnd(eos);
+    this.valuationSystem?.onSeasonRollover();
+    this.relationshipSystem?.onSeasonEndEvaluation?.(summary);
+    this.finance.periodReports.seasonIn = 0;
+    this.finance.periodReports.seasonOut = 0;
 
     // Tự động mở kỳ chuyển nhượng Mùa Hè mới (cấu hình động theo năm startY)
     this.transferSystem.openWindow('summer', startY);
@@ -666,6 +892,7 @@ export class GameState {
       brandMetrics: this.brandMetrics,
       formationState: this.formationSystem.exportState(),
       transferState: this.transferSystem.exportState(),
+      transferConsultationState: this.transferConsultationSystem.exportState(),
       trainingState: this.trainingSystem.exportState(),
       timeState: this.timeSystem.exportState(),
       signingEventState: this.signingEventSystem.exportState(),
@@ -679,6 +906,8 @@ export class GameState {
       televisionState: this.televisionSystem.exportState(),
       relationshipState: this.relationshipSystem.exportState(),
       matchdayState: this.matchdaySystem?.exportState?.() || null,
+      valuationState: this.valuationSystem?.exportState?.() || null,
+      globalClubAIState: this.globalClubAI?.exportState?.() || null,
       uiPrefs: this.uiPrefs || null,
       playerPos
     };
@@ -715,6 +944,7 @@ export class GameState {
     }
     if (snap.formationState) this.formationSystem.importState(snap.formationState);
     if (snap.transferState) this.transferSystem.importState(snap.transferState);
+    if (snap.transferConsultationState) this.transferConsultationSystem?.importState(snap.transferConsultationState);
     if (snap.trainingState) this.trainingSystem.importState(snap.trainingState);
     MediaReputationSystem.ensureBrandMetrics(this);
     if (snap.signingEventState) this.signingEventSystem.importState(snap.signingEventState);
@@ -733,6 +963,12 @@ export class GameState {
       if (snap.matchdayState) this.matchdaySystem.importState(snap.matchdayState);
       else this.matchdaySystem.syncScheduleFromState();
     }
+
+    // Khôi phục định giá & AI CLB toàn cầu mà TUYỆT ĐỐI KHÔNG kích hoạt tính lại tuần khi Load!
+    this.ensureFinanceIntegrity();
+    this.globalClubAI?.importState(snap.globalClubAIState || null);
+    this.valuationSystem?.importState(snap.valuationState || null);
+
     if (snap.uiPrefs) this.uiPrefs = snap.uiPrefs;
 
     this.notifyStaffChanged();

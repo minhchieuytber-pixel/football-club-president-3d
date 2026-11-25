@@ -493,4 +493,26 @@ export class PressNewsSystem {
       }
     });
   }
+
+  static generateValuationMoversNews(state, report) {
+    if (!state || !report) return null;
+    const topRiser = report.risers?.[0];
+    const topFaller = report.fallers?.[0];
+    if (!topRiser && !topFaller) return null;
+    return PressNewsSystem.createArticle(state, {
+      scenarioId: 33,
+      category: 'Chuyển nhượng',
+      tagType: 'Chính thức',
+      verificationStatus: 'Chính thức',
+      dedupeKey: `val_movers_${report.periodId}`,
+      title: `📈 Định giá thị trường Tuần ${report.week}: ${topRiser ? `${topRiser.name} tăng lên €${topRiser.current}M` : 'Biến động toàn cầu'}`,
+      summary: report.summaryText,
+      body: `Trung tâm Định giá Bóng đá Toàn cầu vừa cập nhật giá trị thị trường cho ${report.totalEvaluated} cầu thủ. ${topRiser ? `Ngôi sao tăng giá mạnh nhất là ${topRiser.name} (${topRiser.club}, +€${topRiser.delta}M → €${topRiser.current}M). ` : ''}${topFaller ? `Ở chiều ngược lại, ${topFaller.name} (${topFaller.club}) giảm €${Math.abs(topFaller.delta)}M xuống €${topFaller.current}M (${topFaller.reason}).` : ''}`,
+      imageType: 'transfer',
+      imageCaption: `ĐỊNH GIÁ TUẦN ${report.week}`,
+      relatedEntity: topRiser?.name || 'Thị trường chuyển nhượng',
+      importance: 'Trung bình',
+      fanTone: 'transfer'
+    });
+  }
 }

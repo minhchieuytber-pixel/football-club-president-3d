@@ -182,27 +182,23 @@ export class TransferSystem {
 
   // Kiểm tra cuộc chiến đấu giá (Bidding War) nếu ngôi sao PSG nhắm tới được ông lớn khác tranh mua
   checkBiddingWar(player, neg) {
-    if (!player || player.ovr < 83 || neg.biddingWarChecked || neg.dealType === 'loan') return null;
+    if (!player || neg.biddingWarChecked || neg.dealType === 'loan') return null;
     neg.biddingWarChecked = true;
-    const rivals = this.state.clubs.filter((c) =>
-      c.name !== 'Paris Saint-Germain' &&
-      c.name !== player.club &&
-      c.rating >= 85 &&
-      c.budget >= player.value * 1.15 &&
-      (c.positionalNeeds?.includes(player.position) || Math.random() < 0.35)
-    );
-    if (rivals.length === 0 || Math.random() > 0.45) return null;
 
-    const rival = rivals[Math.floor(Math.random() * rivals.length)];
-    const rivalOffer = Math.round(neg.clubAskFee * 1.08);
-    neg.clubAskFee = Math.max(neg.clubAskFee, rivalOffer + 3);
+    const aiComp = this.state.globalClubAI?.evaluatePsgCompetitiveBid?.(player, neg);
+    if (!aiComp || Math.random() > 0.62) return null;
+
+    const rival = aiComp.rivalClub;
+    const rivalOffer = Math.round(aiComp.rivalFee);
+    neg.clubAskFee = Math.max(neg.clubAskFee, rivalOffer + 2);
     neg.biddingWarRival = rival.name;
-    neg.history.push(`🔥 CẠNH TRANH ĐẤU GIÁ: ${rival.name} cũng gửi đề nghị €${rivalOffer}M cho ${player.name}, khiến ${neg.fromClub} nâng mức kỳ vọng lên €${neg.clubAskFee}M!`);
+    neg.rivalCompetition = aiComp;
+    neg.history.push(`🔥 CẠNH TRANH ĐẤU GIÁ: ${rival.name} gửi đề nghị €${rivalOffer}M (lương dự kiến €${aiComp.rivalWage}k/tuần) cho ${player.name}, khiến ${neg.fromClub} nâng giá yêu cầu lên €${neg.clubAskFee}M!`);
 
     this.state.pushPhoneMsg(
       'Phòng Chuyển Nhượng PSG',
       `🔥 CẠNH TRANH ĐẤU GIÁ: ${rival.name} tranh mua ${player.name}`,
-      `${rival.name} (${rival.strategy}) vừa nhảy vào cuộc đua giành ${player.name} với giá €${rivalOffer}M. Mức giá đòi hỏi của ${neg.fromClub} tăng lên €${neg.clubAskFee}M.`,
+      `${rival.name} (${rival.strategy}) vừa nhảy vào cuộc đua giành ${player.name} với giá €${rivalOffer}M & đãi ngộ €${aiComp.rivalWage}k/tuần. Giá đòi hỏi của ${neg.fromClub} tăng lên €${neg.clubAskFee}M.`,
       true
     );
     this.state.eventBus?.emit('TRANSFER_BIDDING_WAR', {
@@ -229,9 +225,11 @@ export class TransferSystem {
     const existing = this.activeNegotiations.find((n) => n.playerId === playerId && n.status !== 'failed' && n.status !== 'completed');
     if (existing) return { ok: true, negotiation: existing };
 
+    const marketVal = p.valuation?.current ?? p.value ?? 5;
+    const computedAsk = this.state.valuationSystem?.computeAskingPrice?.(p) ?? Math.round(marketVal * (p.contractYears <= 1 ? 0.88 : 1.15));
     const askFee = dealType === 'loan'
-      ? Math.max(2, Math.round(p.value * 0.14))
-      : Math.round(p.value * (p.contractYears <= 1 ? 0.88 : 1.12));
+      ? Math.max(1.5, +Number(marketVal * 0.14).toFixed(1))
+      : Math.max(1, Math.round(computedAsk));
 
     const neg = {
       id: `neg_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
@@ -244,12 +242,14 @@ export class TransferSystem {
       dealType, // 'buy' | 'loan' | 'loan_buy'
       stage: 1, // 1 = Đàm phán CLB, 2 = Đàm phán Cầu thủ
       status: 'club_stage', // 'club_stage' | 'player_stage' | 'completed' | 'failed'
+      marketValueAtStart: marketVal,
       clubAskFee: askFee,
       clubAgreedTerms: null,
       playerAskWage: Math.round((p.wage || 80) * (dealType === 'loan' ? 0.9 : 1.15)),
       rounds: 0,
       biddingWarRival: null,
-      history: [`Khởi tạo đàm phán (${dealType === 'loan' ? 'Mượn' : 'Mua'}) với ${p.club} cho ${p.name} (Định giá ban đầu: €${askFee}M).`]
+      rivalCompetition: null,
+      history: [`Khởi tạo đàm phán (${dealType === 'loan' ? 'Mượn' : 'Mua'}) với ${p.club} cho ${p.name} (Giá thị trường: €${marketVal}M · Giá đòi hỏi: €${askFee}M).`]
     };
     this.activeNegotiations.unshift(neg);
 
@@ -358,16 +358,50 @@ export class TransferSystem {
       return { ok: false, error: 'Tổng phí trả trước + thưởng ký hợp đồng vượt quá quỹ chuyển nhượng!' };
     }
 
-    // Đánh giá cầu thủ có đồng ý hay không
+    // Đánh giá cầu thủ có đồng ý hay không + So sánh với đối thủ cạnh tranh (PSG có thể thua thương vụ!)
     const wageRatio = weeklyWage / Math.max(1, neg.playerAskWage);
     const bonusBoost = signingBonus >= 2 ? 0.08 : signingBonus >= 1 ? 0.04 : 0;
     const roleBoost = (p.ovr >= 86 && squadRole === 'Trụ cột không thể thay thế') ? 0.08
-      : (p.ovr >= 86 && squadRole === 'Dự bị') ? -0.28
+      : (p.ovr >= 86 && (squadRole === 'Dự bị' || squadRole === 'Xoay tua đội hình')) ? -0.22
         : squadRole === 'Đá chính thường xuyên' ? 0.04 : 0;
     const prestigeBoost = (this.state.president.prestige - 80) * 0.005;
     const totalScore = wageRatio + bonusBoost + roleBoost + prestigeBoost;
 
     neg.rounds++;
+
+    // Kiểm tra lựa chọn điểm đến nếu có CLB cạnh tranh đấu giá
+    if (neg.rivalCompetition && this.state.globalClubAI) {
+      const choice = this.state.globalClubAI.evaluatePlayerDestinationChoice(p, {
+        weeklyWage,
+        askWage: neg.playerAskWage,
+        squadRole,
+        playtimeGuarantee,
+        signingBonus
+      }, neg.rivalCompetition);
+
+      if (choice.winner !== 'PSG') {
+        neg.status = 'failed';
+        neg.failReason = `Thua cạnh tranh chuyển nhượng: ${choice.reason}`;
+        neg.history.push(`❌ ${neg.failReason}`);
+        this.state.globalClubAI.completeRivalTransferHijack(
+          p,
+          neg.rivalCompetition.rivalClub,
+          neg.rivalCompetition.rivalFee,
+          neg.rivalCompetition.rivalWage
+        );
+        this.failedDeals.unshift({ ...neg, closedAt: this.getDateStr() });
+        this.activeNegotiations = this.activeNegotiations.filter((n) => n.id !== neg.id);
+        this.state.eventBus?.emit('TRANSFER_DEAL_FAILED', {
+          negId: neg.id,
+          playerId: p.id,
+          playerName: p.name,
+          fromClub: neg.fromClub,
+          fee: neg.clubAgreedTerms?.fee || neg.clubAskFee,
+          reason: neg.failReason
+        }, `fail_${neg.id}`);
+        return { ok: true, outcome: 'rejected', hijackedBy: choice.winner, negotiation: neg, message: neg.failReason };
+      }
+    }
 
     if (totalScore >= 0.96) {
       const agreedPlayerTerms = { weeklyWage, contractYears, signingBonus, squadRole, playtimeGuarantee, releaseClause };
@@ -483,38 +517,96 @@ export class TransferSystem {
       }
     }
 
-    // 3. Cập nhật Tài chính & CLB đối tác
-    const totalUpfront = +(clubTerms.upfront + (playerTerms.signingBonus || 0)).toFixed(2);
-    this.state.addLedger(`${neg.dealType === 'buy' ? 'Chiêu mộ' : 'Mượn'} ${p.name} từ ${oldClub}`, -totalUpfront);
+    // 3. Cập nhật Tài chính thực tế (trả trước + thưởng ký ngay lập tức, trả góp ghi vào Payables/Receivables)
+    const dealId = `deal_${Date.now()}_${p.id}`;
+    const upfrontFee = Number(clubTerms.upfront ?? clubTerms.fee ?? 0);
+    const totalFee = Number(clubTerms.fee ?? upfrontFee);
+    const remainderFee = Math.max(0, +(totalFee - upfrontFee).toFixed(2));
+    const signingBonus = Number(playerTerms.signingBonus || 0);
+    const totalUpfront = +(upfrontFee + signingBonus).toFixed(2);
+    const curWk = this.state.week || 1;
+
+    this.state.recordFinanceTransaction({
+      txKey: `tr_buy_${dealId}`,
+      desc: `${neg.dealType === 'buy' ? 'Chiêu mộ' : 'Mượn'} ${p.name} từ ${oldClub}${remainderFee > 0 ? ` (Đợt 1 €${upfrontFee}M + Thưởng ký €${signingBonus}M)` : ''}`,
+      amount: -totalUpfront,
+      category: 'Chuyển nhượng đến',
+      counterparty: oldClub,
+      expenseField: 'transfers',
+      transferBudgetDelta: -totalUpfront
+    });
+
     const seller = this.state.clubs.find((c) => c.name === oldClub);
-    if (seller) seller.budget = +(seller.budget + clubTerms.fee).toFixed(1);
+    if (remainderFee > 0) {
+      const nInst = Math.max(1, Number(clubTerms.installments || 1));
+      const perInst = +(remainderFee / nInst).toFixed(2);
+      this.state.finance.payables.push({
+        id: `pay_${dealId}`,
+        counterparty: oldClub,
+        desc: `Mua ${p.name}`,
+        remaining: remainderFee,
+        perInstallment: perInst,
+        installmentsLeft: nInst,
+        dueIntervalWeeks: 4,
+        nextDueWeek: curWk + 4
+      });
+      if (seller?.finance) {
+        seller.finance.receivables.push({
+          id: `rcv_${dealId}`,
+          counterparty: 'Paris Saint-Germain',
+          desc: `Bán ${p.name}`,
+          remaining: remainderFee,
+          perInstallment: perInst,
+          installmentsLeft: nInst,
+          dueIntervalWeeks: 4,
+          nextDueWeek: curWk + 4
+        });
+      }
+    }
+
+    if (seller && this.state.globalClubAI) {
+      this.state.globalClubAI.recordAiClubTx(seller, {
+        txKey: `tr_sell_${dealId}`,
+        cashDelta: upfrontFee,
+        transferBudgetDelta: +(upfrontFee * 0.7).toFixed(2),
+        revKey: 'sales',
+        revAmt: totalFee
+      });
+    } else if (seller) {
+      seller.budget = +(seller.budget + upfrontFee).toFixed(1);
+    }
+
     this.recalcWeeklyWages();
 
     // 4. Lưu lịch sử thương vụ
     const dealRecord = {
-      id: `deal_${Date.now()}`,
+      id: dealId,
       date: dateStr,
       playerId: p.id,
       playerName: p.name,
       position: p.position,
       from: oldClub,
       to: 'Paris Saint-Germain',
-      fee: clubTerms.fee,
+      fee: totalFee,
+      upfront: totalUpfront,
+      installments: clubTerms.installments || 0,
       wage: playerTerms.weeklyWage,
       type: neg.dealType === 'buy' ? 'Mua đứt' : neg.dealType === 'loan_buy' ? 'Mượn kèm mua đứt' : 'Mượn'
     };
     this.completedDeals.unshift(dealRecord);
     this.activeNegotiations = this.activeNegotiations.filter((n) => n.id !== neg.id);
 
-    // 5. Đồng bộ Đội hình, Số áo, Tủ đồ 3D, NPC 3D, Uy tín, Quan hệ CLB, Báo chí & EventBus
+    // 5. Đồng bộ Đội hình, Số áo, Tủ đồ 3D, NPC 3D, Uy tín, Quan hệ CLB, Báo chí, Sức mạnh 2 CLB & EventBus
     this.state.formationSystem?.ensureShirtNumbers();
     this.state.formationSystem?.notify();
     this.verifySingleClubOwnership();
+    this.state.globalClubAI?.recomputeClubStrength?.(oldClub);
+    this.state.globalClubAI?.recomputeClubStrength?.('Paris Saint-Germain');
     this.state.relationshipSystem?.onPlayerJoinedPsg?.(p, `Chiêu mộ từ ${oldClub}`);
-    PressNewsSystem.generateTransferNews(this.state, p.name, oldClub, clubTerms.fee, true);
+    PressNewsSystem.generateTransferNews(this.state, p.name, oldClub, totalFee, true);
     this.state.reputationSystem?.applyDelta(
       { fanTrust: p.ovr >= 86 ? +3 : +1, coachTrust: +2, governanceSkill: +2 },
-      `Chiêu mộ ${p.name} từ ${oldClub} (€${clubTerms.fee}M)`,
+      `Chiêu mộ ${p.name} từ ${oldClub} (€${totalFee}M)`,
       `tr_in_${dealRecord.id}`
     );
     this.state.eventBus?.emit('TRANSFER_DEAL_COMPLETED', dealRecord, dealRecord.id);
@@ -712,10 +804,26 @@ export class TransferSystem {
       return { ok: false, error: 'Đội một cần tối thiểu 15 cầu thủ, không thể bán thêm!' };
     }
 
-    const buyer = this.state.clubs.find((c) => c.name === buyerClubName) || this.state.clubs.find((c) => c.name !== 'Paris Saint-Germain' && c.budget >= fee * 0.7);
-    const destName = buyer ? buyer.name : buyerClubName || 'Chelsea';
-    const saleFee = Math.max(1, Number(fee || p.value));
+    const saleFee = Math.max(1, +Number(fee || p.valuation?.current || p.value).toFixed(1));
+    const ai = this.state.globalClubAI;
+    const buyer = buyerClubName
+      ? this.state.clubs.find((c) => c.name === buyerClubName)
+      : this.state.clubs.find((c) => c.name !== 'Paris Saint-Germain' && (ai ? ai.canClubAfford(c, saleFee * 0.65, p.wage || 50, saleFee) : c.budget >= saleFee * 0.7));
+
+    if (!buyer) {
+      return { ok: false, error: `Hiện chưa có CLB đối tác đủ ngân sách đáp ứng mức phí €${saleFee}M cho ${p.name}.` };
+    }
+    if (ai && !ai.canClubAfford(buyer, saleFee * 0.6, p.wage || 50, saleFee)) {
+      return { ok: false, error: `${buyer.name} không đủ thanh khoản/FFP để chi trả thương vụ €${saleFee}M!` };
+    }
+
+    const destName = buyer.name;
     const dateStr = this.getDateStr();
+    const dealId = `deal_sell_${Date.now()}_${p.id}`;
+
+    // Nếu phí >= 30M, hỗ trợ thanh toán 65% trả trước + 35% trả góp ghi vào Receivables của PSG
+    const upfront = saleFee >= 30 ? +(saleFee * 0.65).toFixed(2) : saleFee;
+    const rem = +(saleFee - upfront).toFixed(2);
 
     p.club = destName;
     p.shirtNumber = null;
@@ -723,15 +831,59 @@ export class TransferSystem {
     p.loanInfo = null;
     p.career.transferHistory.unshift({ date: dateStr, from: 'Paris Saint-Germain', to: destName, fee: `€${saleFee}M`, type: 'Bán đứt' });
 
-    if (buyer) buyer.budget = Math.max(5, +(buyer.budget - saleFee).toFixed(1));
-    this.state.addLedger(`Bán ${p.name} cho ${destName}`, +saleFee);
-    this.state.finance.income.sales = +(this.state.finance.income.sales + saleFee).toFixed(1);
+    if (ai) {
+      ai.recordAiClubTx(buyer, {
+        txKey: `psg_sold_buy_${dealId}`,
+        cashDelta: -upfront,
+        transferBudgetDelta: -upfront,
+        expKey: 'transfers',
+        expAmt: saleFee
+      });
+    } else {
+      buyer.budget = Math.max(0, +(buyer.budget - upfront).toFixed(1));
+    }
+
+    this.state.recordFinanceTransaction({
+      txKey: `psg_sold_${dealId}`,
+      desc: `Bán ${p.name} cho ${destName}${rem > 0 ? ` (Nhận trước €${upfront}M · Còn lại €${rem}M trả góp)` : ''}`,
+      amount: +upfront,
+      category: 'Bán cầu thủ',
+      counterparty: destName,
+      incomeField: 'sales'
+    });
+
+    if (rem > 0) {
+      this.state.finance.receivables.push({
+        id: `rcv_${dealId}`,
+        counterparty: destName,
+        desc: `Bán ${p.name}`,
+        remaining: rem,
+        perInstallment: +(rem / 2).toFixed(2),
+        installmentsLeft: 2,
+        dueIntervalWeeks: 4,
+        nextDueWeek: (this.state.week || 1) + 4
+      });
+      if (buyer.finance) {
+        buyer.finance.payables.push({
+          id: `pay_${dealId}`,
+          counterparty: 'Paris Saint-Germain',
+          desc: `Mua ${p.name}`,
+          remaining: rem,
+          perInstallment: +(rem / 2).toFixed(2),
+          installmentsLeft: 2,
+          dueIntervalWeeks: 4,
+          nextDueWeek: (this.state.week || 1) + 4
+        });
+      }
+    }
 
     this.removePlayerFromFormation(p.id);
     this.recalcWeeklyWages();
     this.verifySingleClubOwnership();
+    ai?.recomputeClubStrength?.('Paris Saint-Germain');
+    ai?.recomputeClubStrength?.(destName);
 
-    const deal = { id: `deal_${Date.now()}`, date: dateStr, playerId: p.id, playerName: p.name, position: p.position, from: 'Paris Saint-Germain', to: destName, fee: saleFee, type: 'Bán đứt' };
+    const deal = { id: dealId, date: dateStr, playerId: p.id, playerName: p.name, position: p.position, from: 'Paris Saint-Germain', to: destName, fee: saleFee, type: 'Bán đứt' };
     this.completedDeals.unshift(deal);
     this.incomingBids = this.incomingBids.filter((b) => b.playerId !== p.id);
 
@@ -742,11 +894,17 @@ export class TransferSystem {
     return { ok: true, deal };
   }
 
-  loanOutPlayer(playerId, loanClubName, buyOptionFee = null) {
+  loanOutPlayer(playerId, loanClubName, buyOptionFee = null, loanFeeOrOpts = 0) {
     const p = this.state.getPlayerById(playerId);
     if (!p) return { ok: false, error: 'Không tìm thấy cầu thủ.' };
     const dateStr = this.getDateStr();
     const destName = loanClubName || 'RC Strasbourg Alsace';
+    const destClub = this.state.clubs.find((c) => c.name === destName);
+    const opts = typeof loanFeeOrOpts === 'object' && loanFeeOrOpts !== null ? loanFeeOrOpts : { loanFee: loanFeeOrOpts };
+    const feeNum = Math.max(0, +Number(opts.loanFee || 0).toFixed(2));
+    const rawSplit = opts.wageSplit ?? 60;
+    const wageSplitPct = rawSplit <= 1 ? Math.round(rawSplit * 100) : Math.round(rawSplit);
+    const dealId = `deal_loan_${Date.now()}_${p.id}`;
 
     p.loanClub = destName;
     p.loanListed = false;
@@ -758,20 +916,42 @@ export class TransferSystem {
       startSeason: this.state.season,
       endSeason: this.state.season,
       buyOptionFee: buyOptionFee ? Number(buyOptionFee) : null,
-      wageSplit: 60, // CLB mượn trả 60% lương
+      loanFee: feeNum,
+      wageSplit: wageSplitPct, // CLB mượn trả % lương
       loanApps: 0,
       loanGoals: 0,
       loanAvgRating: 7.0
     };
     p.career.loanHistory.unshift({ season: this.state.season, from: 'Paris Saint-Germain', to: destName, buyOption: buyOptionFee });
 
+    if (feeNum > 0) {
+      if (destClub && this.state.globalClubAI) {
+        this.state.globalClubAI.recordAiClubTx(destClub, {
+          txKey: `psg_loan_out_cost_${dealId}`,
+          cashDelta: -feeNum,
+          expKey: 'transfers',
+          expAmt: feeNum
+        });
+      }
+      this.state.recordFinanceTransaction({
+        txKey: `psg_loan_out_fee_${dealId}`,
+        desc: `Phí cho mượn ${p.name} tới ${destName}`,
+        amount: +feeNum,
+        category: 'Phí cho mượn',
+        counterparty: destName,
+        incomeField: 'sales'
+      });
+    }
+
     const prop = this.academyProposals.find((pr) => pr.playerId === p.id);
     if (prop) prop.status = 'loaned';
 
     this.removePlayerFromFormation(p.id);
     this.recalcWeeklyWages();
+    this.state.globalClubAI?.recomputeClubStrength?.('Paris Saint-Germain');
+    this.state.globalClubAI?.recomputeClubStrength?.(destName);
 
-    const deal = { id: `deal_${Date.now()}`, date: dateStr, playerId: p.id, playerName: p.name, position: p.position, from: 'Paris Saint-Germain', to: destName, fee: 0, type: buyOptionFee ? `Cho mượn (Mua đứt €${buyOptionFee}M)` : 'Cho mượn' };
+    const deal = { id: dealId, date: dateStr, playerId: p.id, playerName: p.name, position: p.position, from: 'Paris Saint-Germain', to: destName, fee: feeNum, type: buyOptionFee ? `Cho mượn (Mua đứt €${buyOptionFee}M)` : 'Cho mượn' };
     this.completedDeals.unshift(deal);
     this.state.relationshipSystem?.onPlayerDeparted(p.id, destName);
     this.state.notifySquadChanged();
@@ -808,9 +988,26 @@ export class TransferSystem {
 
       // Trường hợp PSG cho CLB khác mượn
       if (li.parentClub === 'Paris Saint-Germain') {
-        const clubWantsBuy = li.buyOptionFee && (li.loanAvgRating >= 7.2 || p.ovr >= 78) && Math.random() < 0.55;
+        const borrower = this.state.clubs.find((c) => c.name === li.loanClub);
+        const canPay = !borrower || !this.state.globalClubAI || this.state.globalClubAI.canClubAfford(borrower, li.buyOptionFee || 0, p.wage || 45);
+        const clubWantsBuy = li.buyOptionFee && canPay && (li.loanAvgRating >= 7.1 || p.ovr >= 78) && Math.random() < 0.6;
         if (clubWantsBuy) {
-          this.state.addLedger(`${li.loanClub} kích hoạt mua đứt ${p.name}`, +li.buyOptionFee);
+          if (borrower && this.state.globalClubAI) {
+            this.state.globalClubAI.recordAiClubTx(borrower, {
+              txKey: `loan_buyout_cost_${p.id}_s${this.state.seasonNum}`,
+              cashDelta: -li.buyOptionFee,
+              expKey: 'transfers',
+              expAmt: li.buyOptionFee
+            });
+          }
+          this.state.recordFinanceTransaction({
+            txKey: `loan_buyout_${p.id}_s${this.state.seasonNum}`,
+            desc: `${li.loanClub} kích hoạt mua đứt ${p.name}`,
+            amount: +li.buyOptionFee,
+            category: 'Bán cầu thủ (Mua đứt)',
+            counterparty: li.loanClub,
+            incomeField: 'sales'
+          });
           p.club = li.loanClub;
           p.squadLevel = 'Đội một';
           p.loanInfo = null;
@@ -863,7 +1060,8 @@ export class TransferSystem {
     if (!this.isWindowOpen()) return [];
     const psgSquad = this.state.getPsgSquad();
     const candidates = psgSquad.filter((p) => p.transferListed || p.loanListed || p.ovr >= 78);
-    const activeBuyers = this.state.clubs.filter((c) => c.name !== 'Paris Saint-Germain' && c.budget >= 24);
+    const ai = this.state.globalClubAI;
+    const activeBuyers = this.state.clubs.filter((c) => c.name !== 'Paris Saint-Germain' && !c.finance?.austerityMode && (c.finance?.transferBudget ?? c.budget) >= 20);
     if (candidates.length === 0 || activeBuyers.length === 0) return [];
 
     const created = [];
@@ -872,20 +1070,26 @@ export class TransferSystem {
       const target = candidates[Math.floor(Math.random() * candidates.length)];
       if (this.incomingBids.some((b) => b.playerId === target.id)) continue;
 
-      // Ưu tiên CLB có nhu cầu đúng vị trí của cầu thủ PSG
       const needBuyers = activeBuyers.filter((c) => c.positionalNeeds?.includes(target.position));
       const pool = needBuyers.length ? needBuyers : activeBuyers;
       const wantsLoan = (target.age <= 23 || target.loanListed || Math.random() < 0.25) && !target.transferListed;
+      const marketVal = target.valuation?.current ?? target.value;
 
       const buyer = wantsLoan
-        ? pool.find((c) => c.budget >= 18) || pool[0]
-        : pool.find((c) => c.budget >= target.value * 0.9);
+        ? pool.find((c) => (ai ? ai.canClubAfford(c, Math.max(1.5, marketVal * 0.12), (target.wage || 40) * 0.6) : c.budget >= 18)) || pool[0]
+        : pool.find((c) => (ai ? ai.canClubAfford(c, marketVal * 0.9, target.wage || 60, marketVal) : c.budget >= marketVal * 0.9));
       if (!buyer) continue;
 
       const offerFee = wantsLoan
-        ? Math.max(2, Math.round(target.value * 0.14))
-        : Math.round(target.value * (0.95 + Math.random() * 0.22));
-      if (!wantsLoan && offerFee > buyer.budget) continue;
+        ? Math.max(1.5, +Number(marketVal * 0.13).toFixed(1))
+        : Math.round(marketVal * (0.95 + Math.random() * 0.22));
+      if (ai && !ai.canClubAfford(buyer, wantsLoan ? offerFee : offerFee * 0.65, target.wage || 60, offerFee)) continue;
+
+      const askPrice = target.valuation?.askingPrice ?? Math.round(marketVal * 1.18);
+      const curWeek = this.state.week || 1;
+      const deadlineWeek = curWeek + (this.windowState === 'winter' ? 1 : 2);
+      const baseSellOn = !wantsLoan && target.age <= 23 && Math.random() < 0.55 ? 10 : 0;
+      const baseBonus = !wantsLoan && offerFee >= 25 ? Math.max(2, Math.round(offerFee * 0.08)) : 0;
 
       const bid = {
         id: `bid_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 5)}`,
@@ -898,7 +1102,18 @@ export class TransferSystem {
         position: target.position,
         ovr: target.ovr,
         fee: offerFee,
-        buyOptionFee: wantsLoan ? Math.round(target.value * 0.95) : 0,
+        askingPrice: askPrice,
+        buyOptionFee: wantsLoan ? Math.round(marketVal * 0.95) : 0,
+        clauses: {
+          sellOnPct: baseSellOn,
+          bonusFee: baseBonus,
+          paymentTerms: wantsLoan
+            ? 'Chia 60% quỹ lương trong thời gian cho mượn'
+            : (offerFee >= 30 ? '65% trả trước + 35% trả góp 2 kỳ' : 'Thanh toán 100% trả trước'),
+          extraNotes: []
+        },
+        deadlineWeek,
+        deadlineDate: `Cuối Tuần ${deadlineWeek} (${this.season})`,
         rounds: 0,
         status: 'pending'
       };
@@ -908,7 +1123,7 @@ export class TransferSystem {
       this.state.pushPhoneMsg(
         `${buyer.name} (Mercato)`,
         `📩 Đề nghị ${wantsLoan ? 'MƯỢN' : 'MUA'} ${target.name} (€${offerFee}M)`,
-        `${buyer.name} (${bid.buyerStrategy}) vừa gửi đề nghị ${wantsLoan ? `mượn 1 mùa (phí €${offerFee}M, mua đứt €${bid.buyOptionFee}M)` : `mua đứt €${offerFee}M`} cho ${target.name}. Chủ tịch có thể duyệt trên Máy tính hoặc Điện thoại.`,
+        `${buyer.name} (${bid.buyerStrategy}) vừa gửi đề nghị ${wantsLoan ? `mượn 1 mùa (phí €${offerFee}M, mua đứt €${bid.buyOptionFee}M)` : `mua đứt €${offerFee}M`} cho ${target.name}. Hạn phản hồi: ${bid.deadlineDate}. Chủ tịch có thể tham khảo ý kiến các bộ phận hoặc duyệt trực tiếp.`,
         true
       );
       this.state.eventBus?.emit('TRANSFER_BID_RECEIVED', {
@@ -918,7 +1133,7 @@ export class TransferSystem {
         playerId: target.id,
         playerName: target.name,
         position: target.position,
-        ovr: target.ovr,
+        ovr: bid.ovr,
         fee: offerFee
       }, `bid_recv_${bid.id}`);
     }
@@ -935,12 +1150,16 @@ export class TransferSystem {
 
     const ask = Math.max(bid.fee + 1, Number(requestedFee || Math.round(bid.fee * 1.15)));
     bid.rounds = (bid.rounds || 0) + 1;
+    bid.lastUpdatedWeek = this.state.week || 1;
+    const mv = p.valuation?.current ?? p.value;
+    const buyerCap = buyer?.finance?.transferBudget ?? buyer?.budget ?? ask;
     const maxWilling = bid.dealType === 'loan'
-      ? Math.round(p.value * 0.25)
-      : Math.min(buyer ? buyer.budget * 0.95 : ask, Math.round(p.value * 1.32));
+      ? Math.round(mv * 0.24)
+      : Math.min(buyerCap * 0.92, Math.round(mv * 1.32));
 
     if (ask <= maxWilling && bid.rounds <= 3) {
       bid.fee = ask;
+      bid.status = 'counter_accepted';
       return { ok: true, outcome: 'accepted_counter', bid, message: `${bid.buyerClub} đồng ý nâng giá lên €${ask}M! Chủ tịch có thể bấm Chấp nhận để chốt thương vụ.` };
     }
     if (bid.rounds >= 3 || ask > maxWilling * 1.18) {
@@ -949,7 +1168,64 @@ export class TransferSystem {
     }
     const mid = Math.round((bid.fee + Math.min(ask, maxWilling)) / 2);
     bid.fee = Math.max(bid.fee + 1, mid);
+    bid.status = 'revised';
     return { ok: true, outcome: 'revised', bid, message: `${bid.buyerClub} tăng đề nghị lên €${bid.fee}M và chờ quyết định cuối của Chủ tịch.` };
+  }
+
+  // Yêu cầu bổ sung điều khoản chuyển nhượng (phí bán lại %, thưởng thành tích, điều khoản mua đứt)
+  counterIncomingBidWithClauses(bidId, { sellOnPct = 0, bonusFee = 0, buyOptionFee = null, note = '' } = {}) {
+    const bid = this.incomingBids.find((b) => b.id === bidId);
+    if (!bid) return { ok: false, error: 'Không tìm thấy đề nghị hỏi mua/mượn.' };
+    const p = this.state.getPlayerById(bid.playerId);
+    if (!p) return { ok: false, error: 'Không tìm thấy hồ sơ cầu thủ.' };
+
+    const buyer = this.state.clubs.find((c) => c.name === bid.buyerClub);
+    const reqSellOn = Math.max(0, Math.min(35, Number(sellOnPct) || 0));
+    const reqBonus = Math.max(0, Math.min(40, Number(bonusFee) || 0));
+    const mv = p.valuation?.current ?? p.value;
+    const buyerCap = buyer?.finance?.transferBudget ?? buyer?.budget ?? (bid.fee + reqBonus);
+
+    bid.rounds = (bid.rounds || 0) + 1;
+    bid.lastUpdatedWeek = this.state.week || 1;
+
+    // Nếu tổng đòi hỏi quá cao so với định giá & ngân sách đối tác ở vòng cuối -> có thể rút lui
+    if ((reqSellOn > 25 && bid.rounds >= 3) || (bid.fee + reqBonus > Math.min(buyerCap * 1.05, mv * 1.45) && bid.rounds >= 2)) {
+      this.incomingBids = this.incomingBids.filter((b) => b.id !== bidId);
+      return {
+        ok: true,
+        outcome: 'walked_away',
+        message: `${bid.buyerClub} từ chối gói điều khoản bổ sung (${reqSellOn}% bán lại, +€${reqBonus}M thưởng) và rút lui khỏi bàn đàm phán.`
+      };
+    }
+
+    const existing = bid.clauses && typeof bid.clauses === 'object' ? bid.clauses : { sellOnPct: 0, bonusFee: 0, extraNotes: [] };
+    const acceptedSellOn = Math.min(reqSellOn, 20);
+    const acceptedBonus = Math.min(reqBonus, Math.max(3, Math.round(mv * 0.16)));
+    const notes = Array.isArray(existing.extraNotes) ? [...existing.extraNotes] : [];
+    if (note && note.trim()) notes.push(note.trim());
+
+    bid.clauses = {
+      ...existing,
+      sellOnPct: Math.max(existing.sellOnPct || 0, acceptedSellOn),
+      bonusFee: Math.max(existing.bonusFee || 0, acceptedBonus),
+      paymentTerms: existing.paymentTerms || (bid.dealType === 'loan' ? 'Chia 60% quỹ lương' : '65% trả trước + 35% trả góp'),
+      extraNotes: notes
+    };
+    if (bid.dealType === 'loan' && Number(buyOptionFee) > 0) {
+      bid.buyOptionFee = Math.round(Number(buyOptionFee));
+    }
+    bid.status = 'clauses_updated';
+
+    const parts = [];
+    if (bid.clauses.sellOnPct > 0) parts.push(`${bid.clauses.sellOnPct}% phí bán lại`);
+    if (bid.clauses.bonusFee > 0) parts.push(`+€${bid.clauses.bonusFee}M thưởng thành tích`);
+    if (bid.dealType === 'loan' && bid.buyOptionFee) parts.push(`mua đứt €${bid.buyOptionFee}M`);
+    return {
+      ok: true,
+      outcome: 'clauses_accepted',
+      bid,
+      message: `${bid.buyerClub} chấp nhận điều chỉnh điều khoản cho ${bid.playerName}: ${parts.join(' · ') || 'giữ nguyên cấu trúc thanh toán'}.`
+    };
   }
 
   acceptIncomingBid(bidId) {
@@ -964,8 +1240,7 @@ export class TransferSystem {
     }
 
     if (bid.dealType === 'loan') {
-      const res = this.loanOutPlayer(bid.playerId, bid.buyerClub, bid.buyOptionFee || null);
-      if (res.ok && bid.fee > 0) this.state.addLedger(`Phí cho mượn ${bid.playerName} tới ${bid.buyerClub}`, +bid.fee);
+      const res = this.loanOutPlayer(bid.playerId, bid.buyerClub, bid.buyOptionFee || null, bid.fee || 0);
       this.incomingBids = this.incomingBids.filter((b) => b.id !== bidId);
       return res;
     }
@@ -979,91 +1254,30 @@ export class TransferSystem {
     return { ok: true, bid };
   }
 
-  // AI các CLB khác tự mua bán, gia hạn hợp đồng, cho mượn, thay HLV & phát triển cầu thủ trẻ (không vượt ngân sách!)
+  // AI các CLB khác tự mua bán, gia hạn hợp đồng, cho mượn, thay HLV & phát triển cầu thủ trẻ (tôn trọng ngân sách & FFP!)
   runAiTransferMarketCycle(dealCount = 3) {
     const aiClubs = this.state.clubs.filter((c) => c.name !== 'Paris Saint-Germain');
-    const dateStr = this.getDateStr();
-    const created = [];
-
-    for (let i = 0; i < dealCount; i++) {
-      const buyer = aiClubs[Math.floor(Math.random() * aiClubs.length)];
-      if (!buyer || buyer.budget < 12) continue;
-
-      // Xác định nhu cầu vị trí & ngân sách hợp lý của CLB AI
-      const clubPlayers = this.state.players.filter((p) => p.club === buyer.name);
-      const posNeeded = ['ST', 'CM', 'CB', 'GK', 'RW', 'LW'].find((pos) => !clubPlayers.some((cp) => cp.position === pos)) || 'ST';
-      const maxSpend = +(buyer.budget * 0.65).toFixed(1);
-
-      const pool = this.state.players.filter((p) =>
-        p.club !== 'Paris Saint-Germain' &&
-        p.club !== buyer.name &&
-        !p.loanInfo &&
-        p.value <= maxSpend &&
-        p.ovr >= buyer.rating - 10 &&
-        p.ovr <= buyer.rating + 5
-      );
-      if (pool.length === 0) continue;
-
-      const prioritized = pool.filter((p) => p.position === posNeeded);
-      const chosen = (prioritized.length ? prioritized : pool)[Math.floor(Math.random() * (prioritized.length ? prioritized.length : pool.length))];
-      if (!chosen) continue;
-
-      const oldClubName = chosen.club;
-      const seller = this.state.clubs.find((c) => c.name === oldClubName);
-      const fee = Math.min(maxSpend, Math.round(chosen.value * (0.95 + Math.random() * 0.2)));
-      if (fee > buyer.budget) continue;
-
-      chosen.club = buyer.name;
-      chosen.contractYears = 4;
-      if (chosen.contract) chosen.contract.contractYears = 4;
-      chosen.career.transferHistory.unshift({ date: dateStr, from: oldClubName, to: buyer.name, fee: `€${fee}M`, type: 'Mua đứt' });
-
-      buyer.budget = +(buyer.budget - fee).toFixed(1);
-      if (seller) seller.budget = +(seller.budget + fee).toFixed(1);
-
-      const rec = { id: `ai_deal_${Date.now()}_${i}`, date: dateStr, playerId: chosen.id, playerName: chosen.name, position: chosen.position, from: oldClubName, to: buyer.name, fee, type: 'AI Chuyển nhượng' };
-      this.completedDeals.unshift(rec);
-      created.push(rec);
-
-      if (fee >= 40) {
-        this.state.pushSocial('Fabrizio Romano', '@FabrizioRomano', `Here we go! ${buyer.name} hoàn tất chiêu mộ ${chosen.name} từ ${oldClubName} với mức phí €${fee}M!`, 'neutral');
-      }
+    if (this.state.globalClubAI) {
+      const beforeLen = this.completedDeals.length;
+      const periodKey = `manual_${Date.now()}`;
+      this.state.globalClubAI._runAutonomousClubDecisions(aiClubs, periodKey);
+      if (dealCount > 2) this.state.globalClubAI._runAutonomousClubDecisions(aiClubs, `${periodKey}_b`);
+      aiClubs.forEach((c) => this.state.globalClubAI.recomputeClubStrength(c.name));
+      return this.completedDeals.slice(0, Math.max(0, this.completedDeals.length - beforeLen));
     }
-
-    // AI gia hạn hợp đồng cho trụ cột sắp hết hạn
-    this.state.players.forEach((p) => {
-      if (p.club !== 'Paris Saint-Germain' && p.contractYears <= 1 && p.ovr >= 82 && Math.random() < 0.3) {
-        p.contractYears = 3;
-        if (p.contract) {
-          p.contract.contractYears = 3;
-          p.contract.renewalStatus = 'Ổn định';
-        }
-      }
-    });
-
-    // AI sa thải / bổ nhiệm HLV nếu CLB Ligue 1 thành tích tệ
-    const ligue1Underperf = aiClubs.filter((c) => c.league === 'Ligue 1' && c.played >= 10 && c.rating >= 79 && c.pts / c.played < 1.15);
-    const aiManagers = ['Christophe Galtier', 'Philippe Clement', 'Franck Passi', 'Julien Stéphan', 'Laurent Blanc', 'Rudi Garcia'];
-    ligue1Underperf.forEach((c) => {
-      if (Math.random() < 0.25) {
-        const nextMgr = aiManagers[Math.floor(Math.random() * aiManagers.length)];
-        if (nextMgr !== c.manager) {
-          c.manager = nextMgr;
-          this.rumors.unshift({ id: `rum_${Date.now()}`, date: dateStr, title: `${c.name} thay tướng: Bổ nhiệm HLV ${nextMgr}`, detail: `Thành tích bết bát tại Ligue 1 buộc Ban lãnh đạo ${c.name} thay đổi HLV trưởng.`, reliability: 'Chính thức' });
-        }
-      }
-    });
-
-    if (this.completedDeals.length > 80) this.completedDeals.length = 80;
-    if (this.rumors.length > 20) this.rumors.length = 20;
-    return created;
+    return [];
   }
 
   recalcWeeklyWages() {
     const psgSquad = this.state.getPsgSquad();
     const playerWeeklyM = psgSquad.reduce((s, p) => s + (p.wage || 50), 0) / 1000;
+    const loanedOut = this.getLoanedOutPlayers();
+    const retainedLoanWageM = loanedOut.reduce((s, p) => {
+      const pctKeep = Math.max(0, 100 - (p.loanInfo?.wageSplit ?? 60)) / 100;
+      return s + ((p.wage || 30) * pctKeep) / 1000;
+    }, 0);
     const staffWeeklyM = (this.state.staffDb?.active || []).reduce((s, st) => s + (st.wage || 30), 0) / 1000;
-    this.state.finance.weeklyWages = +(playerWeeklyM + staffWeeklyM + 0.55).toFixed(2);
+    this.state.finance.weeklyWages = +(playerWeeklyM + retainedLoanWageM + staffWeeklyM + 0.55).toFixed(2);
   }
 
   exportState() {

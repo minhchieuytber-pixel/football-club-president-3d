@@ -584,6 +584,7 @@ export class TrainingSystem {
 
     this.trainingReports.unshift(report);
     if (this.trainingReports.length > 25) this.trainingReports.pop();
+    this.state.relationshipSystem?.onTrainingEvaluated?.(report);
 
     // Tạo tương tác trực tiếp từ Trợ lý / HLV gửi Chủ tịch sau buổi tập (Phần IX)
     const interactive = needRecovery.length >= 2

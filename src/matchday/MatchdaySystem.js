@@ -312,11 +312,14 @@ export class MatchdaySystem {
       const avgMorale = active.length ? active.reduce((s, p) => s + (p.morale || 80), 0) / active.length : 80;
 
       const coachSkill = (state.coach?.tactics || 88) * 0.55 + (state.coach?.experience || 86) * 0.45;
-      // Ảnh hưởng đoàn kết & tâm lý phòng thay đồ từ ClubRelationshipSystem
-      const profiles = Object.values(state.relationshipSystem?.profiles || {});
+      // Ảnh hưởng đoàn kết & tâm lý phòng thay đồ từ ClubRelationshipSystem (đã sửa lỗi .profiles -> .playerRelations)
+      const relSys = state.relationshipSystem;
+      const profiles = Object.values(relSys?.playerRelations || {});
+      const drState = relSys?.getDressingRoomState?.();
       const unityScore = profiles.length
-        ? profiles.reduce((s, pr) => s + ((pr.metrics?.morale || 78) * 0.5 + (pr.metrics?.trustCoach || 76) * 0.5), 0) / profiles.length
+        ? profiles.reduce((s, pr) => s + ((pr.metrics?.dressingRoomHarmony ?? pr.metrics?.teamIntegration ?? 78) * 0.5 + (pr.metrics?.trustCoach ?? 76) * 0.5), 0) / profiles.length
         : 78;
+      const drMatchMod = drState?.level === 5 ? -4.5 : drState?.level === 4 ? -2.4 : drState?.level === 3 ? -0.9 : drState?.level === 1 && (drState.harmonyScore || 0) >= 82 ? +1.2 : 0;
 
       const homeBonus = oppHome ? 2.8 : -1.0;
       const redPenalty = (11 - active.length) * 8.5;
@@ -329,6 +332,7 @@ export class MatchdaySystem {
         avgMorale * 0.06 +
         coachSkill * 0.08 +
         unityScore * 0.06 +
+        drMatchMod +
         homeBonus -
         staminaPenalty -
         redPenalty;
@@ -338,9 +342,8 @@ export class MatchdaySystem {
 
     const activeOpp = starters.filter((s) => !s.redCarded);
     const redPenalty = (11 - activeOpp.length) * 8.0;
-    const clubRating = club?.rating || 78;
-    const homeBonus = oppHome ? 2.6 : -0.9;
-    return clamp(clubRating * 0.96 + homeBonus - redPenalty, 40, 104);
+    const baseClubPower = state.globalClubAI?.getEffectiveClubPower?.(club, fixture) ?? ((club?.rating || 78) * 0.96 + (oppHome ? 2.6 : -0.9));
+    return clamp(baseClubPower - redPenalty, 40, 104);
   }
 
   // ==================== KHỞI TẠO PHIÊN MATCHDAY TRỰC TIẾP ====================
@@ -1212,7 +1215,6 @@ export class MatchdaySystem {
       if (r.rating >= 7.8) {
         pl.form = Math.min(99, pl.form + 3);
         pl.morale = Math.min(100, pl.morale + 4);
-        pl.value = +(pl.value + 0.8).toFixed(1);
       } else if (r.rating <= 5.9) {
         pl.form = Math.max(46, pl.form - 2);
         pl.morale = Math.max(36, pl.morale - 3);
@@ -1240,10 +1242,24 @@ export class MatchdaySystem {
       }
     });
 
-    // 5. Tài chính, Uy tín & Cúp
+    // 5. Tài chính, Uy tín & Cúp (chống ghi sổ trùng lặp theo matchId)
     const vipLv = state.commercialSystem?.getFacilityLevel('parc_vip') || 4;
     if (res.psgIsHome) {
-      state.addLedger(`Doanh thu bán vé & VIP Parc des Princes (${fx.comp})`, +(3.6 + vipLv * 0.7).toFixed(1));
+      state.addLedger(
+        `Doanh thu bán vé & VIP Parc des Princes (${fx.comp})`,
+        +(3.6 + vipLv * 0.7).toFixed(1),
+        { txKey: `match_gate_${res.matchId}`, category: 'Bán vé SVĐ', counterparty: 'Parc des Princes', incomeField: 'tickets' }
+      );
+    } else {
+      const homeOppClub = state.clubs.find((c) => c.name === fx.home);
+      if (homeOppClub && state.globalClubAI) {
+        state.globalClubAI.recordAiClubTx(homeOppClub, {
+          txKey: `opp_gate_${res.matchId}`,
+          cashDelta: homeOppClub.tier === 'giant' ? 2.6 : 1.4,
+          revKey: 'tickets',
+          revAmt: homeOppClub.tier === 'giant' ? 2.6 : 1.4
+        });
+      }
     }
     if (res.psgWon) {
       state.loseStreak = 0;
@@ -1252,7 +1268,13 @@ export class MatchdaySystem {
         `Thắng ${res.oppName} (${res.homeGoals}-${res.awayGoals})`,
         `match_rep_${res.matchId}`
       );
-      if (fx.comp === 'UEFA Champions League') state.addLedger('Tiền thưởng chiến thắng UEFA Champions League', 2.8);
+      if (fx.comp === 'UEFA Champions League') {
+        state.addLedger(
+          'Tiền thưởng chiến thắng UEFA Champions League',
+          2.8,
+          { txKey: `ucl_win_${res.matchId}`, category: 'Tiền thưởng UEFA', counterparty: 'UEFA', incomeField: 'prize' }
+        );
+      }
     } else if (!res.psgDrew) {
       state.loseStreak++;
       state.reputationSystem?.applyDelta(
@@ -1359,7 +1381,18 @@ export class MatchdaySystem {
 
     const hShock = (Math.random() - 0.5) * 6.5;
     const aShock = (Math.random() - 0.5) * 6.5;
-    const diff = ((hClub.rating || 78) + 2.6 + hShock) - ((aClub.rating || 78) - 0.8 + aShock);
+    const hPow = this.state.globalClubAI?.getEffectiveClubPower?.(hClub, fx) ?? ((hClub.rating || 78) + 2.6);
+    const aPow = this.state.globalClubAI?.getEffectiveClubPower?.(aClub, fx) ?? ((aClub.rating || 78) - 0.8);
+    const diff = (hPow + hShock) - (aPow + aShock);
+
+    if (this.state.globalClubAI && hClub.name !== 'Paris Saint-Germain') {
+      this.state.globalClubAI.recordAiClubTx(hClub, {
+        txKey: `l1_gate_${mId}`,
+        cashDelta: hClub.tier === 'giant' ? 1.6 : 0.85,
+        revKey: 'tickets',
+        revAmt: hClub.tier === 'giant' ? 1.6 : 0.85
+      });
+    }
 
     const homePoss = clamp(Math.round(50 + diff * 1.2 + (Math.random() - 0.5) * 8), 32, 68);
     const awayPoss = 100 - homePoss;

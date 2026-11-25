@@ -12,6 +12,7 @@ import {
   DIRECTIVE_STATUS,
   COMMITMENT_STATUS,
   CONFLICT_LEVELS,
+  DRESSING_ROOM_LEVELS,
   PRESS_LEAK_RESPONSES,
   PRIVATE_MEETING_TACTICS
 } from '../relations/ClubRelationshipSystem.js';
@@ -150,6 +151,9 @@ export function renderLockerRoomReportHTML(state, filters = {}) {
   const rel = state.relationshipSystem;
   const rep = rel.getLockerRoomReport(filters);
   const k = rep.kpis;
+  const dr = rep.dressingRoomState || rel.getDressingRoomState();
+  const drMeta = DRESSING_ROOM_LEVELS[dr.level] || DRESSING_ROOM_LEVELS[1];
+  const resLog = rep.recentResolutionLog || [];
   const positions = ['ALL', 'GK', 'CB', 'LB', 'RB', 'DM', 'CM', 'AM', 'LW', 'RW', 'ST'];
 
   return `
@@ -160,6 +164,28 @@ export function renderLockerRoomReportHTML(state, filters = {}) {
       <div class="kpi-card"><span>Đoàn kết toàn đội</span><strong class="tabular-nums">${k.teamUnity}/100</strong></div>
       <div class="kpi-card"><span>TB Quan hệ HLV–Cầu thủ</span><strong class="tabular-nums">${k.avgCoachRelation}/100</strong></div>
     </div>
+
+    <div class="card-item" style="border-left:4px solid ${drMeta.color};margin-bottom:8px;">
+      <div class="card-head">
+        <strong>🏟️ Trạng thái Phòng thay đồ (5 cấp): <span style="color:${drMeta.color};">${esc(dr.label)}</span></strong>
+        <span class="tag ${dr.level <= 2 ? 'ok' : dr.level === 3 ? 'warn' : 'bad'} tabular-nums">Hòa hợp: ${dr.harmonyScore}/100</span>
+      </div>
+      <div class="kpi-mini" style="margin-top:4px;">
+        <span>Căng thẳng TB: <b class="tabular-nums">${dr.avgTension}/100</b></span>
+        <span>Niềm tin HLV: <b class="tabular-nums">${dr.coachConfidenceBySquad}/100</b></span>
+        <span>Đội trưởng: <b>${esc(dr.captainName || 'PSG')}</b></span>
+        <span>Âm ỉ / Nghiêm trọng: <b class="tabular-nums">${dr.simmeringCount}/${dr.severeCount}</b></span>
+      </div>
+      ${dr.affectedGroups?.length ? `<div class="muted" style="margin-top:4px;">Nhóm bị ảnh hưởng: <b>${esc(dr.affectedGroups.join(', '))}</b></div>` : `<div class="muted" style="margin-top:4px;">Không khí nội bộ đang vận hành tự nhiên, không có nhóm cầu thủ nào bị xáo trộn.</div>`}
+    </div>
+
+    ${resLog.length > 0 ? `
+      <div class="card-item" style="margin-bottom:8px;">
+        <div class="section-label" style="margin-top:0;">🕊️ Hòa giải tự nhiên gần đây (${resLog.length})</div>
+        <div class="scroll-list" style="max-height:11vh;">
+          ${resLog.slice(0, 4).map((x) => `<div class="muted">• <b>${esc(x.date)}</b>: ${esc(x.note)}</div>`).join('')}
+        </div>
+      </div>` : ''}
 
     <div class="btn-row" style="margin-bottom:8px;">
       <button type="button" class="btn-primary" id="lr-jump-directives" style="min-height:44px;">🎯 Định hướng sử dụng cầu thủ (HLV trưởng)</button>
@@ -286,6 +312,8 @@ export function renderLockerRoomReportHTML(state, filters = {}) {
                 <td class="tabular-nums">${m.trustChairman}</td>
                 <td>
                   ${r.conflict ? `<span class="tag bad">Cấp ${r.conflict.level}/5</span>` : '<span class="muted">Ổn định</span>'}
+                  ${(prof.tensionScore || 0) >= 25 ? `<span class="tag warn tabular-nums">Căng thẳng ${prof.tensionScore}</span>` : ''}
+                  ${prof.agentProbing ? `<span class="tag bad">Đại diện thăm dò</span>` : ''}
                   ${r.openCommitments.length > 0 ? `<span class="tag warn">${r.openCommitments.length} cam kết</span>` : ''}
                   ${r.hasBid ? `<span class="tag bad">Đang bị hỏi mua</span>` : ''}
                 </td>

@@ -95,6 +95,7 @@ export class TournamentSystem {
         st.eliminated = true;
         st.champion = oppName;
         this._cancelFutureFixturesForComp('coupe_de_france', 'Coupe de France');
+        this.state?.relationshipSystem?.onTournamentEliminated?.('Coupe de France', fx.round);
         return { competitionId: 'coupe_de_france', champion: oppName, awarded: false };
       }
       if (fx.isFinal || fx.stage === 'final' || String(fx.round).toLowerCase().includes('chung kết')) {
@@ -114,18 +115,20 @@ export class TournamentSystem {
         // Sau 4 lượt vòng bảng, tối thiểu 4 điểm mới vào Tứ kết
         if (st.groupPlayed >= 4 && st.groupPoints < 4) {
           st.eliminated = true;
-          st.champion = oppName;
+          st.champion = null;
           this._cancelFutureFixturesForComp('ucl', 'UEFA Champions League');
-          return { competitionId: 'ucl', champion: oppName, awarded: false };
+          this.state?.relationshipSystem?.onTournamentEliminated?.('UEFA Champions League', 'Vòng bảng');
+          return { competitionId: 'ucl', champion: null, awarded: false };
         }
         return null;
       }
 
       if (!res.psgWon) {
         st.eliminated = true;
-        st.champion = oppName;
+        st.champion = null;
         this._cancelFutureFixturesForComp('ucl', 'UEFA Champions League');
-        return { competitionId: 'ucl', champion: oppName, awarded: false };
+        this.state?.relationshipSystem?.onTournamentEliminated?.('UEFA Champions League', fx.round);
+        return { competitionId: 'ucl', champion: null, awarded: false };
       }
 
       if (fx.isFinal || fx.stage === 'final' || String(fx.round).toLowerCase().includes('chung kết')) {
@@ -174,6 +177,18 @@ export class TournamentSystem {
       finalMatchText: extra.finalMatchText || '',
       opponentName: extra.opponentName || ''
     });
+    if (res.ok && this.state?.recordFinanceTransaction) {
+      const prizeMap = { ucl: 35, ligue_1: 18, coupe_de_france: 6, fifa_club_world_cup: 25, uefa_super_cup: 5, trophee_des_champions: 2.5 };
+      const prizeM = prizeMap[competitionId] || 4;
+      this.state.recordFinanceTransaction({
+        txKey: `champ_prize_${competitionId}_${seasonName}`,
+        desc: `Tiền thưởng Vô địch ${res.trophy?.competitionName || competitionId} (${seasonName})`,
+        amount: prizeM,
+        category: 'Tiền thưởng danh hiệu',
+        counterparty: 'Ban Tổ Chức Giải Đấu',
+        incomeField: 'prize'
+      });
+    }
     return { competitionId, champion: winner, awarded: !!res.ok, trophy: res.trophy || null };
   }
 
@@ -187,7 +202,11 @@ export class TournamentSystem {
     const psgClub = ligue1.find((c) => c.name === 'Paris Saint-Germain');
     const psgRankIdx = Math.max(1, ligue1.findIndex((c) => c.name === 'Paris Saint-Germain') + 1);
 
-    const uclChamp = this.status.ucl.champion || (this.status.ucl.eliminated ? 'Real Madrid' : 'Real Madrid');
+    let uclChamp = this.status.ucl.champion;
+    if (!uclChamp) {
+      uclChamp = this.state?.globalClubAI?.resolveUclChampionIfPsgEliminated?.() || 'Bayern Munich';
+      this.status.ucl.champion = uclChamp;
+    }
     const seasonName = this.state?.season || this.seasonName;
     const earnedThisSeason = (this.trophySystem?.trophies || []).filter((t) => t.seasonName === seasonName);
     const psgSquad = this.state?.getPsgSquad ? this.state.getPsgSquad() : [];

@@ -779,10 +779,12 @@ export function bindMatchdayViewEvents(state, uiState, callbacks) {
   });
 }
 
-// Giao diện Ứng dụng Lịch thi đấu & Bảng xếp hạng trên Máy tính Chủ tịch (đồng bộ 100% với Matchday)
-export function renderLeaguesComputerTabHTML(state) {
+// Giao diện Ứng dụng Lịch thi đấu & Bảng xếp hạng trên Máy tính Chủ tịch (đồng bộ 100% với Matchday + Toàn Châu Âu)
+export function renderLeaguesComputerTabHTML(state, selectedLeague = 'Ligue 1') {
   const sys = state.matchdaySystem;
-  const rows = sys.getStandings('Ligue 1');
+  const leagueOptions = ['Ligue 1', 'Premier League', 'La Liga', 'Bundesliga', 'Serie A', 'Primeira Liga', 'Eredivisie'];
+  const activeLeague = leagueOptions.includes(selectedLeague) ? selectedLeague : 'Ligue 1';
+  const rows = sys.getStandings(activeLeague);
   const upcoming = state.fixtures.filter((f) => !f.played && !f.skippedEliminated).slice(0, 4);
   const recentDone = state.fixtures.filter((f) => f.played).slice(-4).reverse();
 
@@ -792,7 +794,7 @@ export function renderLeaguesComputerTabHTML(state) {
         <strong>⚽ Trung tâm Lịch thi đấu & Matchday PSG</strong>
         <button type="button" class="btn-xs btn-primary" id="lg-open-matchday">🏟️ Mở Trung tâm Matchday</button>
       </div>
-      <div class="muted">Mọi trận đấu của PSG và toàn giải Ligue 1 đều do hệ thống Matchday duy nhất xử lý tự động theo lịch thi đấu thực.</div>
+      <div class="muted">Mọi trận đấu của PSG, Ligue 1 và 6 giải đấu lớn Châu Âu đều vận hành song song tự động mỗi tuần.</div>
     </div>
 
     <div class="section-label">📅 Lịch thi đấu sắp tới của PSG</div>
@@ -821,7 +823,12 @@ export function renderLeaguesComputerTabHTML(state) {
           </button>`).join('')}
       </div>` : ''}
 
-    <div class="section-label">📊 Bảng xếp hạng Ligue 1</div>
+    <div class="card-head" style="margin-top:6px;margin-bottom:4px;">
+      <div class="section-label" style="margin:0;">📊 Bảng xếp hạng ${esc(activeLeague)}</div>
+      <select id="lg-league-select" class="input-ctrl" style="max-width:170px;">
+        ${leagueOptions.map((lg) => `<option value="${lg}" ${activeLeague === lg ? 'selected' : ''}>${lg}</option>`).join('')}
+      </select>
+    </div>
     <div class="table-wrap">
       <table class="data-table">
         <thead><tr><th>#</th><th>±</th><th>CLB</th><th>Trận</th><th>T</th><th>H</th><th>B</th><th>HS</th><th>Điểm</th><th>5 trận</th></tr></thead>

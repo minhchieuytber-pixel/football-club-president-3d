@@ -128,19 +128,25 @@ export function renderContractsNegotiationHTML(state) {
     <div class="section-label">📩 Đề nghị Hỏi Mua / Mượn từ Đối thủ (${incomingBids.length})</div>
     ${incomingBids.length === 0
       ? '<div class="card-item muted">Hiện chưa có đề nghị mới nào gửi tới bàn Chủ tịch.</div>'
-      : incomingBids.map((b) => `
+      : incomingBids.map((b) => {
+        const p = state.getPlayerById?.(b.playerId);
+        const mv = p?.valuation?.current ?? p?.value ?? b.fee;
+        const ask = b.askingPrice ?? p?.valuation?.askingPrice ?? Math.round(mv * 1.18);
+        return `
         <div class="card-item urgent">
           <div class="card-head">
-            <strong>${esc(b.buyerClub)} muốn ${b.dealType === 'loan' ? 'MƯỢN' : 'MUA'} ${esc(b.playerName)} (${esc(b.position)} · OVR ${b.ovr})</strong>
+            <strong>${esc(b.buyerClub)} muốn ${b.dealType === 'loan' ? 'MƯỢN' : 'MUA'} ${esc(b.playerName)} (${esc(b.position)} · ${p?.age || '--'}t · OVR ${b.ovr})</strong>
             <span class="tag ok">€${b.fee}M</span>
           </div>
-          <div class="muted">Chiến lược: ${esc(b.buyerStrategy || 'Tăng cường lực lượng')} · Vòng: ${b.rounds || 0}</div>
+          <div class="muted">Giá TT: €${mv}M · Yêu cầu: €${ask}M · Chiến lược: ${esc(b.buyerStrategy || 'Tăng cường lực lượng')} · Hạn: ${esc(b.deadlineDate || 'Trong kỳ CN')}</div>
           <div class="btn-row">
+            <button class="btn-xs btn-primary ct-consult-bid" data-bid="${b.id}">🏛️ Tham khảo ý kiến các bộ phận</button>
             <button class="btn-xs btn-primary ct-accept-bid" data-bid="${b.id}">✅ Chấp nhận (+€${b.fee}M)</button>
             <button class="btn-xs btn-accent ct-counter-bid" data-bid="${b.id}" data-fee="${Math.round(b.fee * 1.15)}">💬 Ép giá €${Math.round(b.fee * 1.15)}M</button>
             <button class="btn-xs btn-danger ct-reject-bid" data-bid="${b.id}">❌ Từ chối</button>
           </div>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
 
     <div class="section-label">✍️ Hồ sơ Đàm phán Chuyển nhượng 2 Giai đoạn (${activeNegs.length})</div>
     ${activeNegs.length === 0
@@ -558,15 +564,21 @@ export function renderApprovalsQueueHTML(state) {
             <button class="btn-xs btn-danger app-jump" data-pctab="media" data-msub="crises">Họp cố vấn & Xử lý ngay</button>
           </div>`).join('')}
 
-        ${bids.map((b) => `
+        ${bids.map((b) => {
+          const p = state.getPlayerById?.(b.playerId);
+          const mv = p?.valuation?.current ?? p?.value ?? b.fee;
+          return `
           <div class="card-item urgent">
-            <div class="card-head"><strong>📩 ${esc(b.buyerClub)} hỏi ${b.dealType === 'loan' ? 'mượn' : 'mua'} ${esc(b.playerName)}</strong><span class="tag ok">€${b.fee}M</span></div>
+            <div class="card-head"><strong>📩 ${esc(b.buyerClub)} hỏi ${b.dealType === 'loan' ? 'mượn' : 'mua'} ${esc(b.playerName)} (${esc(b.position)} · OVR ${b.ovr})</strong><span class="tag ok">€${b.fee}M</span></div>
+            <div class="muted">Giá TT: €${mv}M · Hạn: ${esc(b.deadlineDate || 'Trong kỳ CN')}</div>
             <div class="btn-row">
+              <button class="btn-xs btn-primary app-consult-bid" data-bid="${b.id}">🏛️ Tham khảo ý kiến các bộ phận</button>
               <button class="btn-xs btn-primary app-accept-bid" data-bid="${b.id}">✅ Chấp nhận</button>
               <button class="btn-xs btn-accent app-counter-bid" data-bid="${b.id}" data-fee="${Math.round(b.fee * 1.15)}">💬 Ép giá €${Math.round(b.fee * 1.15)}M</button>
               <button class="btn-xs btn-danger app-reject-bid" data-bid="${b.id}">❌ Từ chối</button>
             </div>
-          </div>`).join('')}
+          </div>`;
+        }).join('')}
 
         ${reports.map((r) => `
           <div class="card-item urgent">

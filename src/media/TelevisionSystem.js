@@ -149,14 +149,17 @@ export class TelevisionSystem {
     } else if (channelId === 'transfer_news') {
       const mNews = news.filter((n) => n.category === 'Chuyển nhượng' || n.category === 'Tin chuyển nhượng');
       const deals = ts?.completedDeals || [];
-      const rumors = (s.rumorCrisisSystem?.rumors || []).slice(0, 3);
+      const rumors = (s.rumorCrisisSystem?.rumors || []).slice(0, 2);
+      const valRep = s.valuationSystem?.latestWeeklyReport;
+      const topRiser = valRep?.risers?.[0];
       headline = deals[0]
         ? `MERCATO LIVE: ${deals[0].playerName} (${deals[0].from} → ${deals[0].to} · €${deals[0].fee}M)`
         : 'MERCATO CENTER · THEO DÕI THỊ TRƯỜNG CHUYỂN NHƯỢNG';
       subheadline = ts?.getWindowLabel() || 'Thị trường chuyển nhượng';
       mainCards = [
         ...deals.slice(0, 2).map((d) => ({ label: `Chính thức · ${d.date}`, title: `${d.playerName}: ${d.from} ➔ ${d.to} (€${d.fee}M)`, tag: d.type })),
-        ...rumors.slice(0, 2).map((r) => ({ label: `${r.verificationStatus} · ${r.source}`, title: r.title, tag: 'TIN ĐỒN' }))
+        ...(topRiser ? [{ label: `Định giá Tuần ${valRep.week}`, title: `📈 ${topRiser.name} (${topRiser.club}) đạt €${topRiser.current}M (+${topRiser.deltaPct}%)`, tag: 'VALUATION' }] : []),
+        ...rumors.map((r) => ({ label: `${r.verificationStatus} · ${r.source}`, title: r.title, tag: 'TIN ĐỒN' }))
       ];
       if (mainCards.length === 0 && mNews[0]) {
         mainCards.push({ label: mNews[0].verificationStatus || 'Tin đồn', title: mNews[0].title, tag: 'MERCATO' });
@@ -166,7 +169,7 @@ export class TelevisionSystem {
         { k: 'Hỏi mua PSG', v: `${ts?.incomingBids?.length || 0}` },
         { k: 'Thương vụ xong', v: `${deals.length}` }
       ];
-      ticker = `MERCATO · Đang mở: ${ts?.isWindowOpen() ? 'CÓ' : 'KHÔNG'} · Quỹ CN PSG: €${(s.finance?.transferBudget || 0).toFixed(1)}M · ${rumors[0]?.title || 'Thị trường châu Âu sôi động'}`;
+      ticker = `MERCATO · Đang mở: ${ts?.isWindowOpen() ? 'CÓ' : 'KHÔNG'} · Quỹ CN PSG: €${(s.finance?.transferBudget || 0).toFixed(1)}M · ${topRiser ? `Tăng giá mạnh: ${topRiser.name} €${topRiser.current}M` : (rumors[0]?.title || 'Thị trường châu Âu sôi động')}`;
     } else if (channelId === 'ligue1_news') {
       const psgRow = ligue1.find((c) => c.name === 'Paris Saint-Germain') || { pts: 0, played: 0 };
       const rank = ligue1.findIndex((c) => c.name === 'Paris Saint-Germain') + 1;
@@ -211,19 +214,22 @@ export class TelevisionSystem {
     } else if (channelId === 'sports_finance') {
       const comm = s.commercialSystem;
       const annualSponsors = comm?.getTotalSponsorAnnualRevenue() ?? s.finance?.income?.sponsors ?? 145;
-      headline = `SPORTS FINANCE · GIÁ TRỊ THƯƠNG HIỆU PSG ĐẠT €${s.brandMetrics?.brandValue || 4120}M`;
+      const topRichClub = s.globalClubAI?.getRivalFinanceOverview?.(3)?.find((c) => c.name !== 'Paris Saint-Germain');
+      const rcvSum = (s.finance?.receivables || []).reduce((sum, r) => sum + (r.remaining || 0), 0);
+      const paySum = (s.finance?.payables || []).reduce((sum, p) => sum + (p.remaining || 0), 0);
+      headline = `SPORTS FINANCE · TIỀN MẶT PSG €${(s.finance?.cash ?? s.finance?.budget ?? 0).toFixed(1)}M · THƯƠNG HIỆU €${s.brandMetrics?.brandValue || 4120}M`;
       subheadline = `${s.finance?.ffpStatus || 'An toàn FFP'} · Quỹ lương €${(s.finance?.weeklyWages || 0).toFixed(2)}M/tuần`;
       mainCards = [
-        { label: 'Ngân sách & Quỹ CN', title: `Tổng quỹ: €${(s.finance?.budget || 0).toFixed(1)}M · Quỹ CN: €${(s.finance?.transferBudget || 0).toFixed(1)}M`, tag: 'TREASURY' },
+        { label: 'Ngân sách, Tiền mặt & Trả góp', title: `Cash: €${(s.finance?.cash ?? s.finance?.budget ?? 0).toFixed(1)}M · Quỹ CN: €${(s.finance?.transferBudget || 0).toFixed(1)}M · Phải thu €${rcvSum.toFixed(1)}M / Phải trả €${paySum.toFixed(1)}M`, tag: 'TREASURY' },
         { label: 'Tài trợ & Thương mại', title: `Doanh thu tài trợ: €${annualSponsors}M/năm · Áo đấu bán ra: ${comm?.commercial?.jerseysSoldK || 940}k chiếc`, tag: 'SPONSORS' },
-        { label: 'Cơ sở vật chất', title: `Chi phí bảo trì tuần: €${comm?.getTotalWeeklyFacilityUpkeep() || 1.3}M · ${comm?.commercial?.globalStores || 14} Flagship Store`, tag: 'ASSETS' }
+        ...(topRichClub ? [{ label: 'Tài chính Đối thủ Châu Âu', title: `${topRichClub.name}: Cash €${topRichClub.cash}M · Quỹ CN €${topRichClub.transferBudget}M · ${topRichClub.ffpStatus}`, tag: topRichClub.tier?.toUpperCase() || 'RIVAL' }] : [])
       ];
       statsStrip = [
-        { k: 'Tài trợ/năm', v: `€${annualSponsors}M` },
+        { k: 'Tiền mặt PSG', v: `€${(s.finance?.cash ?? s.finance?.budget ?? 0).toFixed(1)}M` },
         { k: 'Lương/tuần', v: `€${(s.finance?.weeklyWages || 0).toFixed(2)}M` },
         { k: 'Uy tín Đối tác', v: `${s.reputationSystem?.metrics?.partnerTrust ?? 87}/100` }
       ];
-      ticker = `💶 SPORTS FINANCE · Ngân sách €${(s.finance?.budget || 0).toFixed(1)}M · Tài trợ €${annualSponsors}M/năm · ${s.finance?.ffpStatus}`;
+      ticker = `💶 SPORTS FINANCE · Cash €${(s.finance?.cash ?? s.finance?.budget ?? 0).toFixed(1)}M · Tài trợ €${annualSponsors}M/năm · ${s.finance?.ffpStatus}${topRichClub ? ` · Đối thủ dẫn đầu: ${topRichClub.name} (€${topRichClub.cash}M)` : ''}`;
     } else if (channelId === 'press_conference') {
       const activeEvt = s.signingEventSystem?.activeEvent;
       const bcast = s.signingEventSystem?.broadcast;

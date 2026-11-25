@@ -74,7 +74,7 @@ export class CoachMatchAI {
     };
 
     const isLowPriorityMatch = importance < 1.05 || (oppRating <= 78 && psgIsHome);
-    const relProfiles = state.relationshipSystem?.profiles || {};
+    const relProfiles = state.relationshipSystem?.playerRelations || {};
 
     // Hàm chấm điểm ưu tiên chọn đá chính theo chuyên môn HLV AI
     const scoreCandidateForSlot = (player, slotRole) => {

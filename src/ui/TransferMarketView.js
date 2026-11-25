@@ -2,6 +2,9 @@
 // Giao diện Thị trường Chuyển nhượng 8 mục (Phần IV & V):
 // Bộ lọc 10 tiêu chí, Đề xuất, Đàm phán 2 giai đoạn (CLB -> Cầu thủ), Hoàn tất, Bán & Lời mời AI, Cho mượn, Hết hạn HĐ, Tin đồn & Đóng/Mở kỳ chuyển nhượng.
 
+import { getPlayerPortraitDataUrl } from '../players/PlayerDatabase.js';
+import { formatBidClausesText, normalizeBidObject } from '../transfers/TransferConsultationSystem.js';
+
 export function renderTransferMarketHTML(state, uiState) {
   const ts = state.transferSystem;
   const sub = uiState.transferSubTab || 'buy';
@@ -64,17 +67,26 @@ export function renderTransferMarketHTML(state, uiState) {
       </div>
       <div class="table-wrap" style="max-height:33vh;">
         <table class="data-table">
-          <thead><tr><th>Cầu thủ</th><th>CLB</th><th>VT</th><th>Tuổi</th><th>OVR/POT</th><th>Giá</th><th>Lương</th><th>HĐ</th><th>Thao tác</th></tr></thead>
+          <thead><tr><th>Cầu thủ</th><th>CLB</th><th>VT</th><th>Tuổi</th><th>OVR/POT</th><th>Giá TT (Δ)</th><th>Giá Đòi</th><th>Lương</th><th>HĐ</th><th>Thao tác</th></tr></thead>
           <tbody>
-            ${list.map((p) => `<tr class="${uiState.selectedPlayerId === p.id ? 'highlight-row' : ''}" data-rowid="${p.id}">
+            ${list.map((p) => {
+              const v = p.valuation;
+              const mv = v?.current ?? p.value;
+              const ask = v?.askingPrice ?? Math.round(mv * 1.15);
+              const dPct = v?.deltaPct ?? 0;
+              const dCol = dPct > 0 ? '#4ade80' : dPct < 0 ? '#f87171' : '#94a3b8';
+              return `<tr class="${uiState.selectedPlayerId === p.id ? 'highlight-row' : ''}" data-rowid="${p.id}">
               <td><button class="btn-xs btn-secondary open-profile-btn" data-pid="${p.id}">👤 ${p.name}</button></td>
               <td>${p.club}</td><td>${p.position}</td><td>${p.age}</td>
-              <td><b>${p.ovr}</b>/${p.pot}</td><td>€${p.value}M</td><td>€${p.wage}k</td><td>${p.contractYears}n</td>
+              <td><b>${p.ovr}</b>/${p.pot}</td>
+              <td><b>€${mv}M</b> <span style="font-size:10px;color:${dCol};">(${dPct >= 0 ? '+' : ''}${dPct}%)</span></td>
+              <td>€${ask}M</td><td>€${p.wage}k</td><td>${p.contractYears}n</td>
               <td>
                 <button class="btn-xs btn-primary tr-start-neg" data-pid="${p.id}" data-dealtype="buy">✍️ Mua</button>
                 <button class="btn-xs btn-secondary tr-start-loan-in" data-pid="${p.id}">🤝 Mượn</button>
               </td>
-            </tr>`).join('')}
+            </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -118,20 +130,37 @@ export function renderTransferMarketHTML(state, uiState) {
     content = `
       ${ts.incomingBids.length > 0 ? `
         <div class="section-label">📩 Lời hỏi mua / mượn từ các CLB đối thủ (${ts.incomingBids.length})</div>
-        ${ts.incomingBids.map((b) => `
+        ${ts.incomingBids.map((rawBid) => {
+          const p = state.getPlayerById?.(rawBid.playerId);
+          const b = normalizeBidObject(rawBid, p);
+          const portrait = p ? getPlayerPortraitDataUrl(p) : '';
+          const formVal = p?.form ?? p?.morale ?? 78;
+          const consultRec = state.transferConsultationSystem?.getConsultationForBid?.(b.id);
+          return `
           <div class="card-item urgent">
             <div class="card-head">
-              <strong>${b.buyerClub} hỏi ${b.dealType === 'loan' ? 'MƯỢN' : 'MUA'} ${b.playerName} (${b.position} · OVR ${b.ovr})</strong>
+              <div style="display:flex;align-items:center;gap:10px;">
+                ${portrait ? `<img src="${portrait}" alt="${b.playerName}" style="width:42px;height:42px;border-radius:10px;object-fit:cover;flex-shrink:0;" />` : ''}
+                <div>
+                  <strong>${b.buyerClub} hỏi ${b.dealType === 'loan' ? 'MƯỢN' : 'MUA'} ${b.playerName} (${b.position} · ${p?.age || '--'} tuổi · OVR ${b.ovr})</strong>
+                  <div class="muted" style="font-size:11px;">Phong độ: <b>${formVal}/100</b> · Giá TT: <b>€${b.marketValue}M</b> · PSG yêu cầu: <b>€${b.askingPrice}M</b></div>
+                </div>
+              </div>
               <span class="tag ok">${b.dealType === 'loan' ? `Phí mượn €${b.fee}M${b.buyOptionFee ? ` · Mua đứt €${b.buyOptionFee}M` : ''}` : `Đề nghị €${b.fee}M`}</span>
             </div>
-            <div class="muted" style="margin-bottom:6px;">Chiến lược đối tác: ${b.buyerStrategy || 'Cạnh tranh châu Âu'} · Vòng thương lượng: ${b.rounds || 0}</div>
+            <div class="muted" style="margin:6px 0;font-size:11px;">
+              <div>Điều khoản: <b>${formatBidClausesText(b)}</b></div>
+              <div>Hạn phản hồi: <b>${b.deadlineDate}</b> · Đối tác: ${b.buyerStrategy} · Vòng: ${b.rounds || 0}${b.status === 'awaiting_replacement' ? ' · <span style="color:#fbbf24;">Đang chờ người thay thế</span>' : b.status === 'deferred' ? ' · <span style="color:#60a5fa;">Tạm hoãn</span>' : ''}${consultRec ? ' · <span style="color:#4ade80;">Đã có tham vấn</span>' : ''}</div>
+            </div>
             <div class="btn-row">
-              <button class="btn-xs btn-primary tr-review-bid" data-bid="${b.id}">📋 Xử lý tác vụ</button>
+              <button class="btn-xs btn-primary tr-consult-bid" data-bid="${b.id}">🏛️ Tham khảo ý kiến các bộ phận</button>
+              <button class="btn-xs btn-secondary tr-review-bid" data-bid="${b.id}">📋 Xử lý tác vụ</button>
               <button class="btn-xs btn-primary tr-accept-bid" data-bid="${b.id}">✅ Chấp nhận (+€${b.fee}M)</button>
               <button class="btn-xs btn-accent tr-counter-bid" data-bid="${b.id}" data-fee="${Math.round(b.fee * 1.15)}">💬 Ép giá (+15%)</button>
               <button class="btn-xs btn-danger tr-reject-bid" data-bid="${b.id}">❌ Từ chối</button>
             </div>
-          </div>`).join('')}
+          </div>`;
+        }).join('')}
       ` : ''}
       <div class="section-label">Đội một PSG — Đưa vào danh sách bán / Bán nhanh</div>
       <div class="table-wrap" style="max-height:30vh;">
@@ -185,13 +214,22 @@ export function renderTransferMarketHTML(state, uiState) {
           ${ts.isWindowOpen() ? `<button class="btn-xs btn-danger" id="tr-close-win">🔒 Đóng kỳ chuyển nhượng & Lập báo cáo</button>` : `<button class="btn-xs btn-accent" id="tr-open-win">🟢 Mở kỳ chuyển nhượng bổ sung</button>`}
         </div>
       </div>
-      <div class="section-label">🏟️ Chiến lược & Ngân sách CLB Đối thủ Châu Âu</div>
-      <div class="table-wrap" style="max-height:18vh;margin-bottom:8px;">
+      <div class="section-label">🏟️ Tài chính, HLV & Chiến lược CLB Đối thủ Châu Âu</div>
+      <div class="table-wrap" style="max-height:22vh;margin-bottom:8px;">
         <table class="data-table">
-          <thead><tr><th>CLB</th><th>Giải</th><th>Quỹ CN</th><th>Quỹ lương/t</th><th>Nhu cầu</th><th>Chiến lược</th></tr></thead>
+          <thead><tr><th>CLB (Hạng)</th><th>Giải</th><th>Cash</th><th>Quỹ CN</th><th>Lương/t</th><th>Lãi/Lỗ</th><th>FFP</th><th>HLV & Triết lý</th></tr></thead>
           <tbody>
-            ${state.clubs.filter((c) => c.name !== 'Paris Saint-Germain' && c.rating >= 81).slice(0, 14).map((c) => `
-              <tr><td><b>${c.name}</b></td><td>${c.league}</td><td>€${c.budget}M</td><td>€${c.wageBudget || 4.5}M</td><td>${(c.positionalNeeds || []).join(', ')}</td><td>${c.strategy || 'Cân bằng'}</td></tr>
+            ${(state.globalClubAI?.getRivalFinanceOverview?.(18) || []).filter((c) => c.name !== 'Paris Saint-Germain').slice(0, 14).map((c) => `
+              <tr>
+                <td><b>${c.name}</b> <span class="tag">${c.tier}</span></td>
+                <td>${c.league}</td>
+                <td class="tabular-nums">€${c.cash}M</td>
+                <td class="tabular-nums">€${c.transferBudget}M</td>
+                <td class="tabular-nums">€${c.weeklyWages}M</td>
+                <td class="tabular-nums" style="color:${c.profitLoss >= 0 ? '#4ade80' : '#f87171'};">${c.profitLoss >= 0 ? '+' : ''}€${c.profitLoss}M</td>
+                <td><span class="tag ${c.austerityMode ? 'bad' : 'ok'}">${c.ffpStatus}</span></td>
+                <td style="font-size:10.5px;">${c.manager} (${c.tacticalStyle})</td>
+              </tr>
             `).join('')}
           </tbody>
         </table>
