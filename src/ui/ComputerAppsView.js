@@ -64,7 +64,7 @@ export function renderExecutiveOverviewHTML(state, appsList = []) {
       </div>
       <p>${weekFx ? `${esc(weekFx.round)}: <b>${esc(weekFx.home)}</b> vs <b>${esc(weekFx.away)}</b> (Chưa thi đấu)` : 'Đã hoàn thành lịch thi đấu tuần này. Chủ tịch có thể qua tuần hoặc rà soát chiến lược CLB.'}</p>
       <div class="btn-row">
-        <button class="btn-primary" id="ov-play-match">🏟️ Ra SVĐ · Thi đấu 3D</button>
+        <button class="btn-primary" id="ov-play-match">🏟️ Mở Trung tâm Matchday</button>
         <button class="btn-accent" id="ov-board">🏛️ Họp Ban Lãnh Đạo</button>
         <button class="btn-secondary" id="ov-player-meet">🗣️ Họp riêng cầu thủ</button>
         <button class="btn-secondary" id="ov-open-tv">📺 Bật TV Truyền thông</button>

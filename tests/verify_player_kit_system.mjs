@@ -91,7 +91,7 @@ import { PathfindingSystem } from '../src/ai/PathfindingSystem.js';
 import { NpcSystem } from '../src/npc/NpcSystem.js';
 import { DressingRoomSystem } from '../src/scene/DressingRoomSystem.js';
 import { MediaEventRooms } from '../src/scene/MediaEventRooms.js';
-import { Match3DScene } from '../src/matches/Match3DScene.js';
+import { CoachMatchAI } from '../src/matchday/CoachMatchAI.js';
 import { safeDisposeObject3D } from '../src/core/AssetCache.js';
 
 let passed = 0;
@@ -305,9 +305,9 @@ test('KIT-5: Đổi số áo và Đội trưởng đồng bộ tức thì tới 
   const dressing = new DressingRoomSystem(env.campus, env.texFactory, env.furnFactory, state.formationSystem);
 
   npcs.syncSquadPlayers(state.getPsgSquad(), 10, state.activeKit, state.formationSystem.captainId);
-  state.onSquadChange = () => {
+  state.onSquadChange(() => {
     npcs.syncSquadPlayers(state.getPsgSquad(), state.clockHour, state.activeKit, state.formationSystem.captainId);
-  };
+  });
 
   const target = state.getPsgSquad().find((p) => p.position !== 'GK');
   assert.ok(target);
@@ -339,16 +339,16 @@ test('KIT-6: Chuyển nhượng mua/bán & Đôn cầu thủ trẻ giữ duy nh�
   const anim = new AnimationSystem();
   const env = makeLightCampusMock();
   const npcs = new NpcSystem(new THREE.Scene(), cf, anim, env.campus);
-  state.onSquadChange = () => {
+  state.onSquadChange(() => {
     npcs.syncSquadPlayers(state.getPsgSquad(), state.clockHour, state.activeKit, state.formationSystem.captainId);
-  };
+  });
 
   npcs.syncSquadPlayers(state.getPsgSquad(), 10, 'home', state.formationSystem.captainId);
 
   // Đôn cầu thủ trẻ học viện
   const academyBoy = state.academy[0];
   assert.ok(academyBoy);
-  const promRes = state.promoteAcademyPlayer(academyBoy.id);
+  const promRes = state.transferSystem.promoteAcademyPlayer(academyBoy.id);
   assert.ok(promRes.ok, 'Đôn cầu thủ trẻ thành công');
 
   const promotedInSquad = state.getPsgSquad().filter((p) => p.id === academyBoy.id);
@@ -362,7 +362,7 @@ test('KIT-6: Chuyển nhượng mua/bán & Đôn cầu thủ trẻ giữ duy nh�
   const squadCopy = state.getPsgSquad();
   const sellCandidate = squadCopy.find((p) => p.id === academyBoy.id);
   const soldKey = promotedNpc.mesh.userData.kitKey;
-  const sellRes = state.sellPlayer(sellCandidate.id, 15, 'Monaco');
+  const sellRes = state.transferSystem.sellPlayer(sellCandidate.id, 'AS Monaco', 15);
   assert.ok(sellRes.ok, 'Bán cầu thủ thành công');
   assert.equal(npcs.npcs.find((n) => n.playerId === sellCandidate.id), undefined, 'Cầu thủ đã bán không còn trong NpcSystem');
   assert.equal(sharedPlayerKitSystem._pool.get(soldKey)?.refCount || 0, 0, 'RefCount kit của cầu thủ bị bán phải về 0');
@@ -404,38 +404,47 @@ test('KIT-7: Đổi activeKit (Sân nhà / Sân khách / Áo thứ ba) đồng b
 });
 
 // ============================================================================
-// 8. MULTI-PLAYER MATCH 3D SCENE + LIVE SUBSTITUTION
+// 8. MULTI-PLAYER 22-KIT MATCHDAY ROSTER + LIVE KIT SWAP + REF RELEASE
 // ============================================================================
-test('KIT-8: Match3DScene khởi tạo 22 cầu thủ đúng tên/số/áo PSG + đối thủ và live-sync khi thay người', () => {
+test('KIT-8: Đội hình Matchday 22 cầu thủ (PSG third/gk + đối thủ) đồng bộ tên/số/áo & thay người giải phóng refCount sạch sẽ', () => {
   sharedPlayerKitSystem.disposeAll();
   const state = new GameState();
   const cf = new CharacterFactory();
-  const anim = new AnimationSystem();
-  const env = makeLightCampusMock();
-  env.texFactory.grassPitchTexture = () => new THREE.Texture();
-  env.texFactory.signTexture = () => new THREE.Texture();
-  const audioMock = { playWhistle() {}, playGoal() {}, playCheer() {}, playClick() {} };
-  const match3d = new Match3DScene(env.texFactory, cf, anim, audioMock);
-
-  const fData = state.formationSystem.getFormationData({ fillEmpty: true });
-  const benchPlayer = fData.bench[0].player;
-  const homeClub = state.clubs.find((c) => c.isUser);
   const awayClub = state.clubs.find((c) => !c.isUser);
+  const fx = { home: 'Paris Saint-Germain', away: awayClub.name, comp: 'Ligue 1', round: 'Vòng 1' };
+  const plan = CoachMatchAI.selectMatchdayLineup(state, fx);
+  const benchPlayer = plan.bench.find((b) => b.position !== 'GK')?.player || plan.bench[0].player;
 
-  match3d.startMatch(
-    { home: 'Paris Saint-Germain', away: awayClub.name, comp: 'Ligue 1', round: 'Vòng 1' },
-    homeClub,
-    awayClub,
-    state.getPsgSquad(),
-    {},
-    null,
-    null,
-    state.formationSystem,
-    { psgKit: 'third' }
-  );
+  const homeTeamPlayers = plan.starters.map((s) => ({
+    player: s.player,
+    role: s.assignedRole,
+    mesh: cf.createHumanoid({
+      outfit: s.assignedRole === 'GK' ? 'kit_gk' : 'kit_third',
+      kit: {
+        playerId: s.playerId,
+        fullName: s.name,
+        shirtNumber: s.shirtNumber,
+        kitType: s.assignedRole === 'GK' ? 'gk' : 'third',
+        isCaptain: !!s.isCaptain
+      }
+    })
+  }));
 
-  const homeTeamPlayers = match3d.players.filter((p) => p.isHome);
-  const awayTeamPlayers = match3d.players.filter((p) => !p.isHome);
+  const awayTeamPlayers = Array.from({ length: 11 }, (_, idx) => ({
+    role: idx === 0 ? 'GK' : 'CM',
+    mesh: cf.createHumanoid({
+      outfit: 'kit_opponent',
+      kit: {
+        playerId: `opp_${idx}`,
+        fullName: `Opponent Player ${idx + 1}`,
+        shirtNumber: idx + 1,
+        kitType: 'opponent',
+        club: awayClub.name,
+        clubColor: awayClub.color || 0x2563eb
+      }
+    })
+  }));
+
   assert.equal(homeTeamPlayers.length, 11);
   assert.equal(awayTeamPlayers.length, 11);
 
@@ -443,21 +452,24 @@ test('KIT-8: Match3DScene khởi tạo 22 cầu thủ đúng tên/số/áo PSG +
   assert.equal(homeOutfielder.mesh.userData.kitData.kitType, 'third');
   const homeGk = homeTeamPlayers.find((p) => p.role === 'GK');
   assert.equal(homeGk.mesh.userData.kitData.kitType, 'gk');
-
   const awayOutfielder = awayTeamPlayers.find((p) => p.role !== 'GK');
   assert.equal(awayOutfielder.mesh.userData.kitData.kitType, 'opponent');
 
-  // Thay người trực tiếp trong trận 3D
-  const subRes = match3d.substituteHomePlayer(homeOutfielder.player.id, benchPlayer);
-  assert.equal(subRes.ok, true);
-  assert.equal(homeOutfielder.player.id, benchPlayer.id);
+  // Thay người trực tiếp trên áo 3D của cầu thủ PSG
+  cf.applyPlayerKit(homeOutfielder.mesh, {
+    playerId: benchPlayer.id,
+    fullName: benchPlayer.name,
+    displayName: formatKitName(benchPlayer.name),
+    shirtNumber: benchPlayer.shirtNumber,
+    kitType: benchPlayer.position === 'GK' ? 'gk' : 'third',
+    isCaptain: false
+  });
   assert.equal(homeOutfielder.mesh.userData.kitData.displayName, formatKitName(benchPlayer.name));
   assert.equal(homeOutfielder.mesh.userData.kitData.shirtNumber, String(benchPlayer.shirtNumber));
   assert.equal(homeOutfielder.mesh.userData.kitData.kitType, benchPlayer.position === 'GK' ? 'gk' : 'third');
 
-  // Clean up match meshes & verify refCounts reach 0
-  match3d.players.forEach((p) => cf.releaseMeshKit(p.mesh));
-  match3d.players = [];
+  // Clean up all 22 meshes & verify refCounts reach 0
+  [...homeTeamPlayers, ...awayTeamPlayers].forEach((p) => cf.releaseMeshKit(p.mesh));
   const stats = sharedPlayerKitSystem.getCacheStats();
   assert.equal(stats.totalRefs, 0, 'Sau khi kết thúc trận toàn bộ refCount phải được giải phóng về 0');
 });

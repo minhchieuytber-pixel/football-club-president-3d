@@ -369,6 +369,7 @@ export class ManagerManagementSystem {
   syncRoleAcrossSystems(roleKey, staffObj) {
     const meta = STAFF_ROLE_META[roleKey];
     if (roleKey === 'head_coach') {
+      const prevCoach = this.state.coach ? { ...this.state.coach } : null;
       const psgClub = this.state.clubs?.find((c) => c.name === 'Paris Saint-Germain');
       if (staffObj) {
         this.state.coach = {
@@ -409,6 +410,7 @@ export class ManagerManagementSystem {
         };
         if (psgClub) psgClub.manager = 'Đang tuyển dụng';
       }
+      this.state.relationshipSystem?.onHeadCoachChanged?.(prevCoach, staffObj);
     }
 
     // Cập nhật Trưởng phòng ban tương ứng trong DepartmentData

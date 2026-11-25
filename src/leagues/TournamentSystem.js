@@ -148,7 +148,7 @@ export class TournamentSystem {
     this.status.ligue_1.champion = champ;
     this.status.ligue_1.psgPosition = Math.max(1, ligue1.findIndex((c) => c.name === 'Paris Saint-Germain') + 1);
 
-    if (champ === 'Paris Saint-Germain') {
+    if (champ === 'Paris Saint-Germain' && ((psg?.pts || 0) > 0 || (psg?.played || 0) > 0)) {
       return this.awardCompetitionChampion('ligue_1', 'Paris Saint-Germain', {
         finalMatchText: `Hạng 1 Ligue 1 (${psg?.pts ?? 0} điểm)`,
         opponentName: runnerUp

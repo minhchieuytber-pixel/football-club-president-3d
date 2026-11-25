@@ -172,27 +172,6 @@
       display: none; align-items: center; justify-content: center; border: 1.5px solid #fff;
     }
 
-    /* HUD Trận đấu 3D */
-    #match-hud {
-      position: fixed; inset: 0; z-index: 30; pointer-events: none;
-      display: flex; flex-direction: column; justify-content: space-between;
-      padding: max(10px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
-    }
-    #match-hud > * { pointer-events: auto; }
-    .scoreboard {
-      align-self: center; background: rgba(7, 15, 32, 0.9); border: 1px solid rgba(255,255,255,0.2);
-      border-radius: 14px; padding: 8px 18px; text-align: center; backdrop-filter: blur(8px);
-    }
-    .scoreboard .m-score { font-size: 17px; font-weight: 800; }
-    .scoreboard .m-meta { font-size: 11px; color: #93c5fd; margin-top: 2px; }
-    .match-bottom { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
-    .commentary-box {
-      max-width: 380px; background: rgba(7,15,32,0.82); border: 1px solid var(--border-glass);
-      border-radius: 12px; padding: 8px 10px; font-size: 11px; line-height: 1.45; max-height: 92px; overflow-y: auto;
-    }
-    .match-controls { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
-    .quick-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-
     /* Modal & macOS Desktop */
     #modal-backdrop {
       position: fixed; inset: 0; z-index: 60; background: rgba(3, 8, 20, 0.72);
@@ -790,6 +769,108 @@
       .modal-head { padding: 8px 10px; }
       .modal-head span#modal-title { font-size: 12px; }
     }
+
+    /* ==================== TRUNG TÂM MATCHDAY DUY NHẤT (DESKTOP + IPHONE PORTRAIT) ==================== */
+    .md-root { display: flex; flex-direction: column; gap: 10px; }
+    .md-scoreboard {
+      background: linear-gradient(135deg, rgba(0, 32, 91, 0.88), rgba(15, 23, 42, 0.96));
+      border: 1px solid rgba(212, 175, 55, 0.45);
+      border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .md-comp-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .md-teams-bar {
+      display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px;
+    }
+    .md-team-col { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 5px; min-width: 0; }
+    .md-team-name { font-size: 13px; font-weight: 800; color: #f8fafc; line-height: 1.25; word-break: break-word; }
+    .md-crest { border-radius: 50%; object-fit: contain; flex-shrink: 0; background: rgba(255,255,255,0.06); }
+    .md-score-center { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 3px; }
+    .md-score-nums { font-size: 26px; font-weight: 900; color: #ffffff; letter-spacing: 1px; }
+    .md-min-pill {
+      background: rgba(218, 41, 28, 0.24); border: 1px solid rgba(248, 113, 113, 0.55);
+      color: #fecaca; border-radius: 999px; padding: 2px 10px; font-size: 11px; font-weight: 800;
+    }
+    .md-live-controls { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
+    .md-sug-banner { border: 1.5px solid #f59e0b; background: rgba(120, 53, 15, 0.25); }
+    .md-tabs-sticky { position: sticky; top: -12px; z-index: 6; background: #0f172a; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .md-hub-body { display: flex; flex-direction: column; gap: 10px; }
+    .md-footer-bar {
+      position: sticky; bottom: -12px; z-index: 6; background: rgba(15, 23, 42, 0.96);
+      border-top: 1px solid rgba(255,255,255,0.12); padding: 8px 0 2px; display: flex; gap: 8px;
+    }
+    .md-stat-row { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11.5px; }
+    .md-stat-val { font-weight: 800; color: #f8fafc; text-align: center; }
+    .md-stat-mid { display: flex; flex-direction: column; gap: 3px; }
+    .md-stat-lbl { font-size: 10.5px; color: #94a3b8; text-align: center; }
+    .md-stat-track { height: 6px; border-radius: 999px; background: rgba(239, 68, 68, 0.45); overflow: hidden; }
+    .md-stat-fill-home { height: 100%; background: linear-gradient(90deg, #2563eb, #60a5fa); }
+    .md-ev-item {
+      display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px;
+      border-radius: 8px; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(255,255,255,0.08);
+      margin-bottom: 5px; font-size: 11.5px; line-height: 1.4;
+    }
+    .md-ev-item.ev-goal { border-color: rgba(74, 222, 128, 0.45); background: rgba(20, 83, 45, 0.35); }
+    .md-ev-item.ev-red { border-color: rgba(248, 113, 113, 0.5); background: rgba(127, 29, 29, 0.35); }
+    .md-ev-item.ev-inj { border-color: rgba(251, 191, 36, 0.45); background: rgba(120, 53, 15, 0.28); }
+    .md-ev-item.ev-sub { border-color: rgba(96, 165, 250, 0.35); }
+    .md-ev-min { font-weight: 800; color: #fde68a; min-width: 28px; flex-shrink: 0; }
+    .md-ev-txt { color: #e2e8f0; }
+    .md-lock-banner { border-color: rgba(56, 189, 248, 0.4); background: rgba(15, 23, 42, 0.9); }
+    .md-lineup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .md-mini-pitch {
+      position: relative; width: 100%; height: 290px; border-radius: 12px; overflow: hidden;
+      background: linear-gradient(180deg, #14532d 0%, #166534 50%, #14532d 100%);
+      border: 2px solid rgba(255,255,255,0.3);
+    }
+    .md-pitch-midline { position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(255,255,255,0.35); }
+    .md-pitch-circle {
+      position: absolute; left: 50%; top: 50%; width: 64px; height: 64px;
+      transform: translate(-50%, -50%); border-radius: 50%; border: 1px solid rgba(255,255,255,0.35);
+    }
+    .md-pitch-node {
+      position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column;
+      align-items: center; text-align: center; pointer-events: none; max-width: 72px;
+    }
+    .md-node-badge {
+      position: relative; background: #00205b; color: #fff; border: 1.5px solid #fde68a;
+      border-radius: 999px; padding: 2px 7px; font-size: 10px; font-weight: 800;
+    }
+    .md-cap-c {
+      margin-left: 3px; background: #fde68a; color: #0f172a; border-radius: 4px; padding: 0 3px; font-size: 9px;
+    }
+    .md-node-name {
+      margin-top: 2px; background: rgba(3, 8, 20, 0.85); color: #f8fafc;
+      padding: 1px 5px; border-radius: 4px; font-size: 9.5px; font-weight: 700;
+      white-space: nowrap; max-width: 70px; overflow: hidden; text-overflow: ellipsis;
+    }
+    .md-node-role { font-size: 8.5px; color: #fde68a; font-weight: 700; text-shadow: 0 1px 2px #000; }
+    .md-roster-list { display: flex; flex-direction: column; gap: 5px; max-height: 290px; overflow-y: auto; }
+    .md-roster-row { padding: 5px 7px; border-radius: 8px; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(255,255,255,0.08); }
+    .md-roster-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: #f8fafc; }
+    .md-round-match-card { width: 100%; text-align: left; cursor: pointer; color: inherit; transition: border-color 0.14s ease; }
+    .md-round-match-card:hover { border-color: var(--psg-gold); }
+    .md-round-match-card.is-psg { border-color: rgba(212, 175, 55, 0.55); background: rgba(0, 32, 91, 0.38); }
+    .md-round-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; margin-top: 4px; }
+    .md-round-team { display: flex; align-items: center; gap: 5px; font-size: 12px; min-width: 0; }
+    .md-round-team b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .md-round-score { font-size: 14px; font-weight: 900; color: #fde68a; padding: 2px 8px; border-radius: 7px; background: rgba(15, 23, 42, 0.8); }
+    .md-form-strip { display: inline-flex; gap: 3px; align-items: center; }
+    .md-form-dot {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 17px; height: 17px; border-radius: 4px; font-size: 9.5px; font-weight: 800; color: #fff;
+    }
+    .md-form-dot.f-W { background: #16a34a; }
+    .md-form-dot.f-D { background: #ca8a04; }
+    .md-form-dot.f-L { background: #dc2626; }
+
+    @media (orientation: portrait), (max-width: 520px) {
+      .md-lineup-grid { grid-template-columns: 1fr; }
+      .md-score-nums { font-size: 22px; }
+      .md-team-name { font-size: 12px; }
+      .md-root button { min-height: 44px; }
+      .md-tabs-sticky { overflow-x: auto; flex-wrap: nowrap; }
+      .md-tabs-sticky .tab-btn { flex-shrink: 0; min-height: 44px; }
+    }
   </style>
 </head>
 <body>
@@ -840,39 +921,6 @@
         <button class="circle-btn interact-main hidden" id="btn-interact" title="Tương tác" aria-label="Tương tác">✋</button>
         <button class="circle-btn" id="btn-sprint" title="Chạy nhanh" aria-label="Chạy nhanh">🏃</button>
         <button class="circle-btn" id="btn-phone" title="Điện thoại Chủ tịch" aria-label="Điện thoại">📱<span id="phone-badge">3</span></button>
-      </div>
-    </div>
-  </div>
-
-  <!-- HUD Trận đấu 3D Parc des Princes -->
-  <div id="match-hud" class="hidden">
-    <div class="scoreboard">
-      <div class="m-meta" id="m-comp">Ligue 1 · Vòng 1</div>
-      <div class="m-score" id="m-score">Paris Saint-Germain 0 - 0 Đối thủ</div>
-      <div class="m-meta"><b id="m-min">0'</b> · <span id="m-stats">xG: 0.00-0.00 · Kiểm soát: 52%</span></div>
-      <div style="height:5px;background:rgba(255,255,255,0.16);border-radius:99px;overflow:hidden;margin-top:5px;"><div id="m-mom-fill" style="height:100%;width:52%;background:linear-gradient(90deg,#2563eb,#da291c);transition:width 0.3s;"></div></div>
-    </div>
-    <div class="match-bottom">
-      <div class="commentary-box" id="m-commentary"></div>
-      <div class="match-controls">
-        <div class="quick-row">
-          <button class="icon-btn" data-cam="broadcast">🎥 Truyền hình</button>
-          <button class="icon-btn" data-cam="wide">🏟️ Toàn sân</button>
-          <button class="icon-btn" data-cam="tactical">🧭 Chiến thuật</button>
-          <button class="icon-btn" data-cam="player">🏃 Cầu thủ</button>
-          <button class="icon-btn" data-cam="vip">👑 Khán đài VIP</button>
-        </div>
-        <div class="quick-row">
-          <button class="icon-btn" data-tactic="attacking">⚔️ Tấn công</button>
-          <button class="icon-btn" data-tactic="balanced">⚖️ Cân bằng</button>
-          <button class="icon-btn" data-tactic="defensive">🛡️ Phòng ngự</button>
-          <button class="icon-btn" id="btn-match-stats">📊 Thống kê</button>
-          <button class="icon-btn" id="btn-match-replay">🔁 Replay</button>
-          <button class="icon-btn" id="btn-match-sub">🔄 Thay người</button>
-          <button class="icon-btn" id="btn-match-speed">▶️ 1x</button>
-          <button class="icon-btn" id="btn-match-pause">⏸️ Tạm dừng</button>
-          <button class="icon-btn accent" id="btn-match-exit">🏢 Về Trụ sở</button>
-        </div>
       </div>
     </div>
   </div>

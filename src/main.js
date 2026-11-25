@@ -195,7 +195,6 @@ class FootballPresidentGame3D {
     this.ui = new UIManager(this.state, this.audio, this.saveManager, {
       teleport: (room) => this.teleportToRoom(room),
       startMatch: () => this.enterMatchday(),
-      exitMatch: () => {},
       summonBoard: () => this.npcSystem.summonBoardMeeting(),
       endBoard: () => this.npcSystem.endBoardMeeting(),
       summonPlayer: (nameOrId) => this.npcSystem.summonPlayerToPresidentOffice(nameOrId),
@@ -402,6 +401,7 @@ class FootballPresidentGame3D {
     }
     this.updateWorldStreaming(true);
     this.perfManager.requestShadowUpdate();
+    this.ui?.updateTopHUD(this.currentFps, null);
   }
 
   autoSaveNow(mirrorToIdb = false) {
@@ -580,7 +580,7 @@ class FootballPresidentGame3D {
   }
 
   enterMatchday() {
-    this.ui.openMatchdayFlow();
+    this.ui.openMatchdayCenter();
   }
 
   detectAimedTarget() {
@@ -664,6 +664,7 @@ class FootballPresidentGame3D {
       else if (act === 'inspect_legend' && t.data.extra?.legendId) this.ui.openLegendDetail(t.data.extra.legendId);
       else if (act === 'inspect_season' && t.data.extra?.season) this.ui.openSeasonArchive(t.data.extra.season);
       else if (act === 'open_stadium_cctv') this.ui.openStadiumCctvOverlay('overview_gate');
+      else if (act === 'open_fast_travel') this.ui.openFastTravel();
       else if (act === 'open_matchday') this.enterMatchday();
     }
   }

@@ -311,7 +311,7 @@ export class ParcDesPrincesZone {
     const gateFrame = new THREE.Mesh(new THREE.BoxGeometry(16, 6.2, 3.2), psgNavyMat);
     gateFrame.position.set(cx, 6.8, cz + 45.2);
     this.lodLowGroup.add(gateFrame);
-    this.campus.tagInteractable(facadeSign, 'parc_des_princes_entry', 'Vào Ngày Thi Đấu · Parc des Princes', '🏟️', 'open_matchday');
+    this.campus.tagInteractable(facadeSign, 'parc_des_princes_entry', 'Mở Trung tâm Matchday · Parc des Princes', '🏟️', 'open_matchday');
 
     // Collider tường bao ngoài SVĐ (chừa lối vào rộng 12m tại phía Nam x ∈ [-6, 6], z = cz + 45!)
     this.campus.addCollider(cx - 34, cz + 45, 44, 3.0);
@@ -418,7 +418,7 @@ export class ParcDesPrincesZone {
       const dugout = new THREE.Mesh(dugoutGeo, dugoutMat);
       dugout.position.set(cx + ox, 1.2, cz - 24.5);
       this.lodHighGroup.add(dugout);
-      this.campus.tagInteractable(dugout, `stadium_dugout_${ox}`, 'Bắt đầu Ngày Thi Đấu tại Parc des Princes', '⚽', 'open_matchday');
+      this.campus.tagInteractable(dugout, `stadium_dugout_${ox}`, 'Mở Trung tâm Matchday PSG', '⚽', 'open_matchday');
     });
 
     freezeStaticTree(this.lodHighGroup);

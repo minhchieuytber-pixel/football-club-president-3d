@@ -506,10 +506,11 @@ export class TransferSystem {
     this.completedDeals.unshift(dealRecord);
     this.activeNegotiations = this.activeNegotiations.filter((n) => n.id !== neg.id);
 
-    // 5. Đồng bộ Đội hình, Số áo, Tủ đồ 3D, NPC 3D, Uy tín, Báo chí & EventBus
+    // 5. Đồng bộ Đội hình, Số áo, Tủ đồ 3D, NPC 3D, Uy tín, Quan hệ CLB, Báo chí & EventBus
     this.state.formationSystem?.ensureShirtNumbers();
     this.state.formationSystem?.notify();
     this.verifySingleClubOwnership();
+    this.state.relationshipSystem?.onPlayerJoinedPsg?.(p, `Chiêu mộ từ ${oldClub}`);
     PressNewsSystem.generateTransferNews(this.state, p.name, oldClub, clubTerms.fee, true);
     this.state.reputationSystem?.applyDelta(
       { fanTrust: p.ovr >= 86 ? +3 : +1, coachTrust: +2, governanceSkill: +2 },
@@ -635,6 +636,7 @@ export class TransferSystem {
     this.state.formationSystem?.ensureShirtNumbers();
     this.state.formationSystem?.notify();
     this.recalcWeeklyWages();
+    this.state.relationshipSystem?.onPlayerJoinedPsg?.(y, `Đôn từ ${y.squad} lên Đội một PSG`);
 
     this.state.pushPhoneMsg(
       'Học Viện Bóng Đá PSG',
@@ -734,6 +736,7 @@ export class TransferSystem {
     this.incomingBids = this.incomingBids.filter((b) => b.playerId !== p.id);
 
     PressNewsSystem.generateTransferNews(this.state, p.name, destName, saleFee, true, { isSale: true });
+    this.state.relationshipSystem?.onPlayerDeparted(p.id, destName);
     this.state.eventBus?.emit('TRANSFER_DEAL_COMPLETED', deal, deal.id);
     this.state.notifySquadChanged();
     return { ok: true, deal };
@@ -770,6 +773,7 @@ export class TransferSystem {
 
     const deal = { id: `deal_${Date.now()}`, date: dateStr, playerId: p.id, playerName: p.name, position: p.position, from: 'Paris Saint-Germain', to: destName, fee: 0, type: buyOptionFee ? `Cho mượn (Mua đứt €${buyOptionFee}M)` : 'Cho mượn' };
     this.completedDeals.unshift(deal);
+    this.state.relationshipSystem?.onPlayerDeparted(p.id, destName);
     this.state.notifySquadChanged();
     return { ok: true, deal, player: p };
   }
@@ -951,6 +955,14 @@ export class TransferSystem {
   acceptIncomingBid(bidId) {
     const bid = this.incomingBids.find((b) => b.id === bidId);
     if (!bid) return { ok: false, error: 'Không tìm thấy đề nghị.' };
+
+    // Cầu thủ tự quyết định tương lai: có quyền từ chối CLB không phù hợp đẳng cấp/tham vọng dù PSG chấp nhận bán!
+    const playerEval = this.state.relationshipSystem?.evaluateIncomingBidByPlayer?.(bid);
+    if (playerEval && !playerEval.accepted) {
+      this.incomingBids = this.incomingBids.filter((b) => b.id !== bidId);
+      return { ok: false, playerRejected: true, error: playerEval.reason };
+    }
+
     if (bid.dealType === 'loan') {
       const res = this.loanOutPlayer(bid.playerId, bid.buyerClub, bid.buyOptionFee || null);
       if (res.ok && bid.fee > 0) this.state.addLedger(`Phí cho mượn ${bid.playerName} tới ${bid.buyerClub}`, +bid.fee);

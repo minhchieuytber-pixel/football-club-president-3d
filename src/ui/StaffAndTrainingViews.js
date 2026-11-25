@@ -3,8 +3,9 @@
 import { STAFF_ROLE_META } from '../staff/StaffDatabase.js';
 import { COACHING_ROLE_ORDER } from '../staff/CoachingStaffSystem.js';
 import { DRILL_CATALOG } from '../training/TrainingSystem.js';
+import { renderCoachDirectivesHTML } from './RelationshipViews.js';
 
-export function renderStaffCoachTabHTML(state, subTab = 'head_coach') {
+export function renderStaffCoachTabHTML(state, subTab = 'head_coach', directiveDraft = {}) {
   const hc = state.managerSystem.getActiveByRole('head_coach');
   const mults = state.coachingSystem.getTrainingQualityMultipliers();
   const coachingList = state.coachingSystem.getCoachingTeam();
@@ -26,6 +27,8 @@ export function renderStaffCoachTabHTML(state, subTab = 'head_coach') {
           <p class="muted">Khoản bồi thường nếu sa thải ngay: <b style="color:#f87171;">€${sev}M</b></p>
           <div class="btn-row">
             <button class="btn-primary" id="stf-extend-hc">✍️ Gia hạn +2 năm (+8% lương)</button>
+            <button class="btn-accent" id="stf-open-directives">🎯 Định hướng sử dụng cầu thủ</button>
+            <button class="btn-secondary" id="stf-open-locker">🏥 Báo cáo Phòng thay đồ</button>
             <button class="btn-danger" id="stf-fire-hc">🔥 Sa thải HLV trưởng (Bồi thường €${sev}M)</button>
           </div>
         ` : `<p style="color:#fde68a;">Ghế HLV trưởng đang trống! Hãy chọn ứng viên bên dưới để đàm phán và bổ nhiệm ngay lập tức.</p>`}
@@ -93,6 +96,8 @@ export function renderStaffCoachTabHTML(state, subTab = 'head_coach') {
             </div>`;
         }).join('')}
       </div>`;
+  } else if (subTab === 'directives') {
+    body = renderCoachDirectivesHTML(state, directiveDraft);
   } else {
     const hist = state.staffDb.history || [];
     const dep = state.staffDb.departed || [];
@@ -110,6 +115,7 @@ export function renderStaffCoachTabHTML(state, subTab = 'head_coach') {
   return `
     <div class="tab-strip">
       <button class="tab-btn ${subTab === 'head_coach' ? 'active' : ''}" data-stftab="head_coach">👔 HLV Trưởng & Ứng viên</button>
+      <button class="tab-btn ${subTab === 'directives' ? 'active' : ''}" data-stftab="directives">🎯 Định hướng cầu thủ (${state.relationshipSystem?.directives?.length || 0})</button>
       <button class="tab-btn ${subTab === 'coaching_12' ? 'active' : ''}" data-stftab="coaching_12">🏃 Ban Huấn Luyện (12 vị trí)</button>
       <button class="tab-btn ${subTab === 'executives' ? 'active' : ''}" data-stftab="executives">🏛️ Lãnh Đạo Chuyên Môn</button>
       <button class="tab-btn ${subTab === 'history' ? 'active' : ''}" data-stftab="history">📜 Lịch Sử Nhân Sự</button>

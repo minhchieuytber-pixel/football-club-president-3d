@@ -1179,7 +1179,7 @@ export class PsgCampusScene {
     presCar.rotation.y = Math.PI / 2;
     this.root.add(presCar);
     this.addCollider(-10.5, 31.5, 4.9, 2.1);
-    this.tagInteractable(presCar, 'pres_car', 'Lên Xe Chủ tịch → SVĐ Parc des Princes', '🚘', 'open_matchday');
+    this.tagInteractable(presCar, 'pres_car', 'Di chuyển nhanh trong khuôn viên PSG', '🚘', 'open_fast_travel');
 
     const dirCar = this.vehicles.createLuxuryCar(0x1e293b);
     dirCar.position.set(-20.5, 0.03, 36.5);
@@ -1187,12 +1187,6 @@ export class PsgCampusScene {
     this.root.add(dirCar);
     this.addCollider(-20.5, 36.5, 2.1, 4.9);
 
-    const bus = this.vehicles.createTeamBus();
-    bus.position.set(18.5, 0.03, 33.5);
-    bus.rotation.y = Math.PI / 2;
-    this.root.add(bus);
-    this.addCollider(18.5, 33.5, 11.6, 2.9);
-    this.tagInteractable(bus, 'team_bus', 'Xe Buýt Đội Bóng PSG → Trận Đấu 3D', '🚌', 'open_matchday');
     this.roomWaypoints.parking = { x: 0, z: 29 };
   }
 

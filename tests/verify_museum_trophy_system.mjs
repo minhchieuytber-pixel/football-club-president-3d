@@ -78,7 +78,7 @@ globalThis.THREE = {
 globalThis.performance = globalThis.performance || { now: () => Date.now() };
 
 import { GameState } from '../src/club/GameState.js';
-import { MatchSimulationEngine, MatchCalendarSystem } from '../src/matches/MatchSimulationEngine.js';
+import { MatchCalendarSystem } from '../src/matchday/MatchCalendarSystem.js';
 import { TrophyModelFactory } from '../src/trophies/TrophyModelFactory.js';
 import { PsgMuseumScene } from '../src/scene/PsgMuseumScene.js';
 import { ParcDesPrincesZone } from '../src/scene/ParcDesPrincesZone.js';
@@ -127,9 +127,41 @@ function makeCampusMock() {
   };
 }
 
+function runFixedScoreMatchday(state, fx, homeGoals, awayGoals) {
+  const md = state.matchdaySystem;
+  const origSim = md.simulateMatchComplete.bind(md);
+  md.simulateMatchComplete = (f) => {
+    const session = md.startLiveMatchday(f);
+    session.events = [];
+    for (let i = 0; i < homeGoals; i++) {
+      const sc = session.plan.starters[Math.min(10, 8 + (i % 3))] || session.plan.starters[0];
+      session.events.push({
+        id: `ev_h_${i}`, seq: i + 1, minute: 12 + i * 18, type: 'goal', side: 'home', isPsg: true,
+        teamName: f.home, scorerId: sc?.playerId, scorerName: sc?.name || 'Ousmane Dembélé', assisterName: null,
+        text: `⚽ ${12 + i * 18}' — ${sc?.name || 'PSG'} ghi bàn!`
+      });
+    }
+    for (let j = 0; j < awayGoals; j++) {
+      session.events.push({
+        id: `ev_a_${j}`, seq: homeGoals + j + 1, minute: 25 + j * 22, type: 'goal', side: 'away', isPsg: false,
+        teamName: f.away, scorerId: `opp_${j}`, scorerName: 'Tiền đạo đối phương', assisterName: null,
+        text: `⚽ ${25 + j * 22}' — ${f.away} ghi bàn!`
+      });
+    }
+    return md.finalizeLiveSession();
+  };
+  try {
+    return state.runAutomaticMatchday('none');
+  } finally {
+    md.simulateMatchComplete = origSim;
+  }
+}
+
 function forceSingleMatchWin(state, compName, roundName, isFinal = true) {
+  const id = `fx_test_${compName}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const fx = {
-    id: `fx_test_${compName}_${Date.now()}_${Math.random()}`,
+    id,
+    matchId: id,
     week: state.week,
     competitionId: undefined,
     comp: compName,
@@ -144,25 +176,7 @@ function forceSingleMatchWin(state, compName, roundName, isFinal = true) {
     status: 'Sắp diễn ra'
   };
   state.fixtures.unshift(fx);
-  // Đảm bảo PSG thắng đậm qua MatchSimulationEngine + TournamentSystem
-  const origSim = MatchSimulationEngine.simulateMatch;
-  MatchSimulationEngine.simulateMatch = (f, hc, ac, st, dir) => {
-    const res = origSim.call(MatchSimulationEngine, f, hc, ac, st, dir);
-    res.homeGoals = 3;
-    res.awayGoals = 1;
-    res.psgWon = true;
-    res.psgDrew = false;
-    res.psgGoals = 3;
-    res.oppGoals = 1;
-    res.penalties = null;
-    if (f) { f.played = true; f.score = '3 - 1'; f.status = 'Đã thi đấu'; }
-    return res;
-  };
-  try {
-    return state.runAutomaticMatchday('win');
-  } finally {
-    MatchSimulationEngine.simulateMatch = origSim;
-  }
+  return runFixedScoreMatchday(state, fx, 3, 1);
 }
 
 // -------------------------------------------------------------------------
@@ -256,26 +270,14 @@ test('CASE-5: PSG về nhì Ligue 1 & bị loại ở các Cúp -> 0 danh hiệu
   const state = new GameState();
   // Tạo trận Chung kết UCL nhưng PSG THUA 0-2
   const finalFx = {
-    id: 'fx_lose_ucl', week: state.week, comp: 'UEFA Champions League',
+    id: 'fx_lose_ucl', matchId: 'fx_lose_ucl', week: state.week, comp: 'UEFA Champions League',
     round: 'Chung kết UEFA Champions League', isFinal: true,
     home: 'Paris Saint-Germain', away: 'Real Madrid', stadium: 'Munich Arena',
     date: state.timeSystem.getDateString(), time: '21:00', played: false
   };
   state.fixtures.unshift(finalFx);
-  const origSim = MatchSimulationEngine.simulateMatch;
-  MatchSimulationEngine.simulateMatch = (f, hc, ac, st, dir) => {
-    const res = origSim.call(MatchSimulationEngine, f, hc, ac, st, dir);
-    res.homeGoals = 0; res.awayGoals = 2; res.psgWon = false; res.psgDrew = false;
-    res.penalties = null;
-    if (f) { f.played = true; f.score = '0 - 2'; }
-    return res;
-  };
-  try {
-    const res = state.runAutomaticMatchday('none');
-    assert.equal(res.awardedTrophy, undefined, 'Thua chung kết không được trao cúp');
-  } finally {
-    MatchSimulationEngine.simulateMatch = origSim;
-  }
+  const res = runFixedScoreMatchday(state, finalFx, 0, 2);
+  assert.equal(res.awardedTrophy, undefined, 'Thua chung kết không được trao cúp');
 
   // Cho Marseille vượt điểm PSG ở Ligue 1 rồi kết thúc mùa
   const psg = state.clubs.find((c) => c.name === 'Paris Saint-Germain');

@@ -1,4 +1,4 @@
-import { MatchSimulationEngine } from '../matches/MatchSimulationEngine.js';
+import { renderMatchdayHubHTML, bindMatchdayViewEvents, renderLeaguesComputerTabHTML } from './MatchdayView.js';
 import { PressNewsSystem } from '../media/PressNewsSystem.js';
 import { RoleDialogueDatabase, NPCPersonalitySystem, TaskAssignmentSystem } from '../dialogue/DialogueSystem.js';
 import { renderPlayerProfileHTML } from './PlayerProfileView.js';
@@ -27,6 +27,11 @@ import {
 } from './ComputerAppsView.js';
 import { DockStateManager, NavigationHistoryManager } from './DockAndNavManager.js';
 import { SmartTaskManager, TASK_STATUS, TASK_STATUS_LABEL } from './TaskManager.js';
+import {
+  renderLockerRoomReportHTML,
+  renderPrivateMeetingHTML
+} from './RelationshipViews.js';
+import { DIRECTIVE_CATEGORIES, COMMITMENT_STATUS } from '../relations/ClubRelationshipSystem.js';
 // src/ui/UIManager.js
 // Giao diện cảm ứng iPhone Landscape/Portrait tối ưu + Trung tâm Điều hành Chủ tịch (Máy tính 17 ứng dụng, TV 9 kênh, Điện thoại thông minh)
 export class UIManager {
@@ -49,6 +54,8 @@ export class UIManager {
     this.mediaSubTab = 'news';
     this.reportsSubTab = 'daily';
     this.museumSubTab = 'history';
+    this.lockerRoomFilters = { squad: 'first_team', pos: 'ALL', moodLevel: 'ALL', coachRel: 'ALL', contract: 'ALL', hasCommitment: 'ALL', search: '' };
+    this.directiveDraft = { playerId: null, categoryKey: 'usage', optionKey: 'prioritize_starter', priority: 'normal', note: '' };
     this.newsCategory = 'ALL';
     this.activeArticleId = null;
     this.selectedSlotIdx = null;
@@ -59,6 +66,16 @@ export class UIManager {
     this.pendingFormationPreview = null;
     this.confirmOptimalXI = false;
     this.pitchZoom = 1.0;
+    this.mdState = {
+      mdMatchId: null,
+      mdSubTab: 'result',
+      mdLiveTab: 'events',
+      mdRoundKey: null,
+      mdDetailMatchId: null,
+      mdArticleId: null,
+      mdReportKey: 'head_coach'
+    };
+    this._mdLiveTimer = null;
 
     // Quản lý thống nhất trạng thái thanh Dock macOS (không bao giờ reset khi bấm app/đóng cửa sổ)
     const initialDockState = saveManager?.loadSettings?.()?.dockState || state?.uiPrefs?.dockState || null;
@@ -101,9 +118,32 @@ export class UIManager {
     this._ceremonyHeaderSpan = null;
     this._lastCeremonyHeaderText = '';
     this.bindStaticButtons();
+
+    this.state.matchdaySystem?.onAutoTrigger?.((evt) => {
+      if (!evt) return;
+      if (evt.mode === 'live') {
+        this.mdState.mdMatchId = evt.matchId;
+        this.mdState.mdLiveTab = 'events';
+        this.mdState.mdDetailMatchId = null;
+        this.mdState.mdArticleId = null;
+        if (!this.isModalOpen() && !this.isTaskWindowOpen()) {
+          this.audio.playWhistle?.();
+          this.openMatchdayCenter();
+        } else {
+          this.toast('⚽ Đã đến giờ thi đấu Matchday! Bấm thông báo Matchday để theo dõi.', 'warn');
+        }
+      } else if (evt.mode === 'computed') {
+        this.cb.refreshMuseumAndTv?.();
+        const fx = evt.result?.fixture;
+        if (fx) {
+          this.toast(`⚽ Kết quả Matchday: ${fx.home} ${evt.result.homeGoals}-${evt.result.awayGoals} ${fx.away}. Bấm thông báo để xem!`, 'info');
+        }
+      }
+    });
   }
 
   destroy() {
+    this._stopMdLiveTimer();
     if (this._toastTimer) {
       clearTimeout(this._toastTimer);
       this._toastTimer = null;
@@ -262,23 +302,6 @@ export class UIManager {
         this.toast(`⏩ Tốc độ thời gian: x${spd} (1 ngày = ${(15 / spd).toFixed(2)} phút thực)`, 'info');
       }, opts);
     });
-
-    document.querySelectorAll('[data-cam]').forEach((btn) => {
-      btn.addEventListener('click', () => { this.audio.playClick(); this.cb.setMatchCam(btn.dataset.cam); }, opts);
-    });
-    document.querySelectorAll('[data-tactic]').forEach((btn) => {
-      btn.addEventListener('click', () => { this.audio.playClick(); this.cb.setMatchTactic(btn.dataset.tactic); }, opts);
-    });
-    on('btn-match-speed', () => this.cb.toggleMatchSpeed());
-    on('btn-match-pause', () => this.cb.toggleMatchPause());
-    on('btn-match-exit', () => this.cb.exitMatch());
-    on('btn-match-stats', () => this.openMatchStatsModal());
-    on('btn-match-sub', () => {
-      const sub = this.cb.makeImpactSub();
-      if (sub) { this.audio.playSuccess(); this.toast(`🔄 Thay người: ${sub.inName} vào thay ${sub.oldName}!`, 'success'); }
-      else this.toast('Đã hết lượt thay người hoặc cầu thủ dự bị.', 'warn');
-    });
-    on('btn-match-replay', () => this.openReplayModal());
   }
 
   refreshTimeSpeedButtons() {
@@ -344,9 +367,20 @@ export class UIManager {
 
     this.refreshTimeSpeedButtons();
 
-    // Thông báo trận đấu trong tuần trên thanh trạng thái
+    // Thông báo Matchday chưa xem hoặc trận đấu sắp tới trên thanh trạng thái
     if (els.matchPill) {
-      if (weekFx) {
+      const unreadMdId = s.matchdaySystem?.getUnreadMatchdayId?.();
+      if (unreadMdId) {
+        const matchText = '🔔 Kết quả Matchday chưa xem!';
+        if (c.matchText !== matchText) {
+          c.matchText = matchText;
+          els.matchPill.textContent = matchText;
+        }
+        if (c.matchHidden !== false) {
+          c.matchHidden = false;
+          els.matchPill.classList.remove('hidden');
+        }
+      } else if (weekFx) {
         const opp = weekFx.home === 'Paris Saint-Germain' ? weekFx.away : weekFx.home;
         const matchText = `⚽ Tuần ${s.week}: vs ${opp} (Chưa đá)`;
         if (c.matchText !== matchText) {
@@ -412,7 +446,7 @@ export class UIManager {
           <h4>⚽ ${fx.comp} · ${fx.round}</h4>
           <p>Tuần ${this.state.week} có trận đấu giữa <b>${fx.home}</b> và <b>${fx.away}</b> chưa diễn ra. Chủ tịch Phạm Minh Chiêu không thể tua qua tuần trước khi hoàn thành trận đấu này.</p>
           <div class="btn-row" style="margin-top:10px;">
-            <button class="btn-primary" id="wk-go-match">🏟️ Ra SVĐ Parc des Princes thi đấu ngay</button>
+            <button class="btn-primary" id="wk-go-match">🏟️ Mở Trung tâm Matchday</button>
             <button class="btn-secondary" id="wk-stay">Ở lại Trụ sở PSG</button>
           </div>
         </div>`, 'normal');
@@ -511,6 +545,7 @@ export class UIManager {
       benchPosFilter: this.benchPosFilter,
       benchViewMode: this.benchViewMode || 'card',
       benchSearchQuery: this.benchSearchQuery || '',
+      mdState: { ...this.mdState },
       scrollMainTop: Math.round((macMain ? macMain.scrollTop : modalBody?.scrollTop) || 0),
       scrollTableTop: Math.round(tableWrap?.scrollTop || 0),
       scrollBenchTop: Math.round(benchScroll?.scrollTop || 0),
@@ -544,6 +579,7 @@ export class UIManager {
     if (snap.benchPosFilter) this.benchPosFilter = snap.benchPosFilter;
     if (snap.benchViewMode) this.benchViewMode = snap.benchViewMode;
     if (typeof snap.benchSearchQuery === 'string') this.benchSearchQuery = snap.benchSearchQuery;
+    if (snap.mdState && typeof snap.mdState === 'object') this.mdState = { ...this.mdState, ...snap.mdState };
   }
 
   _applyDomSnapshotAfterRender(snap, focusId = null) {
@@ -836,12 +872,10 @@ export class UIManager {
         case 'fast_travel':
           this.openFastTravel(opts);
           break;
+        case 'matchday_center':
         case 'matchday_flow':
-          this.openMatchdayFlow(opts);
-          break;
         case 'match_result':
-          if (p.res) this.openMatchResultModal(p.res, opts);
-          else this.openComputer('leagues', opts);
+          this.openMatchdayCenter({ ...opts, matchId: p.matchId || p.res?.matchId || this.mdState.mdMatchId });
           break;
         case 'trophy_detail':
           this.openTrophyDetail(p.trophyId, opts);
@@ -895,6 +929,12 @@ export class UIManager {
       this.pendingFormationPreview = null;
       this.confirmOptimalXI = false;
       this._refreshFormationInPlace();
+      return;
+    }
+    if (typeof document !== 'undefined' && document.querySelector('.md-root') && (this.mdState.mdDetailMatchId || this.mdState.mdArticleId)) {
+      this.mdState.mdDetailMatchId = null;
+      this.mdState.mdArticleId = null;
+      this.openMatchdayCenter({ skipHistory: true });
       return;
     }
 
@@ -1167,6 +1207,7 @@ export class UIManager {
   }
 
   closeModal(clearNav = true) {
+    this._stopMdLiveTimer();
     this._closeTaskWindowDomOnly();
     this.hideSmartConfirmDialog();
     this._outgoingSnapshotFrozen = false;
@@ -1225,6 +1266,7 @@ export class UIManager {
     const topRumor = (s.rumorCrisisSystem?.rumors || []).find((r) => !r.handled) || null;
     const activeCrises = (s.rumorCrisisSystem?.crises || []).filter((c) => c.status === 'active');
     const pendingTotal = s.getTotalPendingApprovalsCount?.() ?? s.pendingReports.length;
+    const futureAlertRow = (s.relationshipSystem?.getLockerRoomReport?.({ squad: 'first_team', moodLevel: 'critical' })?.rows || [])[0] || null;
 
     const msgsHtml = s.phoneInbox.map((m) => `
       <div class="card-item ${m.urgent ? 'urgent' : ''}">
@@ -1240,6 +1282,16 @@ export class UIManager {
         <div class="kpi-card"><span>Hỏi mua PSG</span><strong class="tabular-nums">${s.transferSystem?.incomingBids?.length || 0} đề nghị</strong></div>
         <div class="kpi-card"><span>Tin mật mới</span><strong class="tabular-nums">${(s.rumorCrisisSystem?.rumors || []).filter((r) => !r.handled).length} tin</strong></div>
       </div>
+
+      ${futureAlertRow ? `
+        <div class="card-item urgent">
+          <div class="card-head"><strong>🚨 CẢNH BÁO – TƯƠNG LAI CẦU THỦ: ${futureAlertRow.player.name}</strong><span class="tag bad">${futureAlertRow.profile.mood}</span></div>
+          <p class="muted">${futureAlertRow.conflict?.cause || 'Cầu thủ bất mãn kéo dài và đề nghị gặp Chủ tịch trao đổi tương lai.'}</p>
+          <div class="btn-row">
+            <button class="btn-xs btn-primary" id="ph-meet-risk" data-pid="${futureAlertRow.player.id}">🗣️ Họp riêng ngay</button>
+            <button class="btn-xs btn-secondary" id="ph-open-locker">🏥 Phòng thay đồ</button>
+          </div>
+        </div>` : ''}
 
       ${activeCrises.length > 0 ? `
         <div class="card-item urgent">
@@ -1272,7 +1324,7 @@ export class UIManager {
 
       <div class="phone-quick-actions">
         <button class="btn-primary" id="ph-tv">📺 TV Truyền Thông PSG</button>
-        <button class="btn-primary" id="ph-pc">💻 Máy tính (17 App)</button>
+        <button class="btn-primary" id="ph-pc">💻 Máy tính (18 App)</button>
         <button class="btn-accent" id="ph-approvals">📥 Việc chờ duyệt (${pendingTotal})</button>
         <button class="btn-primary" id="ph-board">🏛️ Họp Ban Lãnh Đạo</button>
         <button class="btn-accent" id="ph-player">🗣️ Họp Riêng Cầu Thủ</button>
@@ -1294,6 +1346,8 @@ export class UIManager {
     document.getElementById('ph-tv')?.addEventListener('click', () => this.openTelevisionModal());
     document.getElementById('ph-pc')?.addEventListener('click', () => this.openComputer('overview'));
     document.getElementById('ph-approvals')?.addEventListener('click', () => this.openComputer('approvals'));
+    document.getElementById('ph-meet-risk')?.addEventListener('click', (e) => this.openPlayerMeetingSelector(e.currentTarget.dataset.pid, { restart: true }));
+    document.getElementById('ph-open-locker')?.addEventListener('click', () => this.openComputer('locker_room'));
     document.getElementById('ph-open-crisis')?.addEventListener('click', () => { this.mediaSubTab = 'crises'; this.openComputer('media'); });
     document.getElementById('ph-board')?.addEventListener('click', () => this.openBoardMeeting());
     document.getElementById('ph-player')?.addEventListener('click', () => this.openPlayerMeetingSelector());
@@ -1301,7 +1355,7 @@ export class UIManager {
     document.getElementById('ph-cctv')?.addEventListener('click', () => { this.closeModal(true); this.openStadiumCctvOverlay('overview_gate'); });
     document.getElementById('ph-map')?.addEventListener('click', () => this.openFastTravel());
     document.getElementById('ph-museum')?.addEventListener('click', () => this.openComputer('museum'));
-    document.getElementById('ph-match')?.addEventListener('click', () => this.openMatchdayFlow());
+    document.getElementById('ph-match')?.addEventListener('click', () => this.openMatchdayCenter());
 
     document.getElementById('ph-bid-acc')?.addEventListener('click', (e) => {
       const res = s.transferSystem.acceptIncomingBid(e.currentTarget.dataset.bid);
@@ -1404,7 +1458,7 @@ export class UIManager {
       ['logistics_gate', '🛣️ Khu Dịch Vụ, Hậu Cần & Trạm Kiểm Soát SVĐ'],
       ['stadium_plaza', '🏟️ Quảng Trường SVĐ Parc des Princes'],
       ['stadium_pitch', '⚽ Mặt Sân SVĐ Parc des Princes (Tập luyện 3D & Thi đấu)'],
-      ['parking', '🚘 Bãi Đỗ Xe Trụ Sở & Xe Buýt Đội Bóng']
+      ['parking', '🚘 Bãi Đỗ Xe Ban Lãnh Đạo PSG']
     ];
     const zInfo = this.cb.getStadiumZoneStatus ? this.cb.getStadiumZoneStatus() : null;
     const html = `
@@ -1592,27 +1646,21 @@ export class UIManager {
     document.getElementById('bm-reject')?.addEventListener('click', () => done('BÁC BỎ', false));
   }
 
-  openPlayerMeetingSelector(preselectedId = null) {
+  openPlayerMeetingSelector(preselectedId = null, opts = {}) {
     const squad = this.state.getPsgSquad();
     const chosen = squad.find((p) => p.id === preselectedId) || squad[0];
     if (!chosen) return;
     this.selectedPlayerId = chosen.id;
-    this.cb.summonPlayer(chosen.name);
-    const topics = [
-      ['motivate', '🔥 Động viên tinh thần (+8 Tinh thần, +4 Trung thành)'],
-      ['praise', '⭐ Khen ngợi phong độ (+6 Hài lòng)'],
-      ['contract', '✍️ Gia hạn hợp đồng (+2 năm, +10% lương)'],
-      ['captain', '©️ Giao vai trò thủ lĩnh phòng thay đồ (+10 Trung thành)'],
-      ['discipline', '⚠️ Nhắc nhở phong độ & thái độ tập luyện']
-    ];
-    const html = `
-      <div class="card-item">
-        <select id="pm-select" class="input-ctrl">${squad.map((p) => `<option value="${p.id}" ${p.id === chosen.id ? 'selected' : ''}>${p.name} (${p.position} · OVR ${p.ovr})</option>`).join('')}</select>
-        <div class="kpi-mini" style="margin-top:8px;"><span>Lương: <b>€${chosen.wage}k</b></span><span>HĐ: <b>${chosen.contractYears} năm</b></span><span>Hài lòng: <b>${chosen.satisfaction}%</b></span></div>
-      </div>
-      <div class="scroll-list">${topics.map(([k, txt]) => `<button type="button" class="btn-secondary pm-topic" data-topic="${k}" style="width:100%;text-align:left;margin-bottom:5px;">${txt}</button>`).join('')}</div>`;
+    this.cb.summonPlayer?.(chosen.name);
 
+    const rel = this.state.relationshipSystem;
+    let session = rel?.privateMeetingSessions?.[chosen.id];
+    if (!session || opts.restart) {
+      session = rel.startPrivateMeeting(chosen.id)?.session;
+    }
+    const html = renderPrivateMeetingHTML(this.state, session, squad);
     const taskId = `player_meeting_${chosen.id}`;
+
     this.openTaskWindow({
       taskId,
       taskType: 'player_meeting',
@@ -1623,18 +1671,39 @@ export class UIManager {
       replaceTopStep: this._taskNavStack.some((s) => s.key.startsWith('pm_'))
     });
 
-    document.getElementById('pm-select')?.addEventListener('change', (e) => this.openPlayerMeetingSelector(e.target.value));
-    document.querySelectorAll('#task-body .pm-topic').forEach((b) => {
+    document.getElementById('pm-select')?.addEventListener('change', (e) => {
+      this.openPlayerMeetingSelector(e.target.value, { restart: true });
+    });
+    document.getElementById('pm-ask-coach')?.addEventListener('click', () => {
+      const exp = rel.askCoachExplanation(chosen.id);
+      if (exp.ok) {
+        this.audio.playClick();
+        this.toast(exp.explanation, 'info');
+      }
+    });
+    document.getElementById('pm-send-directive')?.addEventListener('click', () => {
+      this.directiveDraft.playerId = chosen.id;
+      this.staffSubTab = 'directives';
+      this.closeAllTaskWindows(true);
+      this.openComputer('coach');
+    });
+    document.querySelectorAll('#task-body .pm-tactic-btn').forEach((b) => {
       b.addEventListener('click', () => {
-        const t = b.dataset.topic;
-        if (t === 'motivate') { chosen.morale = Math.min(100, chosen.morale + 8); chosen.loyalty = Math.min(100, chosen.loyalty + 4); }
-        else if (t === 'praise') chosen.satisfaction = Math.min(100, chosen.satisfaction + 6);
-        else if (t === 'contract') { chosen.contractYears += 2; chosen.wage = Math.round(chosen.wage * 1.1); chosen.satisfaction = 95; }
-        else if (t === 'captain') chosen.loyalty = Math.min(100, chosen.loyalty + 10);
-        else chosen.form = Math.min(99, chosen.form + 5);
-        this.audio.playSuccess();
-        this.completeAndCloseTaskWindow(taskId, `${chosen.name} đã ghi nhận trao đổi riêng với Chủ tịch!`);
+        const res = rel.submitPrivateMeetingTurn(chosen.id, b.dataset.tactic);
+        if (!res.ok) {
+          this.audio.playAlert();
+          this.toast(res.error || 'Không thể tiếp tục cuộc họp.', 'error');
+          return;
+        }
+        this.audio.playClick();
+        if (res.session.finished) this.audio.playSuccess();
+        this.openPlayerMeetingSelector(chosen.id);
       });
+    });
+    document.getElementById('pm-finish-close')?.addEventListener('click', () => {
+      const label = session.finalLabel || `Đã hoàn tất trao đổi với ${chosen.name}`;
+      delete rel.privateMeetingSessions[chosen.id];
+      this.completeAndCloseTaskWindow(taskId, `${chosen.name}: ${label}`, { result: { outcome: session.finalOutcome } });
     });
   }
 
@@ -1960,11 +2029,13 @@ export class UIManager {
     const activeCrisisCnt = (this.state.rumorCrisisSystem?.crises || []).filter((c) => c.status === 'active').length;
     const bidsCnt = this.state.transferSystem?.incomingBids?.length || 0;
 
+    const conflictsCnt = this.state.relationshipSystem?.conflicts?.filter((c) => c.status === 'active').length || 0;
     const apps = [
       { id: 'overview', icon: '🏢', name: 'Tổng quan', bg: 'linear-gradient(135deg,#2563eb,#1e3a8a)' },
       { id: 'squad', icon: '⚽', name: 'Đội một PSG', bg: 'linear-gradient(135deg,#1d4ed8,#0f172a)' },
       { id: 'academy', icon: '🎓', name: 'Đội trẻ', bg: 'linear-gradient(135deg,#16a34a,#14532d)' },
       { id: 'coach', icon: '👔', name: 'Ban huấn luyện', bg: 'linear-gradient(135deg,#0891b2,#164e63)' },
+      { id: 'locker_room', icon: '🏥', name: `Phòng thay đồ${conflictsCnt > 0 ? ` (${conflictsCnt})` : ''}`, bg: 'linear-gradient(135deg,#0f766e,#115e59)' },
       { id: 'hr', icon: '🏛️', name: 'Nhân sự (12 PB)', bg: 'linear-gradient(135deg,#7c3aed,#4c1d95)' },
       { id: 'transfers', icon: '🤝', name: `Chuyển nhượng${bidsCnt > 0 ? ` (${bidsCnt})` : ''}`, bg: 'linear-gradient(135deg,#ea580c,#9a3412)' },
       { id: 'contracts', icon: '✍️', name: 'Đàm phán HĐ', bg: 'linear-gradient(135deg,#0369a1,#0c4a6e)' },
@@ -1987,7 +2058,8 @@ export class UIManager {
     if (resolvedTab === 'overview') content = renderExecutiveOverviewHTML(this.state, apps);
     else if (resolvedTab === 'squad') content = this.renderSquadTab();
     else if (resolvedTab === 'academy') content = this.renderAcademyTab();
-    else if (resolvedTab === 'coach') content = renderStaffCoachTabHTML(this.state, this.staffSubTab);
+    else if (resolvedTab === 'coach') content = renderStaffCoachTabHTML(this.state, this.staffSubTab, this.directiveDraft);
+    else if (resolvedTab === 'locker_room') content = renderLockerRoomReportHTML(this.state, this.lockerRoomFilters);
     else if (resolvedTab === 'hr') content = this.renderDepartmentsTab();
     else if (resolvedTab === 'transfers') content = renderTransferMarketHTML(this.state, this);
     else if (resolvedTab === 'contracts') content = renderContractsNegotiationHTML(this.state);
@@ -2542,14 +2614,7 @@ export class UIManager {
   }
 
   renderLeaguesTab() {
-    const ligue1 = this.state.clubs.filter((c) => c.league === 'Ligue 1').sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
-    const upcoming = this.state.fixtures.filter((f) => !f.played).slice(0, 4);
-    return `
-      <div class="grid-2" style="margin-bottom:8px;">${upcoming.map((f, i) => `<div class="card-item"><div class="card-head"><span class="tag">${f.comp}</span><span class="muted">Tuần ${f.week}</span></div><div><b>${f.home}</b> vs <b>${f.away}</b></div>${i === 0 ? `<button class="btn-xs btn-primary" id="lg-play-now" style="margin-top:6px;">⚽ Thi đấu 3D</button>` : ''}</div>`).join('')}</div>
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>#</th><th>CLB</th><th>Trận</th><th>T</th><th>H</th><th>B</th><th>HS</th><th>Điểm</th></tr></thead>
-        <tbody>${ligue1.map((c, i) => `<tr class="${c.name === 'Paris Saint-Germain' ? 'highlight-row' : ''}"><td>${i + 1}</td><td><b>${c.name}</b></td><td>${c.played}</td><td>${c.won}</td><td>${c.drawn}</td><td>${c.lost}</td><td>${c.gf - c.ga}</td><td><b>${c.pts}</b></td></tr>`).join('')}</tbody>
-      </table></div>`;
+    return renderLeaguesComputerTabHTML(this.state);
   }
 
   renderMediaTab() {
@@ -2688,7 +2753,7 @@ export class UIManager {
       b.addEventListener('click', () => {
         this.selectedPlayerId = b.dataset.pid || null;
         this.navHistory.updateCurrentSnapshot({ selectedPlayerId: this.selectedPlayerId });
-        this.openPlayerProfileModal(b.dataset.pid, 'overview');
+        this.openPlayerProfileModal(b.dataset.pid, b.dataset.pptab || 'overview');
       });
     });
 
@@ -3007,6 +3072,36 @@ export class UIManager {
       });
     } else if (tab === 'coach') {
       document.querySelectorAll('[data-stftab]').forEach((b) => b.addEventListener('click', () => { this.staffSubTab = b.dataset.stftab; this.openComputer('coach', { skipHistory: true }); }));
+      document.getElementById('stf-open-directives')?.addEventListener('click', () => { this.staffSubTab = 'directives'; this.openComputer('coach', { skipHistory: true }); });
+      document.getElementById('stf-open-locker')?.addEventListener('click', () => this.openComputer('locker_room'));
+      document.getElementById('dir-open-locker')?.addEventListener('click', () => this.openComputer('locker_room'));
+      document.getElementById('dir-player-sel')?.addEventListener('change', (e) => { this.directiveDraft.playerId = e.target.value; });
+      document.getElementById('dir-cat-sel')?.addEventListener('change', (e) => {
+        this.directiveDraft.categoryKey = e.target.value;
+        const cat = DIRECTIVE_CATEGORIES.find((c) => c.key === e.target.value);
+        this.directiveDraft.optionKey = cat?.options?.[0]?.key || '';
+        this.openComputer('coach', stayOpts);
+      });
+      document.getElementById('dir-opt-sel')?.addEventListener('change', (e) => { this.directiveDraft.optionKey = e.target.value; });
+      document.getElementById('dir-prio-sel')?.addEventListener('change', (e) => { this.directiveDraft.priority = e.target.value; });
+      document.getElementById('dir-note-inp')?.addEventListener('input', (e) => { this.directiveDraft.note = e.target.value; });
+      document.getElementById('dir-submit-btn')?.addEventListener('click', () => {
+        const playerId = document.getElementById('dir-player-sel')?.value || this.directiveDraft.playerId || this.state.getPsgSquad()[0]?.id;
+        const categoryKey = document.getElementById('dir-cat-sel')?.value || this.directiveDraft.categoryKey;
+        const optionKey = document.getElementById('dir-opt-sel')?.value || this.directiveDraft.optionKey;
+        const priority = document.getElementById('dir-prio-sel')?.value || this.directiveDraft.priority;
+        const note = document.getElementById('dir-note-inp')?.value || '';
+        const res = this.state.relationshipSystem.submitCoachDirective({ playerId, categoryKey, optionKey, priority, note });
+        if (res.ok) {
+          this.audio.playSuccess();
+          this.directiveDraft.note = '';
+          this.toast(`HLV ${res.directive.coachName}: "${res.directive.status}" — ${res.directive.coachReason}`, res.directive.coachDecision === 'rejected' ? 'warn' : 'success');
+        } else {
+          this.audio.playAlert();
+          this.toast(res.error, 'error');
+        }
+        this.openComputer('coach', stayOpts);
+      });
       document.getElementById('stf-extend-hc')?.addEventListener('click', () => {
         this.state.managerSystem.extendStaffContract('head_coach', 2, 0.08);
         this.audio.playSuccess(); this.toast('✍️ Đã gia hạn hợp đồng HLV trưởng (+2 năm)!', 'success'); this.openComputer('coach', stayOpts);
@@ -3015,8 +3110,57 @@ export class UIManager {
       document.querySelectorAll('.stf-open-neg').forEach((b) => b.addEventListener('click', () => this.openStaffNegotiationModal(b.dataset.sid)));
       document.querySelectorAll('.stf-fire-role').forEach((b) => b.addEventListener('click', () => this.openFireStaffModal(b.dataset.rkey)));
       document.querySelectorAll('.stf-recruit-role').forEach((b) => b.addEventListener('click', () => this.openRoleCandidatesModal(b.dataset.rkey)));
+    } else if (tab === 'locker_room') {
+      document.getElementById('lr-jump-directives')?.addEventListener('click', () => {
+        this.staffSubTab = 'directives';
+        this.openComputer('coach');
+      });
+      document.getElementById('lr-jump-media')?.addEventListener('click', () => {
+        this.mediaSubTab = 'crises';
+        this.openComputer('media');
+      });
+      const bindLr = (id, key, evt = 'change') => {
+        document.getElementById(id)?.addEventListener(evt, (e) => {
+          this.lockerRoomFilters[key] = e.target.value;
+          this.openComputer('locker_room', { skipHistory: true, preserveScroll: true, focusId: id });
+        });
+      };
+      bindLr('lr-f-search', 'search', 'input');
+      bindLr('lr-f-squad', 'squad');
+      bindLr('lr-f-pos', 'pos');
+      bindLr('lr-f-mood', 'moodLevel');
+      bindLr('lr-f-coach', 'coachRel');
+      bindLr('lr-f-contract', 'contract');
+      bindLr('lr-f-cmt', 'hasCommitment');
+      document.querySelectorAll('.lr-open-meet').forEach((b) => b.addEventListener('click', () => {
+        this.openPlayerMeetingSelector(b.dataset.pid);
+      }));
+      document.querySelectorAll('.lr-open-prof').forEach((b) => b.addEventListener('click', () => {
+        this.openPlayerProfileModal(b.dataset.pid, 'psychology');
+      }));
+      document.querySelectorAll('.lr-ask-coach').forEach((b) => b.addEventListener('click', () => {
+        const exp = this.state.relationshipSystem.askCoachExplanation(b.dataset.pid);
+        if (exp.ok) {
+          this.audio.playClick();
+          this.toast(exp.explanation, 'info');
+        }
+      }));
+      document.querySelectorAll('.lr-leak-resp').forEach((b) => b.addEventListener('click', () => {
+        const res = this.state.relationshipSystem.respondToPressLeak(b.dataset.lid, b.dataset.resp);
+        if (res.ok) {
+          this.audio.playSuccess();
+          this.toast(res.message, 'info');
+        }
+        this.openComputer('locker_room', stayOpts);
+      }));
     } else if (tab === 'leagues') {
-      document.getElementById('lg-play-now')?.addEventListener('click', () => { this.closeModal(true); this.cb.startMatch(); });
+      document.getElementById('lg-open-matchday')?.addEventListener('click', () => this.openMatchdayCenter());
+      document.getElementById('lg-play-now')?.addEventListener('click', () => this.openMatchdayCenter());
+      document.querySelectorAll('.lg-open-res').forEach((b) => {
+        b.addEventListener('click', () => {
+          this.openMatchdayCenter({ matchId: b.dataset.mid, subTab: 'result' });
+        });
+      });
     } else if (tab === 'museum') {
       document.getElementById('mus-walk-3d')?.addEventListener('click', () => {
         this.audio.playDoor();
@@ -3262,186 +3406,136 @@ export class UIManager {
     }));
   }
 
-  // === QUY TRÌNH NGÀY THI ĐẤU 4 GIAI ĐOẠN (CHỦ TỊCH PHẠM MINH CHIÊU) ===
-  openMatchdayFlow(opts = {}) {
-    const fx = this.state.getCurrentWeekFixture() || this.state.getNextFixture();
-    if (!fx) {
-      const { summary } = this.state.concludeSeason();
-      this.cb.refreshMuseumAndTv?.();
-      this.cb.autoSaveNow?.(true);
-      const nextTrophy = this.state.trophySystem?.popNextCelebration?.();
-      if (nextTrophy) {
-        this.audio.playSuccess();
-        this.openCoronationCelebration(nextTrophy);
-      } else {
-        this.toast(`Đã tổng kết mùa ${summary.season} & sang mùa giải mới ${this.state.season}!`, 'success');
-      }
-      return;
+  // ==================== TRUNG TÂM MATCHDAY DUY NHẤT ====================
+  _stopMdLiveTimer() {
+    if (this._mdLiveTimer !== null) {
+      clearInterval(this._mdLiveTimer);
+      this._mdLiveTimer = null;
     }
-    const rep = MatchSimulationEngine.buildPreMatchCoachReport(fx, this.state);
-    const directives = [
-      ['cheer', '👏 1. Chúc toàn đội thi đấu tốt (+Tinh thần)'],
-      ['coach', `🤝 2. Động viên HLV trưởng ${this.state.coach?.name || 'PSG'} (+Tâm lý BHL)`],
-      ['rest', '🛡️ 3. Yêu cầu ưu tiên bảo toàn thể lực (-Rủi ro chấn thương)'],
-      ['win', '🔥 4. Yêu cầu tập trung giành chiến thắng (+Động lực tấn công)'],
-      ['youth', '🎓 5. Yêu cầu tạo cơ hội cho cầu thủ trẻ'],
-      ['none', '📋 6. Không đưa ra chỉ đạo (Giao toàn quyền cho HLV)']
-    ];
+  }
 
-    const html = `
-      <div class="card-item urgent">
-        <div class="card-head"><strong>📢 THÔNG BÁO NGÀY THI ĐẤU · ${fx.comp}</strong><span class="tag">${fx.round}</span></div>
-        <h3 style="margin:6px 0;font-size:16px;">${fx.home}  vs  ${fx.away}</h3>
-        <div class="muted">📅 ${fx.date} · ⏰ ${fx.time} · 🏟️ ${fx.stadium} · Trạng thái: <b>${fx.status}</b></div>
-      </div>
-      <div class="card-item">
-        <div class="card-head"><strong>👔 Báo cáo trước trận của HLV ${rep.coachName}</strong><span class="tag ok">${rep.formation}</span></div>
-        <p>"${rep.summary}"</p>
-        <div class="muted" style="margin-top:6px;">
-          <b>Sơ đồ đồng bộ (${this.state.formationSystem.formation}):</b> ${this.state.formationSystem.getFormationData().starters.map((s) => `#${s.shirtNumber} ${s.displayName}${s.isCaptain ? ' (C)' : ''}`).join(' · ')}<br/>
-          <b>Độ phù hợp chiến thuật AI TB:</b> <span style="color:#4ade80;font-weight:700;">${rep.avgSuitability ?? '--'}/100</span><br/>
-          <b>Phong độ cao:</b> ${rep.inForm.map((p) => `${p.name} (${p.form})`).join(' · ')}<br/>
-          <b>Chấn thương / Vắng mặt:</b> ${rep.injured.length ? rep.injured.map((p) => `${p.name} (${p.injuryDays}n)`).join(', ') : 'Không có'} · <b>Điểm cần lưu ý:</b> ${rep.vulnerable}
-        </div>
-      </div>
-      <div class="section-label">Giai đoạn 3: Ý kiến của Chủ tịch Phạm Minh Chiêu → Tự động mô phỏng trận đấu</div>
-      <div class="grid-2">
-        ${directives.map(([k, txt]) => `<button class="btn-primary md-dir" data-dir="${k}" style="text-align:left;">${txt}</button>`).join('')}
-      </div>
-      <div class="btn-row" style="margin-top:8px;align-items:center;">
-        <select id="md-kit-select" class="input-ctrl" aria-label="Chọn áo đấu PSG trận này" style="max-width:190px;">
-          <option value="home" ${(this.state.activeKit || 'home') === 'home' ? 'selected' : ''}>👕 Áo Sân nhà PSG</option>
-          <option value="away" ${this.state.activeKit === 'away' ? 'selected' : ''}>👕 Áo Sân khách PSG</option>
-          <option value="third" ${this.state.activeKit === 'third' ? 'selected' : ''}>👕 Áo Thứ ba PSG</option>
-        </select>
-        <button class="btn-secondary" id="md-open-news">📰 Tin báo chí trước trận</button>
-        <button class="btn-accent" id="md-open-form">👕 Chỉnh Sơ đồ đội hình</button>
-      </div>`;
-
-    this.openModal('⚽ NGÀY THI ĐẤU — PARIS SAINT-GERMAIN', html, 'wide', { skipRefreshBack: true });
-    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
-    this._recordNavigation({ routeKey: 'matchday_flow', screen: 'matchday_flow', label: 'Ngày thi đấu PSG' }, opts);
-    this._bindScrollAndCollapseTrackers();
-    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
-    document.getElementById('md-kit-select')?.addEventListener('change', (e) => {
-      this.state.setActiveKit?.(e.target.value);
-      this.audio.playClick();
-      this.toast('👕 Đã cập nhật trang phục thi đấu 3D của PSG!', 'info');
-    });
-    document.getElementById('md-open-news')?.addEventListener('click', () => this.openComputer('media'));
-    document.getElementById('md-open-form')?.addEventListener('click', () => this.openComputer('formation'));
-    document.querySelectorAll('.md-dir').forEach((b) => {
-      b.addEventListener('click', () => {
-        const res = this.state.runAutomaticMatchday(b.dataset.dir);
-        if (res) {
-          this.audio.playWhistle();
+  _syncMdLiveTimer() {
+    this._stopMdLiveTimer();
+    const sys = this.state.matchdaySystem;
+    if (!sys || !sys.liveSession || sys.liveSession.finished || sys.liveSession.paused) return;
+    if (typeof setInterval === 'undefined') return;
+    this._mdLiveTimer = setInterval(() => {
+      const live = sys.liveSession;
+      if (!live || live.finished || live.paused) {
+        this._stopMdLiveTimer();
+        if (live?.finished) {
+          this.audio.playWhistle?.();
           this.cb.refreshMuseumAndTv?.();
           this.cb.autoSaveNow?.(true);
-          this.openMatchResultModal(res);
+          this.mdState.mdMatchId = live.matchId;
+          this.mdState.mdSubTab = 'result';
+          this.openMatchdayCenter({ skipHistory: true });
         }
-      });
+        return;
+      }
+      if (typeof document !== 'undefined' && !document.querySelector('.md-root[data-md-mode="live"]')) {
+        this._stopMdLiveTimer();
+        return;
+      }
+      sys.stepLiveMatch(live.speed || 1);
+      if (!sys.liveSession || sys.liveSession.finished) {
+        this._stopMdLiveTimer();
+        this.audio.playWhistle?.();
+        this.cb.refreshMuseumAndTv?.();
+        this.cb.autoSaveNow?.(true);
+        this.mdState.mdMatchId = sys.activeMatchdayId || live.matchId;
+        this.mdState.mdSubTab = 'result';
+        this.openMatchdayCenter({ skipHistory: true });
+      } else {
+        this.openMatchdayCenter({ skipHistory: true, preserveScroll: true });
+      }
+    }, 350);
+  }
+
+  openMatchdayCenter(opts = {}) {
+    if (opts.matchId) {
+      this.mdState.mdMatchId = opts.matchId;
+      this.mdState.mdDetailMatchId = null;
+      this.mdState.mdArticleId = null;
+    }
+    if (opts.subTab) {
+      this.mdState.mdSubTab = opts.subTab;
+    }
+    if (opts.roundKey) {
+      this.mdState.mdRoundKey = opts.roundKey;
+    }
+
+    const prevScroll = opts.preserveScroll ? this._captureCurrentUiSnapshot() : null;
+    const mdSys = this.state.matchdaySystem;
+    if (mdSys && (!mdSys.liveSession || mdSys.liveSession.finished)) {
+      const shownId = this.mdState.mdMatchId || mdSys.getUnreadMatchdayId?.() || mdSys.activeMatchdayId;
+      if (shownId && mdSys.getMatchRecord?.(shownId)) {
+        mdSys.markMatchdayRead(shownId);
+      }
+    }
+    const html = renderMatchdayHubHTML(this.state, this.mdState);
+    this.openModal('⚽ TRUNG TÂM MATCHDAY — PARIS SAINT-GERMAIN', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({
+      routeKey: `matchday_center:${this.mdState.mdMatchId || 'live'}`,
+      screen: 'matchday_center',
+      label: 'Trung tâm Matchday PSG',
+      params: { matchId: this.mdState.mdMatchId }
+    }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot || prevScroll);
+
+    bindMatchdayViewEvents(this.state, this.mdState, {
+      refresh: (rOpts = {}) => {
+        if (this.state.matchdaySystem?.liveSession?.finished) {
+          this.cb.refreshMuseumAndTv?.();
+          this.cb.autoSaveNow?.(true);
+        }
+        this.openMatchdayCenter({ ...rOpts });
+      },
+      closeMatchday: () => {
+        this._stopMdLiveTimer();
+        this.cb.refreshMuseumAndTv?.();
+        this.cb.autoSaveNow?.(true);
+        this.closeModal(true);
+        const nextTrophy = this.state.trophySystem?.popNextCelebration?.();
+        if (nextTrophy) {
+          this.audio.playSuccess?.();
+          this.openCoronationCelebration(nextTrophy);
+        }
+      },
+      concludeSeason: () => {
+        this._stopMdLiveTimer();
+        const { summary } = this.state.concludeSeason();
+        this.cb.refreshMuseumAndTv?.();
+        this.cb.autoSaveNow?.(true);
+        const nextTrophy = this.state.trophySystem?.popNextCelebration?.();
+        if (nextTrophy) {
+          this.audio.playSuccess?.();
+          this.openCoronationCelebration(nextTrophy);
+        } else {
+          this.toast(`Đã tổng kết mùa ${summary.season} & sang mùa giải mới ${this.state.season}!`, 'success');
+          this.openMatchdayCenter({ skipHistory: true });
+        }
+      },
+      onToast: (msg, type) => this.toast(msg, type),
+      onAudio: (kind) => {
+        if (kind === 'whistle') this.audio.playWhistle?.();
+        else if (kind === 'success') this.audio.playSuccess?.();
+        else if (kind === 'alert') this.audio.playAlert?.();
+        else this.audio.playClick?.();
+      }
     });
+
+    this._syncMdLiveTimer();
+  }
+
+  openMatchdayFlow(opts = {}) {
+    this.openMatchdayCenter(opts);
   }
 
   openMatchResultModal(res, opts = {}) {
-    const psgGoalsList = res.goalEvents.filter((e) => e.team === 'Paris Saint-Germain');
-    const oppGoalsList = res.goalEvents.filter((e) => e.team !== 'Paris Saint-Germain');
-    const cr = res.coachReport;
-    const penLine = res.penalties
-      ? `<div class="tag ok" style="margin-top:4px;">⚖️ Luân lưu 11m: ${res.fixture.home} ${res.penalties.home} - ${res.penalties.away} ${res.fixture.away} (Thắng: ${res.penalties.winner})</div>`
-      : '';
-    const trophyBanner = res.awardedTrophy
-      ? `
-        <div class="card-item urgent" style="border:2px solid #d4af37;background:linear-gradient(135deg,rgba(0,32,91,0.9),rgba(212,175,55,0.22));text-align:center;">
-          <strong style="color:#fde68a;font-size:15px;">🏆 CHÚC MỪNG VÔ ĐỊCH ${res.awardedTrophy.competitionName.toUpperCase()} (${res.awardedTrophy.seasonName})!</strong>
-          <p style="margin:4px 0;">Chiếc cúp 3D mới đã tự động được khắc tên đội hình & trưng bày tại <b>${res.awardedTrophy.displayLocation}</b>.</p>
-          <button class="btn-xs btn-primary" id="mr-celebrate">🎉 Mở Lễ Đăng Quang & Xem Bảo Tàng PSG</button>
-        </div>`
-      : '';
-
-    const html = `
-      ${trophyBanner}
-      <div class="card-item ${res.psgWon ? '' : 'urgent'}" style="text-align:center;">
-        <div class="tag">${res.fixture.comp} · ${res.fixture.round} · ${res.fixture.stadium}</div>
-        <h2 style="margin:8px 0;font-size:21px;">${res.fixture.home}  ${res.homeGoals} - ${res.awayGoals}  ${res.fixture.away}</h2>
-        ${penLine}
-        <div class="muted">⭐ Cầu thủ xuất sắc nhất: <b style="color:#fde68a;">${res.motm.name} (${res.motm.rating})</b> · ${cr.resultLabel}</div>
-        <div class="kpi-mini" style="justify-content:center;margin-top:8px;">
-          <span>Kiểm soát: <b>${res.stats.homePoss}% - ${res.stats.awayPoss}%</b></span>
-          <span>Sút (Trúng): <b>${res.stats.homeShots}(${res.stats.homeOnTarget}) - ${res.stats.awayShots}(${res.stats.awayOnTarget})</b></span>
-          <span>xG: <b>${res.stats.homeXg} - ${res.stats.awayXg}</b></span>
-        </div>
-      </div>
-      <div class="grid-2">
-        <div class="card-item">
-          <strong>⚽ Ghi bàn (Paris Saint-Germain)</strong>
-          <p>${psgGoalsList.length ? psgGoalsList.map((e) => `• ${e.scorer} (${e.minute}')${e.assister ? ` — kiến tạo: ${e.assister}` : ''}`).join('<br/>') : 'Không có bàn thắng'}</p>
-        </div>
-        <div class="card-item">
-          <strong>⚽ Ghi bàn (${res.oppName})</strong>
-          <p>${oppGoalsList.length ? oppGoalsList.map((e) => `• ${e.scorer} (${e.minute}')`).join('<br/>') : 'Giữ sạch lưới!'}</p>
-        </div>
-      </div>
-      <div class="card-item">
-        <strong>👔 Báo cáo chuyên môn của HLV ${this.state.coach.name}</strong>
-        <p>${cr.summary}</p>
-        <p class="muted"><b>Điểm mạnh:</b> ${cr.strengths} · <b>Điểm yếu:</b> ${cr.weaknesses}${res.matchInjury ? ` · 🏥 Chấn thương mới: ${res.matchInjury}` : ''}</p>
-      </div>
-      <div class="section-label">📊 Đánh giá cầu thủ PSG sau trận</div>
-      <div class="table-wrap" style="max-height:155px;">
-        <table class="data-table">
-          <thead><tr><th>Cầu thủ</th><th>VT</th><th>Điểm</th><th>G/A</th><th>Nhận xét chuyên môn</th></tr></thead>
-          <tbody>${cr.ratings.map((r) => `<tr><td><b>${r.name}</b></td><td>${r.position}</td><td><b style="color:${r.rating >= 7.5 ? '#4ade80' : r.rating < 6.2 ? '#f87171' : '#fff'}">${r.rating}</b></td><td>${r.goals}/${r.assists}</td><td>${r.note}</td></tr>`).join('')}</tbody>
-        </table>
-      </div>
-      <div class="section-label">💡 Đề xuất của Ban huấn luyện sau trận</div>
-      ${cr.proposals.map((pr) => `
-        <div class="card-item">
-          <p>"${pr.text}" <span class="tag">${pr.status}</span></p>
-          ${pr.status === 'Chờ duyệt' ? `
-            <div class="btn-row">
-              <button class="btn-xs btn-primary cp-act" data-cpid="${pr.id}" data-act="Đã phê duyệt">✅ Phê duyệt</button>
-              <button class="btn-xs btn-danger cp-act" data-cpid="${pr.id}" data-act="Đã từ chối">❌ Từ chối</button>
-              <button class="btn-xs btn-secondary cp-act" data-cpid="${pr.id}" data-act="Đã chuyển GĐ Thể thao">📤 Chuyển GĐ Thể thao</button>
-            </div>` : ''}
-        </div>`).join('')}
-      <div class="btn-row" style="margin-top:8px;">
-        <button class="btn-primary" id="mr-press">📰 Đọc báo chí & bình luận CĐV sau trận</button>
-        <button class="btn-secondary" id="mr-close">${res.awardedTrophy ? '🏆 Tiếp tục Lễ Đăng Quang' : '🏢 Đóng báo cáo'}</button>
-      </div>`;
-
-    const prevScroll = opts.preserveScroll ? this._captureCurrentUiSnapshot() : null;
-    this.openModal('🏁 THÔNG BÁO KẾT QUẢ & BÁO CÁO SAU TRẬN', html, 'wide', { skipRefreshBack: true });
-    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
-    this._recordNavigation({ routeKey: `match_result:${res.fixture?.week || 0}`, screen: 'match_result', label: 'Kết quả trận đấu', params: { res } }, opts);
-    this._bindScrollAndCollapseTrackers();
-    this._applyDomSnapshotAfterRender(opts.restoredSnapshot || prevScroll);
-    document.querySelectorAll('.cp-act').forEach((b) => {
-      b.addEventListener('click', () => {
-        const pr = cr.proposals.find((x) => x.id === b.dataset.cpid);
-        if (pr) { pr.status = b.dataset.act; this.audio.playSuccess(); this.toast(`Đã cập nhật đề xuất HLV: ${pr.status}`, 'success'); this.openMatchResultModal(res, { skipHistory: true, preserveScroll: true }); }
-      });
-    });
-    document.getElementById('mr-celebrate')?.addEventListener('click', () => {
-      const nextTrophy = this.state.trophySystem?.popNextCelebration?.() || res.awardedTrophy;
-      if (nextTrophy) this.openCoronationCelebration(nextTrophy);
-    });
-    document.getElementById('mr-press')?.addEventListener('click', () => {
-      this.activeArticleId = null;
-      this.selectedSlotIdx = null;
-      this.pitchZoom = 1.0;
-      this.newsCategory = 'ALL';
-      this.mediaSubTab = 'news';
-      this.openComputer('media');
-    });
-    document.getElementById('mr-close')?.addEventListener('click', () => {
-      const nextTrophy = this.state.trophySystem?.popNextCelebration?.();
-      if (nextTrophy) {
-        this.openCoronationCelebration(nextTrophy);
-      } else {
-        this.closeModal(true);
-      }
-    });
+    this.openMatchdayCenter({ ...opts, matchId: res?.matchId || res?.fixture?.matchId || this.mdState.mdMatchId, subTab: 'result' });
   }
 
   // ==================== BẢO TÀNG TRUYỀN THỐNG & LỄ ĐĂNG QUANG PSG ====================
@@ -3532,7 +3626,13 @@ export class UIManager {
     this.selectedPlayerId = p.id;
     const prevScroll = opts.preserveScroll ? this._captureCurrentUiSnapshot() : null;
     const isPsgFirstTeam = p.club === 'Paris Saint-Germain' && p.squadLevel === 'Đội một';
-    const html = renderPlayerProfileHTML(p, activeTab, isPsgFirstTeam);
+    const rel = this.state.relationshipSystem;
+    const relExtras = rel ? {
+      profile: rel.ensurePlayerProfile(p.id),
+      conflict: rel.getActiveConflict(p.id),
+      commitments: (rel.commitments || []).filter((c) => c.playerId === p.id && c.status !== COMMITMENT_STATUS.OBSOLETE)
+    } : null;
+    const html = renderPlayerProfileHTML(p, activeTab, isPsgFirstTeam, relExtras);
     this.openModal(`👤 HỒ SƠ CẦU THỦ · ${p.name.toUpperCase()} (${p.id})`, html, 'wide', { skipRefreshBack: true, skipHistory: !!opts.skipHistory });
     this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
     this._recordNavigation({

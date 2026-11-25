@@ -56,8 +56,7 @@ globalThis.THREE = {
 globalThis.performance = globalThis.performance || { now: () => Date.now() };
 
 import { GameState } from '../src/club/GameState.js';
-import { MatchSimulationEngine } from '../src/matches/MatchSimulationEngine.js';
-import { Match3DScene } from '../src/matches/Match3DScene.js';
+import { CoachMatchAI } from '../src/matchday/CoachMatchAI.js';
 import { renderFormationPitchTabHTML } from '../src/ui/FormationPitchView.js';
 
 let passed = 0;
@@ -315,9 +314,9 @@ test('Case 10: Thay người trong trận cập nhật XI, ghi lịch sử & ch�
 });
 
 // ============================================================================
-// TEST CASE 11: Vượt quá 5 lượt thay người trong trận + Đồng bộ Match3DScene
+// TEST CASE 11: Vượt quá 5 lượt thay người trong trận + Đồng bộ MatchdaySystem Live
 // ============================================================================
-test('Case 11: Chặn lượt thay người thứ 6 & kiểm tra Match3DScene.substituteHomePlayer', () => {
+test('Case 11: Chặn lượt thay người thứ 6 & kiểm tra MatchdaySystem.performChairmanLiveSub', () => {
   const gs = makeFreshState();
   const fs = gs.formationSystem;
   fs.startInMatchSession(5, 55);
@@ -339,27 +338,19 @@ test('Case 11: Chặn lượt thay người thứ 6 & kiểm tra Match3DScene.su
     assert.match(r6.reason, /hết lượt thay người/i);
   }
 
-  // Kiểm tra Match3DScene headless sync
+  // Kiểm tra MatchdaySystem live session sync & giới hạn thay người trong trận
   const gs2 = makeFreshState();
-  const scene3d = new Match3DScene(
-    { grassPitchTexture: () => ({}), signTexture: () => ({}) },
-    {
-      skinTones: [0, 1, 2, 3, 4],
-      hairColors: [0, 1, 2, 3, 4, 5],
-      createHumanoid: () => new Obj3D()
-    },
-    {},
-    { playWhistle: () => {} }
-  );
-  const fx = gs2.getCurrentWeekFixture();
-  const psg = gs2.clubs.find((c) => c.name === 'Paris Saint-Germain');
-  const opp = gs2.clubs.find((c) => c.name !== 'Paris Saint-Germain');
-  scene3d.startMatch(fx, psg, opp, gs2.getPsgSquad(), gs2.h2h, null, null, gs2.formationSystem);
-  assert.equal(gs2.formationSystem.matchSubSession.active, true);
-  const subIn3d = gs2.formationSystem.getFormationData().bench.find((b) => b.availability === 'available');
-  const res3d = scene3d.substituteHomePlayer(9, subIn3d.playerId);
-  assert.equal(res3d.ok, true);
-  assert.equal(gs2.formationSystem.getFormationData().starters[9].playerId, subIn3d.playerId);
+  const fx = gs2.getCurrentWeekFixture() || gs2.getNextFixture();
+  const live = gs2.matchdaySystem.startLiveMatchday(fx);
+  assert.ok(live && !live.finished);
+  gs2.matchdaySystem.stepLiveMatch(5);
+  const subInMd = live.bench.find((b) => b.position !== 'GK');
+  assert.ok(subInMd);
+  const outSlot = live.activeStarters.find((s) => s.assignedRole !== 'GK' && !s.redCarded);
+  const resMd = gs2.matchdaySystem.performChairmanLiveSub(outSlot.slotIndex, subInMd.playerId);
+  assert.equal(resMd.ok, true);
+  assert.equal(live.activeStarters.find((s) => s.slotIndex === outSlot.slotIndex).playerId, subInMd.playerId);
+  assert.ok(live.subbedOutIds.includes(outSlot.playerId));
 });
 
 // ============================================================================
@@ -387,16 +378,16 @@ test('Case 12: Cache AI hoạt động đúng (hit/invalidate) & Giao diện sâ
   const mockUi = { selectedSlotIdx: 0, selectedBenchId: null, benchPosFilter: 'ALL', benchViewMode: 'card', benchSearchQuery: '', pendingFormationPreview: null, confirmOptimalXI: false };
   const html = renderFormationPitchTabHTML(gs, mockUi);
   assert.match(html, /tac-pitch-svg/, 'Phải render sân bóng SVG từ trên xuống');
-  assert.match(html, /circle cx="50" cy="70" r="12"/, 'Phải có vòng tròn giữa sân');
-  assert.match(html, /line x1="4" y1="70" x2="96" y2="70"/, 'Phải có vạch giữa sân');
-  assert.match(html, /rect x="23" y="5" width="54" height="19"/, 'Phải có khu vực 16m50');
-  assert.match(html, /rect x="35" y="5" width="30" height="7.5"/, 'Phải có khu vực 5m50');
-  assert.match(html, /GK \(/, 'Phải có bộ lọc dự bị GK');
-  assert.match(html, /DEF \(/, 'Phải có bộ lọc dự bị DEF');
-  assert.match(html, /MID \(/, 'Phải có bộ lọc dự bị MID');
-  assert.match(html, /ATT \(/, 'Phải có bộ lọc dự bị ATT');
-  assert.match(html, /YOUTH \(/, 'Phải có bộ lọc cầu thủ trẻ');
-  assert.match(html, /MULTI \(/, 'Phải có bộ lọc cầu thủ đa năng');
+  assert.match(html, /circle cx="50" cy="65" r="11.5"/, 'Phải có vòng tròn giữa sân');
+  assert.match(html, /line x1="4" y1="65" x2="96" y2="65"/, 'Phải có vạch giữa sân');
+  assert.match(html, /rect x="23" y="4" width="54" height="18"/, 'Phải có khu vực 16m50');
+  assert.match(html, /rect x="35" y="4" width="30" height="7"/, 'Phải có khu vực 5m50');
+  assert.match(html, /Thủ môn \(/, 'Phải có bộ lọc dự bị GK');
+  assert.match(html, /Hậu vệ \(/, 'Phải có bộ lọc dự bị DEF');
+  assert.match(html, /Tiền vệ \(/, 'Phải có bộ lọc dự bị MID');
+  assert.match(html, /Tiền đạo \(/, 'Phải có bộ lọc dự bị ATT');
+  assert.match(html, /Cầu thủ trẻ \(/, 'Phải có bộ lọc cầu thủ trẻ');
+  assert.match(html, /Đa năng \(/, 'Phải có bộ lọc cầu thủ đa năng');
 
   // Kiểm tra CSS mobile portrait & đã xóa bỏ Drag & Drop (thay bằng chạm 2 bước + cuộn dự bị độc lập)
   const indexHtml = fs.readFileSync(path.resolve('index.html'), 'utf8');
@@ -405,10 +396,11 @@ test('Case 12: Cache AI hoạt động đúng (hit/invalidate) & Giao diện sâ
   assert.match(indexHtml, /\.tac-bench-scroll\s*\{[\s\S]*touch-action:\s*pan-y/, 'Danh sách dự bị phải cuộn dọc mượt mà với touch-action: pan-y');
   assert.match(indexHtml, /@media \(orientation: portrait\), \(max-width: 520px\)/, 'Phải có responsive iPhone portrait');
 
-  // Kiểm tra MatchSimulationEngine tích hợp avgSuitability
-  const lineupCheck = MatchSimulationEngine.validateLineup(gs.formationSystem);
-  assert.equal(lineupCheck.valid, true);
-  assert.ok(lineupCheck.avgSuitability >= 80);
+  // Kiểm tra CoachMatchAI tích hợp avgSuitability tự động cho Matchday
+  const fxCheck = gs.getCurrentWeekFixture() || gs.getNextFixture();
+  const aiPlan = CoachMatchAI.selectMatchdayLineup(gs, fxCheck);
+  assert.equal(aiPlan.starters.length, 11);
+  assert.ok(aiPlan.avgSuitability >= 80);
 });
 
 // ============================================================================

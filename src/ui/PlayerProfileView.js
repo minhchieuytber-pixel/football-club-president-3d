@@ -1,6 +1,7 @@
 // src/ui/PlayerProfileView.js
 // Giao diện Hồ sơ cầu thủ chi tiết 8 tab dùng chung cho Điện thoại, Máy tính macOS, Sơ đồ, Học viện, Chuyển nhượng, Báo cáo tập luyện & NPC 3D.
 import { getPlayerPortraitDataUrl } from '../players/PlayerDatabase.js';
+import { RELATIONSHIP_METRIC_DEFS, PLAYER_TRAITS, CONFLICT_LEVELS } from '../relations/ClubRelationshipSystem.js';
 
 function attrRow(label, val) {
   const v = Math.max(0, Math.min(99, Math.round(val || 0)));
@@ -8,7 +9,7 @@ function attrRow(label, val) {
   return `<div class="attr-bar-row"><span class="attr-bar-label">${label}</span><div class="attr-bar-track"><div class="attr-bar-fill" style="width:${v}%;background:${col};"></div></div><span class="attr-bar-val">${v}</span></div>`;
 }
 
-export function renderPlayerProfileHTML(player, activeTab = 'overview', isPsgFirstTeam = false) {
+export function renderPlayerProfileHTML(player, activeTab = 'overview', isPsgFirstTeam = false, relExtras = null) {
   const tabs = [
     ['overview', '1. Tổng quan'],
     ['stats', '2. Chỉ số'],
@@ -165,26 +166,61 @@ export function renderPlayerProfileHTML(player, activeTab = 'overview', isPsgFir
         <p>Nhu cầu phục hồi: ${h.recoveryNeeded ? `<span class="tag bad">⚠️ Cần giảm cường độ tập để tránh quá tải</span>` : `<span class="tag ok">✅ Tốt</span>`}</p>
       </div>`;
   } else if (activeTab === 'psychology') {
+    const prof = relExtras?.profile || null;
+    const conflict = relExtras?.conflict || null;
+    const cmList = relExtras?.commitments || [];
+    const traitsStr = prof ? prof.traits.map((k) => PLAYER_TRAITS[k]?.label || k).join(' · ') : 'Chuyên nghiệp';
+    const moodStr = prof?.mood || 'Hài lòng';
+
     tabBody = `
       <div class="card-item">
-        ${attrRow('Tinh thần (Morale)', psy.morale ?? player.morale)}
-        ${attrRow('Mức độ hài lòng', psy.satisfaction ?? player.satisfaction)}
-        ${attrRow('Lòng trung thành', psy.loyalty ?? player.loyalty)}
-        ${attrRow('Quan hệ với HLV trưởng', psy.coachRelation ?? 82)}
-        ${attrRow('Quan hệ với đồng đội', psy.teammateRelation ?? 84)}
-        <p style="margin-top:8px;">Vai trò trong đội: <b>${psy.squadRole || 'Đá chính'}</b></p>
+        <div class="card-head">
+          <strong>🧠 Tâm lý & Tính cách cá nhân</strong>
+          <span class="tag ${['Rất hài lòng', 'Hài lòng'].includes(moodStr) ? 'ok' : moodStr === 'Thất vọng' ? 'warn' : 'bad'}">${moodStr}</span>
+        </div>
+        <p style="margin-top:4px;">Tính cách nổi bật: <b>${traitsStr}</b> · Vai trò: <b>${psy.squadRole || 'Đội một'}</b></p>
         <p>Mong muốn tương lai: <i>"${psy.futureDesire || 'Gắn bó và chinh phục danh hiệu lớn.'}"</i></p>
-      </div>`;
+      </div>
+      ${prof ? `
+        <div class="card-item">
+          <div class="section-label" style="margin-top:0;">📊 10 Chỉ số Quan hệ Nội bộ (0–100)</div>
+          <div class="grid-2">
+            <div>${RELATIONSHIP_METRIC_DEFS.slice(0, 5).map((d) => attrRow(d.label, prof.metrics[d.key])).join('')}</div>
+            <div>${RELATIONSHIP_METRIC_DEFS.slice(5).map((d) => attrRow(d.label, prof.metrics[d.key])).join('')}</div>
+          </div>
+        </div>
+      ` : `
+        <div class="card-item">
+          ${attrRow('Tinh thần (Morale)', psy.morale ?? player.morale)}
+          ${attrRow('Mức độ hài lòng', psy.satisfaction ?? player.satisfaction)}
+          ${attrRow('Lòng trung thành', psy.loyalty ?? player.loyalty)}
+          ${attrRow('Quan hệ với HLV trưởng', psy.coachRelation ?? 82)}
+          ${attrRow('Quan hệ với đồng đội', psy.teammateRelation ?? 84)}
+        </div>
+      `}
+      ${conflict ? `
+        <div class="card-item urgent">
+          <div class="card-head"><strong>🔥 Mâu thuẫn hiện tại: Cấp ${conflict.level}/5 (${CONFLICT_LEVELS[conflict.level]?.label || ''})</strong><span class="tag bad">${conflict.startedDate}</span></div>
+          <p>${conflict.cause}</p>
+        </div>` : ''}
+      ${cmList.length > 0 ? `
+        <div class="card-item">
+          <div class="section-label" style="margin-top:0;">🤝 Cam kết của Chủ tịch (${cmList.length})</div>
+          ${cmList.map((cm) => `<p>• <b>${cm.content}</b> — <span class="tag">${cm.status}</span> (Hạn Tuần ${cm.deadlineWeek})</p>`).join('')}
+        </div>` : ''}`;
   } else {
     const trHist = c.transferHistory || [];
     const injHist = c.injuryHistory || [];
     const loanHist = c.loanHistory || [];
     const devLog = player.developmentLog || [];
+    const relEvents = relExtras?.profile?.eventLog || [];
+    const formerCoachConflicts = relExtras?.profile?.formerCoachConflicts || [];
     tabBody = `
       <div class="grid-2">
         <div class="card-item">
-          <div class="section-label" style="margin-top:0;">🤝 Lịch sử chuyển nhượng</div>
-          ${trHist.length ? trHist.map((x) => `<p>• <b>${x.date}</b>: ${x.from} → <b>${x.to}</b> (${x.fee} · ${x.type})</p>`).join('') : '<p class="muted">Chưa có lịch sử chuyển nhượng.</p>'}
+          <div class="section-label" style="margin-top:0;">🧭 Lịch sử Quan hệ & Mâu thuẫn (${relEvents.length})</div>
+          ${relEvents.length ? relEvents.slice(0, 8).map((x) => `<p>• <b>${x.date}</b>: ${x.message}${x.impact ? ` <span class="muted">(${x.impact})</span>` : ''}</p>`).join('') : '<p class="muted">Chưa ghi nhận biến động quan hệ.</p>'}
+          ${formerCoachConflicts.length ? `<div class="section-label">👔 Mâu thuẫn với HLV tiền nhiệm</div>${formerCoachConflicts.map((fc) => `<p>• Với <b>${fc.coachName}</b> (Cấp ${fc.level}): ${fc.cause} (${fc.archivedDate})</p>`).join('')}` : ''}
         </div>
         <div class="card-item">
           <div class="section-label" style="margin-top:0;">📈 Lịch sử phát triển huấn luyện</div>
@@ -193,12 +229,13 @@ export function renderPlayerProfileHTML(player, activeTab = 'overview', isPsgFir
       </div>
       <div class="grid-2">
         <div class="card-item">
-          <div class="section-label" style="margin-top:0;">🏥 Lịch sử chấn thương</div>
-          ${injHist.length ? injHist.map((x) => `<p>• ${x.date}: ${x.type} (${x.days} ngày)</p>`).join('') : '<p class="muted">Chưa từng chấn thương nghiêm trọng.</p>'}
+          <div class="section-label" style="margin-top:0;">🤝 Lịch sử chuyển nhượng</div>
+          ${trHist.length ? trHist.map((x) => `<p>• <b>${x.date}</b>: ${x.from} → <b>${x.to}</b> (${x.fee} · ${x.type})</p>`).join('') : '<p class="muted">Chưa có lịch sử chuyển nhượng.</p>'}
         </div>
         <div class="card-item">
-          <div class="section-label" style="margin-top:0;">🔄 Lịch sử cho mượn</div>
-          ${loanHist.length ? loanHist.map((x) => `<p>• ${x.season}: ${x.from} → ${x.to}${x.buyOption ? ` (Mua đứt €${x.buyOption}M)` : ''}</p>`).join('') : '<p class="muted">Chưa từng được cho mượn.</p>'}
+          <div class="section-label" style="margin-top:0;">🏥 Chấn thương & 🔄 Cho mượn</div>
+          ${injHist.length ? injHist.map((x) => `<p>• ${x.date}: ${x.type} (${x.days} ngày)</p>`).join('') : '<p class="muted">Chưa từng chấn thương nghiêm trọng.</p>'}
+          ${loanHist.length ? loanHist.map((x) => `<p>• ${x.season}: ${x.from} → ${x.to}${x.buyOption ? ` (Mua đứt €${x.buyOption}M)` : ''}</p>`).join('') : ''}
         </div>
       </div>`;
   }
