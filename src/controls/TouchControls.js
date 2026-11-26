@@ -1,10 +1,11 @@
 // src/controls/TouchControls.js
 // Điều khiển đa chạm độc lập trên iPhone Landscape: Tay trái di chuyển bằng Joystick đồng thời tay phải vuốt xoay màn hình không xung đột
 export class TouchControls {
-  constructor(cameraController, canvasEl, onInteract) {
+  constructor(cameraController, canvasEl, onInteract, onCanvasTap = null) {
     this.cam = cameraController;
     this.canvas = canvasEl;
     this.onInteract = onInteract;
+    this.onCanvasTap = onCanvasTap;
     this.moveVec = { x: 0, y: 0 };
     this.sprint = false;
     this.keys = new Set();
@@ -13,6 +14,9 @@ export class TouchControls {
     this.camTouchId = null;
     this.lastCamPt = { x: 0, y: 0 };
     this.mouseDragging = false;
+    this._mouseDownPt = { x: 0, y: 0 };
+    this.pointerNDC = { x: 0, y: 0 };
+    this.pointerActive = false;
     this._inputVec = { x: 0, y: 0, moving: false };
     this._abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
 
@@ -100,6 +104,7 @@ export class TouchControls {
 
     // Lắng nghe đa chạm toàn cục trên window để tay trái giữ joystick vẫn cho phép tay phải vuốt xoay camera tự do
     window.addEventListener('touchstart', (e) => {
+      this.pointerActive = false;
       const target = e.target;
       if (target && target.closest && (
         target.closest('#modal-backdrop.open') ||
@@ -141,14 +146,33 @@ export class TouchControls {
     window.addEventListener('touchend', onEnd, passiveOpts);
     window.addEventListener('touchcancel', onEnd, passiveOpts);
 
-    // Chuột xoay camera + cuộn zoom trên máy tính
+    // Chuột xoay camera, trỏ vật thể 3D trực tiếp & cuộn zoom trên máy tính
     if (this.canvas) {
+      const updatePointerNDC = (clientX, clientY) => {
+        const rect = this.canvas.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return;
+        this.pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        this.pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+        this.pointerActive = true;
+      };
+
       this.canvas.addEventListener('mousedown', (e) => {
         if (e.button === 0) {
           this.mouseDragging = true;
           this.lastCamPt.x = e.clientX;
           this.lastCamPt.y = e.clientY;
+          this._mouseDownPt.x = e.clientX;
+          this._mouseDownPt.y = e.clientY;
+          updatePointerNDC(e.clientX, e.clientY);
         }
+      }, defaultOpts);
+      this.canvas.addEventListener('mousemove', (e) => {
+        if (!this.mouseDragging) {
+          updatePointerNDC(e.clientX, e.clientY);
+        }
+      }, defaultOpts);
+      this.canvas.addEventListener('mouseleave', () => {
+        this.pointerActive = false;
       }, defaultOpts);
       window.addEventListener('mousemove', (e) => {
         if (!this.mouseDragging) return;
@@ -156,7 +180,17 @@ export class TouchControls {
         this.lastCamPt.x = e.clientX;
         this.lastCamPt.y = e.clientY;
       }, defaultOpts);
-      window.addEventListener('mouseup', () => { this.mouseDragging = false; }, defaultOpts);
+      window.addEventListener('mouseup', (e) => {
+        const wasDragging = this.mouseDragging;
+        this.mouseDragging = false;
+        if (wasDragging && e.button === 0 && e.target === this.canvas && this.onCanvasTap) {
+          const dragDist = Math.hypot(e.clientX - this._mouseDownPt.x, e.clientY - this._mouseDownPt.y);
+          if (dragDist < 6) {
+            updatePointerNDC(e.clientX, e.clientY);
+            this.onCanvasTap(this.pointerNDC);
+          }
+        }
+      }, defaultOpts);
       this.canvas.addEventListener('wheel', (e) => {
         this.cam.zoom(e.deltaY);
       }, passiveOpts);

@@ -64,10 +64,10 @@ function makeTestCampus() {
     // Bàn trong phòng họp (-10, -12.5)
     { minX: -14.0, maxX: -6.0, minZ: -13.6, maxZ: -11.4, active: true }
   ];
-  const doorCol = { minX: -26.15, maxX: -25.85, minZ: -44.7, maxZ: -42.3, active: true };
+  const doorCol = { minX: 142.85, maxX: 143.15, minZ: -48.7, maxZ: -46.3, active: true };
   colliders.push(doorCol);
   const doors = [
-    { id: 'door_dressing_main', x: -26.0, z: -43.5, open: false, locked: false, targetAngle: 0, collider: doorCol, pivot: new Obj3D() }
+    { id: 'door_dressing_main', x: 143.0, z: -47.5, open: false, locked: false, targetAngle: 0, collider: doorCol, pivot: new Obj3D() }
   ];
   return {
     root: new Obj3D(),
@@ -75,8 +75,8 @@ function makeTestCampus() {
     doors,
     boardroomSeats: Array.from({ length: 8 }, (_, i) => ({ x: -13 + i, z: -10.5, rotY: Math.PI })),
     resolveCollision(x, z, radius = 0.34) {
-      let px = Math.max(-60, Math.min(60, x));
-      let pz = Math.max(-62, Math.min(54, z));
+      let px = Math.max(-70, Math.min(240, x));
+      let pz = Math.max(-150, Math.min(54, z));
       for (let iter = 0; iter < 3; iter++) {
         for (const b of this.colliders) {
           if (!b.active) continue;
@@ -124,10 +124,10 @@ function makeCharFactoryMock() {
 // =========================================================================
 // 1. KIỂM THỬ AI PATHFINDING & COLLISION AVOIDANCE (PHẦN XIII.1)
 // =========================================================================
-test('AI-1: NPC tìm đường từ Phòng Thay Đồ ra Sân Tập chính qua cửa đúng tuyến', () => {
+test('AI-1: NPC tìm đường từ Phòng Thay Đồ ra Sân Tập chính Training Center qua cửa đúng tuyến', () => {
   const campus = makeTestCampus();
   const pf = new PathfindingSystem(campus);
-  const path = pf.findPath(-35, -42, 0, -44);
+  const path = pf.findPath(133, -45, 192, -86);
   assert.ok(path.length >= 3, 'Lộ trình phải đi qua nhiều nút hành lang/cửa');
   assert.ok(path.some((pt) => pt.doorId === 'door_dressing_main'), 'Phải đi qua cửa chính phòng thay đồ');
 });

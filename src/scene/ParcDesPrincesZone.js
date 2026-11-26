@@ -479,16 +479,41 @@ export class ParcDesPrincesZone {
       }
 
       if (extraZones.dressingRoomGroup) {
-        const drDx = playerPos.x + 37;
-        const drDz = playerPos.z + 44;
+        const drDx = playerPos.x - 132;
+        const drDz = playerPos.z + 48;
         const drDist2 = drDx * drDx + drDz * drDz;
-        const drShellVisible = !this.cctvModeActive && drDist2 <= 88 * 88;
+        const drShellVisible = !this.cctvModeActive && drDist2 <= 145 * 145;
         extraZones.dressingRoomGroup.visible = drShellVisible;
         const drInterior = extraZones.dressingRoomGroup.userData?.interiorGroup;
         if (drInterior) {
-          // Ẩn 20 tủ đồ & nội thất Phòng Thay Đồ khi người chơi đang ở bên trong Trụ sở HQ (z > -21.5) hoặc ở xa > 46m
-          drInterior.visible = drShellVisible && playerPos.z <= -21.5 && drDist2 <= 46 * 46;
+          drInterior.visible = drShellVisible && drDist2 <= 46 * 46;
         }
+      }
+
+      if (extraZones.trainingComplexGroup) {
+        const tcDx = playerPos.x - 172;
+        const tcDz = playerPos.z + 36;
+        const tcDist2 = tcDx * tcDx + tcDz * tcDz;
+        const tcVisible = !this.cctvModeActive && tcDist2 <= 185 * 185;
+        extraZones.trainingComplexGroup.visible = tcVisible;
+
+        const ud = extraZones.trainingComplexGroup.userData || {};
+        const pDx = playerPos.x - 192;
+        const pDz = playerPos.z + 86;
+        const pDist2 = pDx * pDx + pDz * pDz;
+        if (ud.pitchGroup) ud.pitchGroup.visible = tcVisible && pDist2 <= 140 * 140;
+
+        const mgDx = playerPos.x - 184;
+        const mgDz = playerPos.z + 38;
+        if (ud.medicalGymGroup) ud.medicalGymGroup.visible = tcVisible && (mgDx * mgDx + mgDz * mgDz) <= 68 * 68;
+
+        const resDx = playerPos.x - 184;
+        const resDz = playerPos.z - 9;
+        const resDist2 = resDx * resDx + resDz * resDz;
+        const resNear = tcVisible && resDist2 <= 78 * 78;
+        if (ud.residenceFloor1Group) ud.residenceFloor1Group.visible = resNear;
+        if (ud.residenceSuitesGroup) ud.residenceSuitesGroup.visible = tcVisible && resDist2 <= 62 * 62;
+        if (ud.residenceFloor2Group) ud.residenceFloor2Group.visible = resNear;
       }
 
       if (extraZones.museumGroup) {
@@ -505,7 +530,9 @@ export class ParcDesPrincesZone {
       }
 
       if (extraZones.trainingEquipGroup) {
-        extraZones.trainingEquipGroup.visible = this.lodHighGroup.visible || this.cctvModeActive;
+        const tpDx = playerPos.x - 192;
+        const tpDz = playerPos.z + 86;
+        extraZones.trainingEquipGroup.visible = !this.cctvModeActive && (tpDx * tpDx + tpDz * tpDz) <= 115 * 115;
       }
     }
 
@@ -526,14 +553,40 @@ export class ParcDesPrincesZone {
 
   getPlayerZoneLabel(playerPos) {
     if (!playerPos) return 'Khu Nhà Điều Hành PSG';
+    if (playerPos.x >= 102) {
+      if (playerPos.x >= 143 && playerPos.x <= 226 && playerPos.z >= -8 && playerPos.z <= 26) {
+        const area = playerPos.x < 178
+          ? 'Cánh Tây · Tầng 1 (ROOM 01–15)'
+          : playerPos.x > 190
+            ? 'Cánh Đông · Tầng 1 (ROOM 16–30)'
+            : 'Sảnh PSG & Khu Sinh Hoạt · Tầng 1';
+        return `🏨 PSG PLAYER RESIDENCE · ${area}`;
+      }
+      if (playerPos.x >= 154 && playerPos.x <= 182 && playerPos.z >= -50 && playerPos.z <= -27) {
+        return '🏥 PSG MEDICAL CENTER (Trung tâm Y tế & Phục hồi)';
+      }
+      if (playerPos.x >= 185 && playerPos.x <= 216 && playerPos.z >= -50 && playerPos.z <= -27) {
+        return '💪 FITNESS & PERFORMANCE CENTER (Gym & Thể lực)';
+      }
+      if (playerPos.x >= 120 && playerPos.x <= 144 && playerPos.z >= -62 && playerPos.z <= -35) {
+        return '👕 FIRST TEAM LOCKER ROOM (Phòng Thay Đồ Đội Một)';
+      }
+      if (playerPos.x >= 150 && playerPos.x <= 235 && playerPos.z >= -146 && playerPos.z <= -54) {
+        return '⚽ PSG TRAINING PITCH (Sân Tập Bóng Đá Đội Một)';
+      }
+      return '🏟️ PARIS SAINT-GERMAIN TRAINING CENTER';
+    }
     const dSt = Math.hypot(playerPos.x - this.stadiumCenter.x, playerPos.z - this.stadiumCenter.z);
-    if (dSt <= 66) return '🏟️ SVĐ Parc des Princes (Tập luyện & Thi đấu · LOD Cao)';
+    if (dSt <= 66) return '🏟️ SVĐ Parc des Princes (Thi đấu chính thức · LOD Cao)';
     if (playerPos.x >= 16 && playerPos.x <= 51 && playerPos.z >= -58 && playerPos.z <= -30) {
       return '🏛️ PARIS SAINT-GERMAIN CLUB MUSEUM (Bảo tàng Danh hiệu)';
     }
     if (playerPos.z < -62) return '🛣️ Khu Hậu Cần, Bãi Xe & Đại Lộ SVĐ';
-    if (playerPos.z < -25) return '🌳 Công Viên Nội Bộ, Bảo Tàng & Phòng Thay Đồ PSG';
+    if (playerPos.z < -25) return '🌳 Công Viên Nội Bộ & Bảo Tàng PSG';
     if (playerPos.z > 23) return '🚘 Bãi Đỗ Xe & Cổng Chính PSG';
+    if (playerPos.x >= 6 && playerPos.x <= 20 && playerPos.z >= 13.8 && playerPos.z <= 22) {
+      return '📊 Phòng Kỹ Thuật PSG (Technical Department)';
+    }
     return '🏢 Khu Nhà Điều Hành PSG';
   }
 }

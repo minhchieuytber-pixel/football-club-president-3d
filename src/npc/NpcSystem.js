@@ -4,15 +4,22 @@ import { PathfindingSystem } from '../ai/PathfindingSystem.js';
 import { formatKitName } from '../characters/PlayerKitSystem.js';
 
 const COACH_SIDELINE_SPOTS = [
-  { x: 0, z: -130.5 }, { x: -10, z: -130.5 }, { x: 10, z: -130.5 }, { x: 0, z: -133.0 }
+  { x: 192.0, z: -61.5 }, { x: 182.0, z: -61.5 }, { x: 202.0, z: -61.5 }, { x: 192.0, z: -59.5 }
 ];
 
-// Khu vực nghỉ ngơi & phục hồi dành riêng cho cầu thủ: nằm hoàn toàn trong Tòa nhà Phòng Thay Đồ PSG (TUYỆT ĐỐI KHÔNG tự ý đi vào Nhà làm việc!)
+// Khu vực nghỉ ngơi & phục hồi dành riêng cho cầu thủ: nằm trong Phòng Thay Đồ Mới (132, -48) & Tòa nhà Nghỉ dưỡng (184, 9)
+// (TUYỆT ĐỐI KHÔNG tự ý đi vào Nhà làm việc!)
 const PLAYER_REST_SPOTS = [
-  { x: -43.5, z: -48.5 }, { x: -43.5, z: -44.0 }, { x: -43.5, z: -39.5 },
-  { x: -39.0, z: -50.8 }, { x: -34.0, z: -50.8 }, { x: -30.5, z: -48.5 },
-  { x: -30.5, z: -39.5 }, { x: -35.5, z: -39.0 }, { x: -39.5, z: -39.0 },
-  { x: -30.5, z: -43.5 }
+  { x: 126.5, z: -52.5 }, { x: 126.5, z: -48.0 }, { x: 126.5, z: -43.5 },
+  { x: 130.0, z: -54.8 }, { x: 135.0, z: -54.8 }, { x: 138.5, z: -52.5 },
+  { x: 138.5, z: -43.5 }, { x: 133.5, z: -43.0 }, { x: 129.5, z: -43.0 },
+  { x: 138.5, z: -47.5 }
+];
+
+const RESIDENCE_LOUNGE_SPOTS = [
+  { x: 180.5, z: 17.5 }, { x: 187.5, z: 17.5 }, { x: 184.0, z: 13.5 },
+  { x: 175.0, z: 9.0 },  { x: 193.0, z: 9.0 },  { x: 184.0, z: 2.0 },
+  { x: 184.0, z: -2.2 }, { x: 165.0, z: 9.0 },  { x: 202.0, z: 9.0 }
 ];
 
 const COACH_PROP_STATES = new Set(['clipboard', 'tablet', 'notes', 'supervise', 'coach_drill']);
@@ -65,6 +72,8 @@ export class NpcSystem {
     this.captainId = null;
     this._sharedAssets = null;
     this._frameCounter = 0;
+    this._curtainEvalTimer = 0;
+    this._shouldEvalCurtains = false;
     this.lodCounts = [0, 0, 0, 0];
     this._avoidOut = { vx: 0, vz: 0, waiting: false };
     this._avoidOpts = { out: this._avoidOut, useSpatialGrid: true, skipWhiskers: false };
@@ -215,8 +224,8 @@ export class NpcSystem {
 
     const seatRotY = this.getCorrectDeskRotation(p);
     const restSpot = p.isPlayer ? PLAYER_REST_SPOTS[idx % PLAYER_REST_SPOTS.length] : (p.home || { x: 0, z: 6 });
-    let startX = p.home?.x ?? 0;
-    let startZ = p.home?.z ?? -152;
+    let startX = p.home?.x ?? 192;
+    let startZ = p.home?.z ?? -86;
     if (p.isPlayer && !trainingAtStart) {
       startX = restSpot.x;
       startZ = restSpot.z;
@@ -233,8 +242,8 @@ export class NpcSystem {
       startMode = 'coach_drill';
       startRotY = Math.PI;
     } else if (p.id === 'npc_coach' && trainingAtStart) {
-      startX = 0;
-      startZ = -130.5;
+      startX = 192;
+      startZ = -61.5;
       startMode = 'supervise';
       startRotY = Math.PI;
     }
@@ -422,8 +431,8 @@ export class NpcSystem {
       if (playerNpcCount >= maxVisiblePlayers && !p.justJoined) continue;
       let hash = 0;
       for (let c = 0; c < p.id.length; c++) hash += p.id.charCodeAt(c);
-      const pitchX = p.position === 'GK' ? -33.0 : (-24 + ((idx * 7) % 48));
-      const pitchZ = p.position === 'GK' ? -152.0 : (-166 + ((idx * 5) % 28));
+      const pitchX = p.position === 'GK' ? 158.0 : (168 + ((idx * 7) % 48));
+      const pitchZ = p.position === 'GK' ? -86.0 : (-102 + ((idx * 5) % 28));
       const profile = {
         id: `npc_pl_${p.id}`,
         playerId: p.id,
@@ -550,11 +559,11 @@ export class NpcSystem {
     let needsClone = false;
 
     if (npc.isPlayer && !this.isAuthorizedHqVisit(npc)) {
-      // Nếu đích đến nằm trong Nhà làm việc mà cầu thủ không được triệu tập -> chuyển hướng về Phòng Thay Đồ!
+      // Nếu đích đến nằm trong Nhà làm việc mà cầu thủ không được triệu tập -> chuyển hướng về Phòng Thay Đồ Mới!
       if (PathfindingSystem.isHqInteriorPoint(targetX, targetZ)) {
         const safeSpot = (npc.restSpot && !PathfindingSystem.isHqInteriorPoint(npc.restSpot.x, npc.restSpot.z))
           ? npc.restSpot
-          : { x: -35.5, z: -39.0 };
+          : { x: 133.5, z: -43.0 };
         targetX = safeSpot.x;
         targetZ = safeSpot.z;
       }
@@ -567,6 +576,70 @@ export class NpcSystem {
 
     if (needsClone) {
       pathOptions = { ...options, forbidHqInterior: true };
+    }
+
+    // Kiểm tra đi qua cửa phòng riêng tại Player Residence (cầu thủ phải lại gần mở cửa rồi mới bước vào/ra)
+    const resSys = this.trainingSystem?.state?.playerResidenceSystem;
+    if (npc.isPlayer && !pathOptions._bypassDoorCheck && npc.mesh && resSys) {
+      const nx = npc.mesh.position.x;
+      const nz = npc.mesh.position.z;
+      const curRoom = resSys.getRoomAtPosition(nx, nz);
+      let destRoom = resSys.getRoomAtPosition(targetX, targetZ);
+
+      if (destRoom && !resSys.canNpcEnterRoom(destRoom.roomNumber, npc.playerId)) {
+        const fallback = RESIDENCE_LOUNGE_SPOTS[0];
+        targetX = fallback.x;
+        targetZ = fallback.z;
+        destRoom = null;
+      }
+
+      if (curRoom && (!destRoom || destRoom.roomNumber !== curRoom.roomNumber)) {
+        if (!curRoom.doorOpen) {
+          const spots = resSys.getDoorApproachSpots(curRoom);
+          if (spots) {
+            npc._doorTransition = {
+              phase: 'exit_walk',
+              roomNumber: curRoom.roomNumber,
+              resumeMode: npc.mode,
+              resumeDestX: targetX,
+              resumeDestZ: targetZ,
+              resumeOpts: pathOptions,
+              faceRotY: spots.inside.faceRotY,
+              timer: 0.78,
+              opened: false
+            };
+            npc.mode = 'door_walk';
+            this.setNpcDestination(npc, spots.inside.x, spots.inside.z, { ...pathOptions, _bypassDoorCheck: true });
+            return;
+          }
+        } else {
+          npc._autoCloseRoomNumber = curRoom.roomNumber;
+          npc._autoCloseTimer = 2.6;
+        }
+      } else if (destRoom && (!curRoom || curRoom.roomNumber !== destRoom.roomNumber)) {
+        if (!destRoom.doorOpen) {
+          const spots = resSys.getDoorApproachSpots(destRoom);
+          if (spots) {
+            npc._doorTransition = {
+              phase: 'enter_walk',
+              roomNumber: destRoom.roomNumber,
+              resumeMode: npc.mode,
+              resumeDestX: targetX,
+              resumeDestZ: targetZ,
+              resumeOpts: pathOptions,
+              faceRotY: spots.outside.faceRotY,
+              timer: 0.78,
+              opened: false
+            };
+            npc.mode = 'door_walk';
+            this.setNpcDestination(npc, spots.outside.x, spots.outside.z, { ...pathOptions, _bypassDoorCheck: true });
+            return;
+          }
+        } else {
+          npc._autoCloseRoomNumber = destRoom.roomNumber;
+          npc._autoCloseTimer = 2.8;
+        }
+      }
     }
 
     if (npc.finalDest) {
@@ -593,7 +666,7 @@ export class NpcSystem {
       if (PathfindingSystem.isHqInteriorPoint(targetX, targetZ)) {
         const safeSpot = (npc.restSpot && !PathfindingSystem.isHqInteriorPoint(npc.restSpot.x, npc.restSpot.z))
           ? npc.restSpot
-          : { x: -35.5, z: -39.0 };
+          : { x: 133.5, z: -43.0 };
         targetX = safeSpot.x;
         targetZ = safeSpot.z;
       }
@@ -669,16 +742,41 @@ export class NpcSystem {
     this.summonedPlayerNpc = null;
   }
 
+  // Nhân sự/Trưởng bộ phận chủ động lên Phòng Chủ tịch báo cáo tiến độ hoặc vướng mắc
+  visitPresidentOfficeForReport(npcId, visitData = null) {
+    const npc = this.getById(npcId);
+    if (!npc || npc.isPlayer) return null;
+    npc.officeVisitData = visitData || null;
+    npc.mode = 'going_president';
+    npc.meetingRotY = Math.PI;
+    this.setNpcDestination(npc, -24.9, -15.2);
+    return npc;
+  }
+
+  dismissOfficeVisitor(npcId) {
+    const npc = this.getById(npcId);
+    if (!npc || npc.isPlayer) return false;
+    npc.officeVisitData = null;
+    if (npc.mode === 'going_president' || npc.mode === 'sit_president') {
+      this.setNpcDestination(npc, npc.home.x, npc.home.z);
+      npc.mode = 'returning';
+    }
+    return true;
+  }
+
   // Phân loại 4 tầng Simulation & Animation LOD có trễ (hysteresis 2m chống nhấp nháy ranh giới)
   // KHÔNG BAO GIỜ ghi đè n.mesh.visible (chỉ đọc từ ParcDesPrincesZone.updateStreaming!)
   _computeNpcLod(n, focusPos, playerPos) {
     // Luôn giữ LOD 0 cho NPC đang tham gia Lễ ký kết/Họp báo hoặc đang được Chủ tịch triệu tập
+    const resumeMode = n._doorTransition?.resumeMode;
     if (
       n === this.summonedPlayerNpc ||
       n.mode === 'event_travel' ||
       n.mode === 'event_hold' ||
       n.mode === 'going_president' ||
-      n.mode === 'sit_president'
+      n.mode === 'sit_president' ||
+      resumeMode === 'event_travel' ||
+      resumeMode === 'going_president'
     ) {
       return 0;
     }
@@ -747,6 +845,22 @@ export class NpcSystem {
       n.mode = 'coach_drill';
       n.mesh.rotation.y = Math.PI;
       n.timer = 5.0;
+    } else if (n.mode === 'curtain_walk') {
+      n.mode = 'curtain_action';
+      if (n.curtainTask) {
+        n.mesh.rotation.y = n.curtainTask.faceRotY;
+        n.curtainTask.actionTimer = 1.5;
+        n.curtainTask.applied = false;
+      }
+    } else if (n.mode === 'door_walk') {
+      n.mode = 'door_action';
+      if (n._doorTransition) {
+        if (typeof n._doorTransition.faceRotY === 'number') {
+          n.mesh.rotation.y = n._doorTransition.faceRotY;
+        }
+        n._doorTransition.timer = 0.78;
+        n._doorTransition.opened = false;
+      }
     } else if (n.mode === 'returning') {
       const homeChair = this.campus?.hasChairAt ? this.campus.hasChairAt(n.home.x, n.home.z, 0.78) : false;
       n.mode = n.isPlayer ? (trainingNow ? 'train' : 'rest') : (homeChair ? 'work_pc' : 'stand_duty');
@@ -762,7 +876,7 @@ export class NpcSystem {
     if (n.isPlayer && !this.isAuthorizedHqVisit(n) && PathfindingSystem.isHqInteriorPoint(tx, tz)) {
       const safeSpot = (n.restSpot && !PathfindingSystem.isHqInteriorPoint(n.restSpot.x, n.restSpot.z))
         ? n.restSpot
-        : { x: -35.5, z: -39.0 };
+        : { x: 133.5, z: -43.0 };
       tx = safeSpot.x;
       tz = safeSpot.z;
       n.finalDest.x = tx;
@@ -781,7 +895,27 @@ export class NpcSystem {
     n._lod3InTransit = false;
     n._lod3TransitRemaining = 0;
     n._chairCacheX = NaN;
+    if (n.mode === 'door_walk' && n._doorTransition) {
+      const tr = n._doorTransition;
+      n._doorTransition = null;
+      n.mode = tr.resumeMode || 'rest';
+      tx = tr.resumeDestX;
+      tz = tr.resumeDestZ;
+      n.mesh.position.set(tx, 0.14, tz);
+      n.target.set(tx, 0.14, tz);
+      n.finalDest.x = tx;
+      n.finalDest.z = tz;
+      n.lastPosX = tx;
+      n.lastPosZ = tz;
+    }
     this._finalizeArrivalMode(n, trainingNow);
+    const resSys = this.trainingSystem?.state?.playerResidenceSystem;
+    if (n.isPlayer && resSys && n.playerId) {
+      const rm = resSys.getRoomForPlayer(n.playerId);
+      if (rm && rm.doorOpen && rm.lastDoorAction?.by !== 'player') {
+        resSys.setRoomDoorState(rm.roomNumber, false, { by: 'npc', npcId: n.id, npcName: n.name, immediate: true });
+      }
+    }
   }
 
   // Khôi phục liền mạch vị trí, trạng thái, đạo cụ & tư thế ghế 3D khi NPC chuyển từ LOD 3 -> LOD 0/1/2
@@ -795,7 +929,7 @@ export class NpcSystem {
       }
     } else if (n.isPlayer && !this.isAuthorizedHqVisit(n) && PathfindingSystem.isHqInteriorPoint(n.mesh.position.x, n.mesh.position.z)) {
       // Bảo vệ tuyệt đối: không bao giờ khôi phục cầu thủ trái phép trong HQ
-      const safeSpot = n.restSpot || { x: -35.5, z: -39.0 };
+      const safeSpot = n.restSpot || { x: 133.5, z: -43.0 };
       n.mesh.position.set(safeSpot.x, 0.14, safeSpot.z);
       n.target.set(safeSpot.x, 0.14, safeSpot.z);
       n.lastPosX = safeSpot.x;
@@ -827,14 +961,14 @@ export class NpcSystem {
     if (n.id === 'npc_coach' && !this.meetingActive && n.mode !== 'going_meeting' && n.mode !== 'meeting' && n.mode !== 'task_travel' && n.mode !== 'task_working' && n.mode !== 'event_travel' && n.mode !== 'event_hold') {
       if (drNow && clockHour >= 9.0 && clockHour < 9.25) {
         n.task = 'Đang phổ biến chiến thuật đầu buổi tập tại Phòng Thay Đồ PSG';
-        if (Math.hypot((n.finalDest?.x ?? 0) - (-34.5), (n.finalDest?.z ?? 0) - (-44.8)) > 1.5) {
-          this._setLod3LogicalDestination(n, -34.5, -44.8);
+        if (Math.hypot((n.finalDest?.x ?? 0) - 134.5, (n.finalDest?.z ?? 0) - (-48.8)) > 1.5) {
+          this._setLod3LogicalDestination(n, 134.5, -48.8);
           n.mode = 'supervise_walk';
         }
       } else if (trainingNow) {
-        n.task = 'Trực tiếp điều hành & quan sát toàn bộ buổi tập PSG tại SVĐ Parc des Princes';
+        n.task = 'Trực tiếp điều hành & quan sát toàn bộ buổi tập PSG tại PSG TRAINING PITCH';
         if (n.mode !== 'supervise' && n.mode !== 'supervise_walk') {
-          this._setLod3LogicalDestination(n, 0, -130.5);
+          this._setLod3LogicalDestination(n, 192.0, -61.5);
           n.mode = 'supervise_walk';
         }
       } else {
@@ -859,9 +993,12 @@ export class NpcSystem {
       }
     }
 
-    // 3. Cầu thủ đội một
-    if (n.isPlayer && n !== this.summonedPlayerNpc && n.mode !== 'going_president' && n.mode !== 'sit_president' && n.mode !== 'event_travel' && n.mode !== 'event_hold') {
+    // 3. Cầu thủ đội một (khi không bị chấn thương đang điều trị y tế)
+    if (n.isPlayer && n !== this.summonedPlayerNpc && n.mode !== 'going_president' && n.mode !== 'sit_president' && n.mode !== 'event_travel' && n.mode !== 'event_hold' && n.mode !== 'medical_rehab') {
+      const residenceTime = clockHour < 8.75 || clockHour >= 16.5 || (clockHour >= 12.6 && clockHour < 14.25);
       if (drNow) {
+        n.curtainTask = null;
+        n._doorTransition = null;
         if (n.bibMesh) n.bibMesh.visible = false;
         n.scrimmageTeam = null;
         n.task = 'Có mặt tại Phòng Thay Đồ thay trang phục & chuẩn bị giáo án';
@@ -870,15 +1007,33 @@ export class NpcSystem {
           this._setLod3LogicalDestination(n, n.restSpot.x, n.restSpot.z);
         }
       } else if (trainingNow) {
-        if (n.mode === 'rest' || n.mode === 'dressing' || n.mode === 'returning') {
+        n.curtainTask = null;
+        n._doorTransition = null;
+        if (n.mode === 'rest' || n.mode === 'dressing' || n.mode === 'returning' || n.mode === 'curtain_walk' || n.mode === 'curtain_action' || n.mode === 'door_walk' || n.mode === 'door_action') {
           n.mode = 'train';
           this._setLod3LogicalDestination(n, n.home.x, n.home.z);
         }
+      } else if (residenceTime) {
+        n._doorTransition = null;
+        if (n.bibMesh) n.bibMesh.visible = false;
+        n.scrimmageTeam = null;
+        const rSpot = this._getPlayerResidenceSpot(n);
+        n.task = 'Nghỉ ngơi & sinh hoạt tại Tòa nhà Nghỉ dưỡng Cầu thủ PSG';
+        if (n.mode !== 'rest' || Math.hypot((n.finalDest?.x ?? 0) - rSpot.x, (n.finalDest?.z ?? 0) - rSpot.z) > 1.5) {
+          n.mode = 'rest';
+          this._setLod3LogicalDestination(n, rSpot.x, rSpot.z);
+        }
+        if (this._shouldEvalCurtains) {
+          this._tryStartNpcCurtainTask(n, clockHour, this._lastPlayerPos || null, SKIP_LOCAL_GRID_OPTS, true);
+          this._tickResidenceRoomComfort(n, clockHour, this._lastPlayerPos || null, 1.4, true);
+        }
       } else {
+        n.curtainTask = null;
+        n._doorTransition = null;
         if (n.bibMesh) n.bibMesh.visible = false;
         n.scrimmageTeam = null;
         n.task = 'Nghỉ ngơi & phục hồi thể lực tại Phòng Thay Đồ Cầu Thủ PSG';
-        if (n.mode === 'train' || n.mode === 'drill' || n.mode === 'dressing') {
+        if (n.mode === 'train' || n.mode === 'drill' || n.mode === 'dressing' || n.mode === 'curtain_walk' || n.mode === 'curtain_action' || n.mode === 'door_walk' || n.mode === 'door_action') {
           n.mode = 'rest';
           this._setLod3LogicalDestination(n, n.restSpot.x, n.restSpot.z);
         }
@@ -936,7 +1091,7 @@ export class NpcSystem {
     let vx, vz, waiting = false;
     if (lod <= 1) {
       this._avoidOpts.useSpatialGrid = true;
-      this._avoidOpts.skipWhiskers = (lod === 1 && n.stuckTimer <= 0.35);
+      this._avoidOpts.skipWhiskers = (lod === 1 && n.stuckTimer <= 0.35) || (n.mode === 'door_walk' && dist < 1.25);
       const av = this.pathfinder.computeAvoidanceVelocity(n, dirX, dirZ, n.speed, this.npcs, playerPos, this._avoidOpts);
       vx = av.vx;
       vz = av.vz;
@@ -973,7 +1128,7 @@ export class NpcSystem {
     if (n.isPlayer && !this.isAuthorizedHqVisit(n) && !curInHq && PathfindingSystem.isHqInteriorPoint(nextX, nextZ)) {
       n._velX = 0;
       n._velZ = 0;
-      const safeSpot = n.restSpot || { x: -35.5, z: -39.0 };
+      const safeSpot = n.restSpot || { x: 133.5, z: -43.0 };
       this.setNpcDestination(n, safeSpot.x, safeSpot.z, lod === 2 ? SKIP_LOCAL_GRID_OPTS : EMPTY_PATH_OPTS);
       return false;
     }
@@ -1032,6 +1187,14 @@ export class NpcSystem {
 
   update(dt, playerPos, clockHour = 9.5, onScheduleToast = null, coachName = 'Luis Enrique', options = null) {
     this._frameCounter = (this._frameCounter + 1) & 0x3fffffff;
+    this._lastPlayerPos = playerPos || null;
+    this._curtainEvalTimer += dt;
+    if (this._curtainEvalTimer >= 1.4) {
+      this._curtainEvalTimer = 0;
+      this._shouldEvalCurtains = true;
+    } else {
+      this._shouldEvalCurtains = false;
+    }
     const trainingNow = this.isTrainingHour(clockHour);
     const drNow = this.isDressingRoomHour(clockHour);
 
@@ -1044,8 +1207,8 @@ export class NpcSystem {
       this.wasTraining = trainingNow;
       if (onScheduleToast) {
         onScheduleToast(trainingNow
-          ? `⚽ Đã đến giờ tập! HLV ${coachName} và toàn đội PSG đã ra SVĐ Parc des Princes tập luyện 3D.`
-          : `☕ Kết thúc ca tập tại Parc des Princes! Đội một PSG về Phòng Thay Đồ phục hồi và BHL tổng hợp báo cáo.`);
+          ? `⚽ Đã đến giờ tập! HLV ${coachName} và toàn đội PSG đã ra Trung tâm Huấn luyện PSG tập luyện 3D.`
+          : `☕ Kết thúc ca tập tại PSG Training Center! Đội một PSG về Phòng Thay Đồ & Khu Nghỉ Dưỡng phục hồi.`);
       }
     } else if (this.wasTraining === null) {
       this.wasTraining = trainingNow;
@@ -1058,13 +1221,13 @@ export class NpcSystem {
     const stride1 = Math.max(1, Math.round(2 * lodStrideMult));
     const stride2 = Math.max(2, Math.round(6 * lodStrideMult));
 
-    // Xác định vùng tập luyện Parc des Princes có đang active (người chơi gần SVĐ hoặc đang mở CCTV SVĐ) không
+    // Xác định vùng sân tập PSG TRAINING PITCH (tâm 192, -86) có đang active (người chơi ở gần Khu Huấn Luyện) không
     let trainingZoneActive = true;
-    if (options && typeof options.stadiumTrainingVisible === 'boolean') {
-      trainingZoneActive = options.stadiumTrainingVisible;
+    if (options && typeof options.trainingPitchVisible === 'boolean') {
+      trainingZoneActive = options.trainingPitchVisible;
     } else if (focusPos) {
-      const sdx = focusPos.x;
-      const sdz = focusPos.z + 152;
+      const sdx = focusPos.x - 192.0;
+      const sdz = focusPos.z + 86.0;
       trainingZoneActive = (sdx * sdx + sdz * sdz) <= STADIUM_ACTIVE_RADIUS_SQ;
     }
 
@@ -1137,14 +1300,14 @@ export class NpcSystem {
       if (n.id === 'npc_coach' && !this.meetingActive && n.mode !== 'going_meeting' && n.mode !== 'meeting' && n.mode !== 'task_travel' && n.mode !== 'task_working' && n.mode !== 'event_travel' && n.mode !== 'event_hold') {
         if (drNow && clockHour >= 9.0 && clockHour < 9.25) {
           n.task = 'Đang phổ biến chiến thuật đầu buổi tập tại Phòng Thay Đồ PSG';
-          if (Math.hypot((n.finalDest?.x ?? 0) - (-34.5), (n.finalDest?.z ?? 0) - (-44.8)) > 1.5) {
-            this.setNpcDestination(n, -34.5, -44.8, pathOpts);
+          if (Math.hypot((n.finalDest?.x ?? 0) - 134.5, (n.finalDest?.z ?? 0) - (-48.8)) > 1.5) {
+            this.setNpcDestination(n, 134.5, -48.8, pathOpts);
             n.mode = 'supervise_walk';
           }
         } else if (trainingNow) {
-          n.task = 'Trực tiếp điều hành & quan sát toàn bộ buổi tập PSG tại SVĐ Parc des Princes';
+          n.task = 'Trực tiếp điều hành & quan sát toàn bộ buổi tập PSG tại PSG TRAINING PITCH';
           if (n.mode !== 'supervise' && n.mode !== 'supervise_walk') {
-            this.setNpcDestination(n, 0, -130.5, pathOpts);
+            this.setNpcDestination(n, 192.0, -61.5, pathOpts);
             n.mode = 'supervise_walk';
           }
         } else {
@@ -1169,26 +1332,48 @@ export class NpcSystem {
         }
       }
 
-      // 3. Hành vi Cầu thủ đội một (khi không bị triệu tập lên phòng Chủ tịch hoặc đang dự Lễ ký kết / Họp báo)
-      if (n.isPlayer && n !== this.summonedPlayerNpc && n.mode !== 'going_president' && n.mode !== 'sit_president' && n.mode !== 'event_travel' && n.mode !== 'event_hold') {
+      // 3. Hành vi Cầu thủ đội một (khi không bị triệu tập, không dự lễ, và không đang điều trị chấn thương y tế)
+      if (n.isPlayer && n !== this.summonedPlayerNpc && n.mode !== 'going_president' && n.mode !== 'sit_president' && n.mode !== 'event_travel' && n.mode !== 'event_hold' && n.mode !== 'medical_rehab') {
+        const residenceTime = clockHour < 8.75 || clockHour >= 16.5 || (clockHour >= 12.6 && clockHour < 14.25);
         if (drNow) {
+          n.curtainTask = null;
           if (n.bibMesh) n.bibMesh.visible = false;
           n.scrimmageTeam = null;
           n.task = 'Có mặt tại Phòng Thay Đồ thay trang phục & chuẩn bị giáo án';
-          if (n.mode !== 'dressing') {
+          if (n.mode !== 'dressing' && !(n.mode === 'door_walk' && n._doorTransition?.resumeMode === 'dressing') && !(n.mode === 'door_action' && n._doorTransition?.resumeMode === 'dressing')) {
+            n._doorTransition = null;
             n.mode = 'dressing';
             this.setNpcDestination(n, n.restSpot.x, n.restSpot.z, pathOpts);
           }
         } else if (trainingNow) {
-          if (n.mode === 'rest' || n.mode === 'dressing' || n.mode === 'returning') {
-            n.mode = 'train';
-            this.setNpcDestination(n, n.home.x, n.home.z, pathOpts);
+          n.curtainTask = null;
+          if (n.mode === 'rest' || n.mode === 'dressing' || n.mode === 'returning' || n.mode === 'curtain_walk' || n.mode === 'curtain_action' || n.mode === 'door_walk' || n.mode === 'door_action') {
+            if (!(n._doorTransition?.resumeMode === 'train')) {
+              n._doorTransition = null;
+              n.mode = 'train';
+              this.setNpcDestination(n, n.home.x, n.home.z, pathOpts);
+            }
+          }
+        } else if (residenceTime) {
+          if (n.bibMesh) n.bibMesh.visible = false;
+          n.scrimmageTeam = null;
+          if (n.mode !== 'curtain_walk' && n.mode !== 'curtain_action' && n.mode !== 'door_walk' && n.mode !== 'door_action') {
+            const rSpot = this._getPlayerResidenceSpot(n);
+            n.task = 'Nghỉ ngơi & sinh hoạt tại Tòa nhà Nghỉ dưỡng Cầu thủ PSG';
+            if (n.mode !== 'rest' || Math.hypot((n.finalDest?.x ?? 0) - rSpot.x, (n.finalDest?.z ?? 0) - rSpot.z) > 1.5) {
+              n.mode = 'rest';
+              this.setNpcDestination(n, rSpot.x, rSpot.z, pathOpts);
+            } else if (this._shouldEvalCurtains) {
+              this._tryStartNpcCurtainTask(n, clockHour, playerPos, pathOpts, false);
+            }
           }
         } else {
+          n.curtainTask = null;
           if (n.bibMesh) n.bibMesh.visible = false;
           n.scrimmageTeam = null;
           n.task = 'Nghỉ ngơi & phục hồi thể lực tại Phòng Thay Đồ Cầu Thủ PSG';
-          if (n.mode === 'train' || n.mode === 'drill' || n.mode === 'dressing') {
+          if (n.mode === 'train' || n.mode === 'drill' || n.mode === 'dressing' || n.mode === 'curtain_walk' || n.mode === 'curtain_action') {
+            n._doorTransition = null;
             n.mode = 'rest';
             this.setNpcDestination(n, n.restSpot.x, n.restSpot.z, pathOpts);
           }
@@ -1196,6 +1381,7 @@ export class NpcSystem {
       }
       if (n.isPlayer) {
         this._syncPlayerNpcKit(n, null, trainingNow, drNow, clockHour);
+        this._tickResidenceRoomComfort(n, clockHour, playerPos, stepDt, false);
       }
 
       // 4. Thực hiện bước di chuyển phân tầng theo LOD
@@ -1286,12 +1472,72 @@ export class NpcSystem {
           if (n.timer <= 0) {
             n.timer = 2.4 + Math.random() * 3.0;
             n.target.set(
-              Math.max(-28, Math.min(28, n.home.x + (Math.random() - 0.5) * 16)),
+              Math.max(162, Math.min(222, n.home.x + (Math.random() - 0.5) * 16)),
               0.14,
-              Math.max(-170, Math.min(-134, n.home.z + (Math.random() - 0.5) * 12))
+              Math.max(-106, Math.min(-66, n.home.z + (Math.random() - 0.5) * 12))
             );
           }
           if (animateStationary) this.animSystem.updateRig(n.mesh, 'train', animDt, 1.0, lod);
+        }
+      } else if (n.isPlayer && n.mode === 'door_action') {
+        const tr = n._doorTransition;
+        if (!tr) {
+          n.mode = 'rest';
+        } else {
+          if (typeof tr.faceRotY === 'number') {
+            n.mesh.rotation.y = lerpAngle(n.mesh.rotation.y, tr.faceRotY, animDt * 10);
+          }
+          tr.timer -= stepDt;
+          if (!tr.opened && tr.timer <= 0.48) {
+            tr.opened = true;
+            const resSys = this.trainingSystem?.state?.playerResidenceSystem;
+            if (resSys) {
+              resSys.setRoomDoorState(tr.roomNumber, true, {
+                by: 'npc',
+                npcId: n.id,
+                npcName: n.name,
+                clockHour
+              });
+            }
+          }
+          if (animateStationary) this.animSystem.updateRig(n.mesh, 'open_door', animDt, 1.0, lod);
+          if (tr.timer <= 0) {
+            n._doorTransition = null;
+            n.mode = tr.resumeMode || 'rest';
+            n._autoCloseRoomNumber = tr.roomNumber;
+            n._autoCloseTimer = 2.6;
+            this.setNpcDestination(n, tr.resumeDestX, tr.resumeDestZ, {
+              ...(tr.resumeOpts || {}),
+              _bypassDoorCheck: true
+            });
+          }
+        }
+      } else if (n.isPlayer && n.mode === 'curtain_action') {
+        if (!n.curtainTask) {
+          n.mode = 'rest';
+        } else {
+          n.mesh.rotation.y = lerpAngle(n.mesh.rotation.y, n.curtainTask.faceRotY, animDt * 10);
+          n.curtainTask.actionTimer -= stepDt;
+          if (!n.curtainTask.applied && n.curtainTask.actionTimer <= 0.85) {
+            n.curtainTask.applied = true;
+            const resSys = this.trainingSystem?.state?.playerResidenceSystem;
+            if (resSys && resSys.canNpcEnterRoom(n.curtainTask.roomNumber, n.playerId)) {
+              resSys.setRoomCurtainState(n.curtainTask.roomNumber, n.curtainTask.targetState, {
+                by: 'npc',
+                npcId: n.id,
+                npcName: n.name,
+                reason: n.curtainTask.reason,
+                clockHour
+              });
+            }
+          }
+          if (animateStationary) this.animSystem.updateRig(n.mesh, 'pull_curtain', animDt, 1.0, lod);
+          if (n.curtainTask.actionTimer <= 0) {
+            n.curtainTask = null;
+            n.mode = 'rest';
+            const rSpot = this._getPlayerResidenceSpot(n);
+            this.setNpcDestination(n, rSpot.x, rSpot.z, pathOpts);
+          }
         }
       } else if (n.isPlayer && (n.mode === 'rest' || n.mode === 'dressing')) {
         if (animateStationary) this.animSystem.updateRig(n.mesh, n.mode === 'dressing' ? 'talk' : 'idle', animDt, 1.0, lod);
@@ -1370,6 +1616,135 @@ export class NpcSystem {
       n.mesh.position.y = (n.mode === 'event_hold' && px > 52.5 && pz > 3.5 && pz < 18.5) ? 0.48 : 0.14;
     }
     return requestedAnim;
+  }
+
+  _tryStartNpcCurtainTask(npc, clockHour, playerPos, pathOpts = EMPTY_PATH_OPTS, isLod3 = false) {
+    const resSys = this.trainingSystem?.state?.playerResidenceSystem;
+    if (!resSys || !npc?.isPlayer || !npc.playerId) return false;
+    const room = resSys.getRoomForPlayer(npc.playerId);
+    if (!room || !resSys.canNpcEnterRoom(room.roomNumber, npc.playerId)) return false;
+
+    const desired = resSys.computeDesiredCurtainForRoom(room, { clockHour, playerPos });
+    if (!desired) return false;
+
+    if (isLod3) {
+      resSys.setRoomCurtainState(room.roomNumber, desired.state, {
+        by: 'npc',
+        npcId: npc.id,
+        npcName: npc.name,
+        reason: desired.reason,
+        clockHour,
+        immediate: true
+      });
+      return true;
+    }
+
+    // Chỉ đi kéo rèm bằng animation khi cầu thủ đã vào gần/trong tòa nhà nghỉ dưỡng
+    const distToRoom = Math.hypot(npc.mesh.position.x - room.cx, npc.mesh.position.z - room.cz);
+    if (distToRoom > 16) return false;
+
+    const spot = resSys.getWindowStandSpot(room);
+    if (!spot) return false;
+    npc.curtainTask = {
+      roomNumber: room.roomNumber,
+      targetState: desired.state,
+      reason: desired.reason,
+      windowX: spot.x,
+      windowZ: spot.z,
+      faceRotY: spot.faceRotY,
+      actionTimer: 1.5,
+      applied: false
+    };
+    npc.mode = 'curtain_walk';
+    npc.task = `${desired.reason} (${room.code})`;
+    this.setNpcDestination(npc, spot.x, spot.z, pathOpts);
+    return true;
+  }
+
+  _tickResidenceRoomComfort(npc, clockHour, playerPos, stepDt, immediate = false) {
+    const resSys = this.trainingSystem?.state?.playerResidenceSystem;
+    if (!resSys || !npc?.isPlayer || !npc.playerId || !npc.mesh) return;
+
+    const isDoorwayClear = (rm) => {
+      if (!rm) return false;
+      const nx = npc.mesh.position.x;
+      const nz = npc.mesh.position.z;
+      if (Math.hypot(nx - rm.doorX, nz - rm.doorZ) < 1.38) return false;
+      if (playerPos && Math.hypot(playerPos.x - rm.doorX, playerPos.z - rm.doorZ) < 1.48) return false;
+      return true;
+    };
+
+    if (npc._autoCloseRoomNumber) {
+      npc._autoCloseTimer = (npc._autoCloseTimer || 0) - stepDt;
+      if (npc._autoCloseTimer <= 0) {
+        const rm = resSys.getRoomByNumber(npc._autoCloseRoomNumber);
+        if (rm && rm.doorOpen) {
+          const playerRecentlyOpened = rm.lastDoorAction?.by === 'player' &&
+            Math.abs(clockHour - (rm.lastDoorAction.clockHour ?? clockHour)) < 0.35;
+          if (!playerRecentlyOpened && isDoorwayClear(rm)) {
+            resSys.setRoomDoorState(rm.roomNumber, false, {
+              by: 'npc',
+              npcId: npc.id,
+              npcName: npc.name,
+              clockHour,
+              immediate
+            });
+            npc._autoCloseRoomNumber = null;
+          } else {
+            npc._autoCloseTimer = 1.4;
+          }
+        } else {
+          npc._autoCloseRoomNumber = null;
+        }
+      }
+    }
+
+    if (!this._shouldEvalCurtains && !immediate) return;
+    const ownedRoom = resSys.getRoomForPlayer(npc.playerId);
+    if (!ownedRoom || !resSys.canNpcEnterRoom(ownedRoom.roomNumber, npc.playerId)) return;
+
+    const curRoom = resSys.getRoomAtPosition(npc.mesh.position.x, npc.mesh.position.z);
+    const insideOwnRoom = !!(curRoom && curRoom.roomNumber === ownedRoom.roomNumber);
+    if (!insideOwnRoom) return;
+
+    const isSleepHour = clockHour >= 22.8 || clockHour < 6.0;
+    const isEveningLeisure = clockHour >= 17.5 && clockHour < 22.8;
+
+    if (isSleepHour) {
+      if (ownedRoom.lightOn) resSys.setRoomLightState(ownedRoom.roomNumber, false);
+      if (ownedRoom.tvOn) resSys.setRoomTvState(ownedRoom.roomNumber, false);
+      if (ownedRoom.doorOpen && ownedRoom.lastDoorAction?.by !== 'player' && isDoorwayClear(ownedRoom)) {
+        resSys.setRoomDoorState(ownedRoom.roomNumber, false, {
+          by: 'npc',
+          npcId: npc.id,
+          npcName: npc.name,
+          clockHour,
+          immediate
+        });
+      }
+    } else if (isEveningLeisure) {
+      if (!ownedRoom.lightOn) resSys.setRoomLightState(ownedRoom.roomNumber, true);
+      if (ownedRoom.roomNumber % 2 === 1 && clockHour >= 18.5 && clockHour < 22.2 && !ownedRoom.tvOn) {
+        resSys.setRoomTvState(ownedRoom.roomNumber, true);
+      }
+    } else {
+      if (!ownedRoom.lightOn) resSys.setRoomLightState(ownedRoom.roomNumber, true);
+      if (ownedRoom.tvOn && clockHour < 17.5) resSys.setRoomTvState(ownedRoom.roomNumber, false);
+    }
+  }
+
+  _getPlayerResidenceSpot(npc) {
+    const resSys = this.trainingSystem?.state?.playerResidenceSystem;
+    const room = resSys && npc?.playerId ? resSys.getRoomForPlayer(npc.playerId) : null;
+    if (room && room.floor === 1) {
+      // Vị trí đứng/thư giãn rộng rãi giữa khu tiếp khách & giường ngủ (lz_in = 7.75, cách mọi nội thất >0.65m)
+      return {
+        x: room.cx + 0.45,
+        z: room.side === 'north' ? -2.25 : 20.25
+      };
+    }
+    const idx = Math.abs((npc?.id || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0)) % RESIDENCE_LOUNGE_SPOTS.length;
+    return RESIDENCE_LOUNGE_SPOTS[idx];
   }
 
   getById(id) {

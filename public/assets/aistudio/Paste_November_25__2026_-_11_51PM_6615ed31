@@ -1,0 +1,1301 @@
+PSG PRESIDENTIAL OFFICE
+
+COMPLETE DOCUMENT, URGENT & EXECUTIVE MANAGEMENT SYSTEM
+
+HỆ THỐNG HỒ SƠ GIẤY – KHAY URGENT – MÁY MAC – THỰC THI QUYẾT ĐỊNH – QUẢN LÝ NPC
+
+⸻
+
+PHẦN I. MỤC TIÊU VÀ NGUYÊN TẮC THIẾT KẾ
+
+Tôi muốn nâng cấp phòng làm việc hiện tại của Chủ tịch PSG thành một trung tâm điều hành CLB bóng đá chuyên nghiệp.
+
+Hệ thống bao gồm 5 thành phần liên kết với nhau:
+
+1. Hệ thống hồ sơ giấy trên bàn Chủ tịch.
+2. Khay hồ sơ khẩn cấp URGENT màu đỏ.
+3. Hệ thống báo cáo và quản lý điện tử trên máy Mac.
+4. Hệ thống phân công, giao việc và giám sát NPC.
+5. Hệ thống thực thi quyết định và cập nhật dữ liệu game.
+
+Mục tiêu không chỉ là tạo giao diện đẹp mà phải xây dựng một quy trình quản trị thực sự.
+
+NGUYÊN TẮC CỐT LÕI:
+
+* Chủ tịch đưa ra quyết định.
+* NPC và các bộ phận chịu trách nhiệm thực hiện.
+* Game Logic kiểm soát và cập nhật nghiệp vụ.
+* Các hệ thống liên quan phản ánh kết quả.
+* NPC báo cáo tiến độ và kết quả.
+* Chủ tịch có thể giám sát và can thiệp khi cần.
+
+Một hồ sơ được ký duyệt không đồng nghĩa với việc công việc đã hoàn thành.
+
+Một quyết định chỉ hoàn thành khi công việc thực tế đã được thực hiện và kết quả đã được xác nhận.
+
+Không tạo phòng Chủ tịch mới.
+
+Không tạo thêm máy Mac.
+
+Giữ nguyên bàn làm việc, TV, điện thoại, mô hình phòng và các vật thể 3D hiện có.
+
+⸻
+
+PHẦN II. PHÂN CHIA HỒ SƠ GIẤY VÀ MÁY MAC
+
+Đây là nguyên tắc bắt buộc.
+
+1. HỒ SƠ GIẤY – DECISION & APPROVAL
+
+Hồ sơ giấy chỉ dành cho những vấn đề cần Chủ tịch:
+
+* Ký duyệt.
+* Phê duyệt.
+* Từ chối.
+* Ban hành quyết định.
+* Giao nhiệm vụ.
+* Đưa ra chỉ đạo.
+* Giải quyết vấn đề vượt quyền hạn cấp dưới.
+* Xem xét các đề xuất quan trọng.
+
+Ví dụ:
+
+CLB khác gửi đề nghị mua cầu thủ PSG.
+
+Hồ sơ giấy bao gồm:
+
+* Tên cầu thủ.
+* CLB gửi đề nghị.
+* Giá chuyển nhượng.
+* Điều khoản.
+* Thời hạn phản hồi.
+* Giá trị thị trường.
+* Ý kiến Giám đốc thể thao.
+* Ý kiến HLV trưởng.
+* Đánh giá của Ban huấn luyện.
+* Đề xuất xử lý.
+* Phần quyết định của Chủ tịch.
+
+Chủ tịch đọc hồ sơ, tham khảo ý kiến và đưa ra quyết định.
+
+2. MÁY MAC – MANAGEMENT & ANALYSIS
+
+Máy Mac dùng để:
+
+* Quản lý dữ liệu CLB.
+* Xem báo cáo.
+* Phân tích.
+* Theo dõi tình hình.
+* So sánh chỉ số.
+* Xây dựng kế hoạch.
+* Giám sát tiến độ.
+* Xem lịch sử hoạt động.
+* Theo dõi công việc của các bộ phận.
+
+Ví dụ:
+
+Chủ tịch muốn xem:
+
+* Tổng giá trị đội hình.
+* Doanh thu tháng.
+* Quỹ lương.
+* Tình hình tài chính.
+* Phong độ cầu thủ.
+* Bảng xếp hạng.
+* Hiệu quả HLV.
+* Tiến độ dự án nâng cấp sân tập.
+
+Tất cả hiển thị trên máy Mac.
+
+Không tạo hồ sơ giấy cho các báo cáo thống kê thông thường.
+
+3. MỘT SỰ KIỆN CÓ THỂ XUẤT HIỆN Ở CẢ HAI HỆ THỐNG
+
+Ví dụ: PSG nhận đề nghị mua cầu thủ.
+
+* Máy Mac: Phân tích cầu thủ, giá trị thị trường, hợp đồng, phong độ, tài chính và ảnh hưởng đội hình.
+* Hồ sơ giấy: Đề nghị chính thức và phần quyết định của Chủ tịch.
+* Điện thoại: Thông báo có đề nghị mới.
+* Khay URGENT: Nhận hồ sơ nếu đủ mức độ khẩn cấp.
+* Task Manager: Theo dõi việc cần quyết định.
+
+Đây là các thành phần của cùng một giao dịch.
+
+Không tạo nhiều giao dịch độc lập.
+
+Quy tắc: Hồ sơ giấy dùng để quyết định; máy Mac dùng để quản lý và theo dõi.
+
+⸻
+
+PHẦN III. THIẾT KẾ 6 CHỒNG HỒ SƠ GIẤY
+
+Bổ sung 6 chồng hồ sơ vật lý trên bàn Chủ tịch.
+
+Tất cả phải là mô hình 3D thực sự, không phải hình ảnh giao diện 2D đặt giả trên bàn.
+
+Mỗi chồng có:
+
+* Mô hình giấy 3D.
+* Bìa hồ sơ riêng.
+* Nhãn tên.
+* Biểu tượng nhận diện.
+* Số lượng hồ sơ chưa xử lý.
+* Tương tác khi chạm.
+* Hoạt ảnh lấy hồ sơ, mở hồ sơ và đặt lại.
+
+1. TRANSFER DOCUMENTS – HỒ SƠ CHUYỂN NHƯỢNG
+
+Chứa:
+
+* Đề nghị mua cầu thủ.
+* Đề nghị mượn cầu thủ.
+* Đề xuất bán cầu thủ.
+* Đề xuất cho mượn.
+* Gia hạn hợp đồng quan trọng.
+* Chấm dứt hợp đồng cần phê duyệt.
+* Kế hoạch chuyển nhượng cần Chủ tịch duyệt.
+* Những thương vụ cần quyết định cuối cùng.
+
+Không đưa tin đồn chuyển nhượng thông thường vào đây.
+
+2. HUMAN RESOURCES – HỒ SƠ NHÂN SỰ
+
+Chứa:
+
+* Bổ nhiệm HLV.
+* Sa thải HLV.
+* Bổ nhiệm trợ lý HLV.
+* Thay đổi nhân sự cấp cao.
+* Gia hạn hợp đồng nhân viên.
+* Khen thưởng.
+* Thay đổi cơ cấu nhân sự.
+* Các vấn đề nhân sự cần Chủ tịch quyết định.
+
+3. FINANCE DOCUMENTS – HỒ SƠ TÀI CHÍNH
+
+Chứa:
+
+* Đề xuất đầu tư lớn.
+* Đề xuất vay vốn.
+* Điều chỉnh ngân sách.
+* Hợp đồng tài trợ quan trọng.
+* Khoản chi vượt ngân sách.
+* Thanh toán đặc biệt cần duyệt.
+* Đầu tư cơ sở vật chất.
+* Quyết định tài chính thuộc thẩm quyền Chủ tịch.
+
+Không đưa báo cáo thu chi định kỳ vào chồng giấy.
+
+4. COACHING STAFF – HỒ SƠ BAN HUẤN LUYỆN
+
+Chứa:
+
+* Đề xuất mua cầu thủ từ HLV.
+* Đề xuất bán cầu thủ.
+* Kế hoạch nhân sự đội một cần phê duyệt.
+* Đề xuất thay đổi nhân sự chuyên môn.
+* Báo cáo chuyên môn cần quyết định.
+* Đề xuất nâng cấp cơ sở vật chất.
+* Những kiến nghị cần Chủ tịch chỉ đạo.
+
+Báo cáo chiến thuật và thống kê trận đấu thông thường xem trên máy Mac.
+
+5. PRESIDENTIAL DECISIONS – HỒ SƠ ĐIỀU HÀNH
+
+Chứa:
+
+* Quyết định cần ký.
+* Đề xuất từ CEO.
+* Biên bản họp cần thông qua.
+* Quyết định chiến lược.
+* Các vấn đề quan trọng của CLB.
+* Công việc cần Chủ tịch chỉ đạo trực tiếp.
+* Vấn đề vượt quyền hạn của các bộ phận.
+
+6. PARTNERSHIP & COMMERCIAL – HỒ SƠ ĐỐI NGOẠI VÀ THƯƠNG MẠI
+
+Chứa:
+
+* Hợp đồng tài trợ cần ký.
+* Đề xuất hợp tác thương mại.
+* Hợp đồng quảng cáo.
+* Tổ chức sự kiện lớn.
+* Hợp tác với CLB khác.
+* Thỏa thuận đối ngoại.
+* Hợp đồng thương mại cần phê duyệt.
+
+⸻
+
+PHẦN IV. KHAY URGENT – HỒ SƠ KHẨN CẤP
+
+Thiết kế một khay hồ sơ màu đỏ đặt trực tiếp trên bàn Chủ tịch.
+
+Tên:
+
+URGENT
+PRESIDENTIAL PRIORITY
+
+Khay phải có mô hình 3D độc lập, thiết kế sang trọng và dễ nhận biết.
+
+Không che máy Mac, điện thoại hoặc các chồng hồ sơ khác.
+
+1. Điều kiện đưa hồ sơ vào khay
+
+Chỉ đưa hồ sơ vào khi:
+
+* Có thời hạn xử lý gần.
+* Có nguy cơ gây hậu quả lớn.
+* Quyết định ảnh hưởng nghiêm trọng đến CLB.
+* Có yêu cầu khẩn cấp từ Ban lãnh đạo.
+* Chủ tịch cần can thiệp trực tiếp.
+
+Ví dụ:
+
+* Đề nghị mua cầu thủ sắp hết hạn.
+* HLV trưởng gửi đơn từ chức.
+* Cầu thủ trụ cột yêu cầu ra đi.
+* Hợp đồng quan trọng sắp hết hạn.
+* Vấn đề tài chính nghiêm trọng.
+* Quyết định có thể ảnh hưởng lớn đến hoạt động CLB.
+
+Không đưa mọi hồ sơ mới vào khay đỏ.
+
+2. Hiển thị số lượng
+
+Trên khay có huy hiệu:
+
+URGENT: 03
+
+Số lượng tự động cập nhật.
+
+Khi có hồ sơ mới:
+
+* Huy hiệu tăng.
+* Có hiệu ứng cảnh báo nhẹ.
+* Điện thoại nhận thông báo.
+* Notification Center cập nhật.
+
+Khi không có hồ sơ:
+
+* Khay vẫn nằm trên bàn.
+* Số lượng bằng 0.
+* Hiển thị trạng thái EMPTY.
+
+3. Sắp xếp hồ sơ
+
+Ưu tiên theo:
+
+1. Mức độ khẩn cấp.
+2. Thời hạn.
+3. Hậu quả nếu bỏ qua.
+4. Thời điểm phát sinh.
+
+Hồ sơ gần hết hạn và có ảnh hưởng lớn nằm trên cùng.
+
+4. Xử lý hồ sơ
+
+Khi chạm vào khay:
+
+* Mở danh sách hồ sơ.
+* Hiển thị tên.
+* Nội dung tóm tắt.
+* Bộ phận gửi.
+* Thời gian nhận.
+* Thời hạn.
+* Hậu quả nếu không xử lý.
+* Trạng thái.
+
+Có thể mở hồ sơ và thực hiện:
+
+* APPROVE.
+* REJECT.
+* SIGN.
+* REQUEST REVISION.
+* REQUEST INFORMATION.
+* FORWARD.
+
+Nếu chỉ mở hồ sơ mà chưa quyết định, hồ sơ vẫn nằm trong khay.
+
+Chỉ rời khay khi đã được xử lý hoặc không còn cần ưu tiên khẩn cấp theo quy tắc nghiệp vụ.
+
+⸻
+
+PHẦN V. TƯƠNG TÁC VỚI HỒ SƠ GIẤY
+
+Khi chạm vào một chồng hồ sơ, mở danh sách hồ sơ bên trong.
+
+Mỗi hồ sơ hiển thị:
+
+* Tên.
+* Mã hồ sơ.
+* Bộ phận gửi.
+* Ngày nhận.
+* Mức ưu tiên.
+* Trạng thái.
+* Thời hạn.
+
+Khi mở hồ sơ:
+
+* Hiển thị bìa.
+* Lật từng trang.
+* Đọc nội dung.
+* Xem tài liệu liên quan.
+* Xem ý kiến tham vấn.
+* Xem đề xuất xử lý.
+* Xem phần quyết định.
+
+Các thao tác:
+
+1. APPROVE – Phê duyệt.
+2. REJECT – Từ chối.
+3. SIGN – Ký duyệt.
+4. REQUEST REVISION – Yêu cầu chỉnh sửa.
+5. REQUEST INFORMATION – Yêu cầu bổ sung thông tin.
+6. FORWARD – Chuyển bộ phận.
+7. ASSIGN TASK – Giao nhiệm vụ.
+8. ADD INSTRUCTION – Ghi chỉ đạo.
+9. CLOSE – Đóng hồ sơ nếu không còn cần xử lý.
+
+Không tự động thực hiện quyết định khi người chơi chỉ mở hồ sơ.
+
+Mọi quyết định phải được xác nhận.
+
+⸻
+
+PHẦN VI. HỆ THỐNG ĐIỆN TỬ TRÊN MÁY MAC
+
+Giữ nguyên máy Mac hiện tại.
+
+Nâng cấp thành:
+
+PSG PRESIDENTIAL MANAGEMENT SYSTEM
+
+Thiết kế như phần mềm quản trị CLB bóng đá chuyên nghiệp.
+
+Có các danh mục sau:
+
+1. DASHBOARD – TỔNG QUAN
+
+Hiển thị:
+
+* Số dư tài khoản.
+* Tổng tài sản.
+* Doanh thu.
+* Chi phí.
+* Lợi nhuận.
+* Ngân sách chuyển nhượng.
+* Quỹ lương.
+* Tổng giá trị đội hình.
+* Thành tích mùa giải.
+* Vị trí bảng xếp hạng.
+* Hồ sơ đang chờ.
+* Công việc đang thực hiện.
+* Những vấn đề cần ưu tiên.
+
+2. FINANCE CENTER – TÀI CHÍNH
+
+Hiển thị:
+
+* Doanh thu ngày, tuần, tháng, mùa.
+* Chi phí từng bộ phận.
+* Lương cầu thủ.
+* Lương ban huấn luyện.
+* Phí chuyển nhượng.
+* Doanh thu bán vé.
+* Bản quyền truyền hình.
+* Tài trợ.
+* Quảng cáo.
+* Thương mại.
+* Bán áo đấu.
+* Lợi nhuận.
+* Nợ và khoản phải trả.
+* Dự báo tài chính.
+
+Các khoản đầu tư lớn hoặc chi vượt ngân sách cần phê duyệt phải tạo hồ sơ giấy.
+
+3. SQUAD MANAGEMENT – ĐỘI BÓNG
+
+Hiển thị:
+
+* Đội một.
+* Đội trẻ.
+* Ảnh cầu thủ.
+* Tuổi.
+* Quốc tịch.
+* Vị trí.
+* Chỉ số.
+* Phong độ.
+* Thể lực.
+* Chấn thương.
+* Số phút.
+* Bàn thắng.
+* Kiến tạo.
+* Thẻ phạt.
+* Giá trị thị trường.
+* Hợp đồng.
+* Lương.
+
+Có tìm kiếm, lọc và sắp xếp.
+
+4. TRANSFER CENTER – CHUYỂN NHƯỢNG
+
+Hiển thị:
+
+* Cầu thủ được quan tâm.
+* Cầu thủ có thể mua.
+* Cầu thủ có thể bán.
+* Đề nghị đang nhận.
+* Thương vụ đang đàm phán.
+* Lịch sử chuyển nhượng.
+* Giá trị thị trường.
+* Giá đề nghị.
+* Asking Price.
+* Ngân sách còn lại.
+* Kế hoạch của HLV.
+* Phương án thay thế.
+
+Có nút mở hồ sơ giấy tương ứng khi cần Chủ tịch quyết định.
+
+5. STAFF & MANAGEMENT – NHÂN SỰ
+
+Hiển thị:
+
+* HLV trưởng.
+* Trợ lý HLV.
+* Giám đốc thể thao.
+* Giám đốc tài chính.
+* Giám đốc truyền thông.
+* Các nhân viên.
+* Hợp đồng.
+* Lương.
+* Thời hạn.
+* Hiệu quả công việc.
+* Tình trạng nhân sự.
+* Quan hệ nội bộ.
+
+6. MATCHDAY & PERFORMANCE – THÀNH TÍCH
+
+Hiển thị:
+
+* Kết quả trận.
+* Kết quả vòng đấu.
+* Bảng xếp hạng.
+* Lịch thi đấu.
+* Thống kê đội bóng.
+* Thống kê cầu thủ.
+* Phong độ 5 trận gần nhất.
+* Báo cáo ban huấn luyện.
+* Đánh giá HLV.
+* Lịch sử trận đấu.
+
+7. MARKET VALUE CENTER – THỊ TRƯỜNG CẦU THỦ
+
+Hiển thị:
+
+* Cầu thủ giá trị cao nhất.
+* Cầu thủ tăng giá mạnh.
+* Cầu thủ giảm giá mạnh.
+* Tài năng trẻ nổi bật.
+* Cầu thủ có thể mua.
+* Cầu thủ PSG có thể bán.
+* Biến động giá theo tuần.
+* Lịch sử định giá.
+* Tổng giá trị đội hình.
+
+8. MEDIA & REPUTATION – TRUYỀN THÔNG
+
+Hiển thị:
+
+* Tin tức PSG.
+* Tin chuyển nhượng.
+* Tin Ligue 1.
+* Tin Champions League.
+* Phản ứng người hâm mộ.
+* Đánh giá chuyên gia.
+* Danh tiếng CLB.
+* Uy tín Chủ tịch.
+* Quan hệ truyền thông.
+* Khủng hoảng đang theo dõi.
+
+TV hiện có vẫn là thiết bị theo dõi báo chí và phát sóng nội dung. Không biến TV thành máy Mac thứ hai.
+
+9. STRATEGIC PLANNING – CHIẾN LƯỢC
+
+Hiển thị:
+
+* Mục tiêu mùa giải.
+* Kế hoạch đội một.
+* Kế hoạch đội trẻ.
+* Kế hoạch chuyển nhượng.
+* Kế hoạch tài chính.
+* Kế hoạch cơ sở vật chất.
+* Kế hoạch thương mại.
+* Tiến độ mục tiêu.
+
+10. DOCUMENT ARCHIVE – KHO HỒ SƠ
+
+Lưu:
+
+* Hồ sơ đã phê duyệt.
+* Hồ sơ bị từ chối.
+* Hồ sơ hoàn thành.
+* Hồ sơ hết hạn.
+* Hồ sơ đã hủy.
+
+Cho phép tìm kiếm theo:
+
+* Tên.
+* Bộ phận.
+* Thời gian.
+* Trạng thái.
+* Người xử lý.
+
+Có thể xem lại nội dung, chữ ký và lịch sử quyết định.
+
+11. EXECUTIVE ACTION TRACKER – THEO DÕI THỰC THI
+
+Đây là danh mục mới rất quan trọng.
+
+Hiển thị tất cả quyết định Chủ tịch đã phê duyệt nhưng chưa hoàn thành.
+
+Thông tin:
+
+* Tên quyết định.
+* Người phụ trách.
+* Bộ phận.
+* Ngày giao việc.
+* Thời hạn.
+* Tiến độ.
+* Trạng thái.
+* Khó khăn.
+* Báo cáo gần nhất.
+
+Chủ tịch có thể mở công việc để:
+
+* Xem tiến độ.
+* Yêu cầu báo cáo.
+* Gửi chỉ đạo.
+* Gia hạn.
+* Thay người phụ trách.
+* Yêu cầu giải trình.
+* Tạm dừng.
+* Hủy nhiệm vụ nếu có căn cứ.
+
+⸻
+
+PHẦN VII. EXECUTIVE DECISION EXECUTION SYSTEM
+
+1. NGUYÊN TẮC
+
+Mỗi quyết định được Chủ tịch phê duyệt phải tạo ra hành động thực tế.
+
+Không được chỉ đổi trạng thái hồ sơ thành APPROVED rồi dừng lại.
+
+Khi ký quyết định:
+
+* Kiểm tra tính hợp lệ.
+* Kiểm tra thẩm quyền.
+* Tạo DecisionRecord.
+* Tạo ExecutionTask.
+* Xác định người chịu trách nhiệm.
+* Phân công bộ phận.
+* Thực hiện công việc.
+* Cập nhật các hệ thống liên quan.
+* Báo cáo kết quả.
+
+Hồ sơ được ký là điểm bắt đầu của quy trình thực hiện.
+
+2. QUY TRÌNH THỰC THI
+
+1. Chủ tịch mở hồ sơ.
+2. Xem xét nội dung.
+3. Tham khảo ý kiến các bộ phận.
+4. Đưa ra quyết định.
+5. Game Logic xác nhận quyết định hợp lệ.
+6. Tạo nhiệm vụ thực hiện.
+7. Giao nhiệm vụ cho NPC.
+8. NPC triển khai.
+9. Hệ thống cập nhật tiến độ.
+10. NPC báo cáo kết quả.
+11. Game Logic xác nhận hoàn thành.
+12. Hồ sơ được lưu trữ.
+
+Nếu không thể thực hiện, phải thông báo lý do.
+
+Không giả lập thành công.
+
+⸻
+
+PHẦN VIII. HỆ THỐNG NPC VÀ PHÂN CÔNG TRÁCH NHIỆM
+
+Mỗi NPC cấp quản lý phải có:
+
+* Tên.
+* Chức vụ.
+* Bộ phận.
+* Quyền hạn.
+* Năng lực chuyên môn.
+* Tính cách.
+* Lịch làm việc.
+* Nhiệm vụ hiện tại.
+* Lịch sử thực hiện nhiệm vụ.
+* Quan hệ với Chủ tịch.
+* Mức độ uy tín và trách nhiệm.
+
+Bảng phân công mặc định
+
+Công việc	Người chịu trách nhiệm
+Mua/bán cầu thủ	Giám đốc thể thao
+Đàm phán hợp đồng cầu thủ	Bộ phận chuyển nhượng
+Điều chỉnh ngân sách	Giám đốc tài chính
+Bổ nhiệm/sa thải nhân sự	Giám đốc nhân sự
+Nâng cấp cơ sở vật chất	Giám đốc cơ sở vật chất
+Hợp đồng tài trợ	Giám đốc thương mại
+Họp báo	Giám đốc truyền thông
+Phát triển cầu thủ trẻ	Giám đốc học viện
+Chuyên môn đội một	HLV trưởng
+Thể lực và hồi phục	Trợ lý thể lực
+
+Đây là phân công mặc định, cần dựa trên cơ cấu nhân sự thực tế trong game.
+
+Nếu không có NPC phụ trách, nhiệm vụ phải được trình Chủ tịch để phân công.
+
+Không tự tạo nhân sự trùng lặp.
+
+1. NPC PHẢI THỰC SỰ THỰC HIỆN CÔNG VIỆC
+
+Không chỉ hiện thông báo rằng NPC đã nhận nhiệm vụ.
+
+NPC phải:
+
+* Nhận nhiệm vụ.
+* Cập nhật trạng thái công việc.
+* Thực hiện các bước nghiệp vụ.
+* Phối hợp với bộ phận khác.
+* Báo cáo khi có tiến triển.
+* Báo cáo khi gặp khó khăn.
+* Báo cáo khi hoàn thành.
+
+Đối với hoạt động có thể thể hiện trong khuôn viên:
+
+* NPC đến phòng Chủ tịch nhận chỉ đạo.
+* Nhân viên mang hồ sơ.
+* Giám đốc tài chính đến báo cáo.
+* HLV đến trao đổi.
+* Nhân viên truyền thông chuẩn bị họp báo.
+* Nhân viên cơ sở vật chất kiểm tra dự án.
+
+Đối với hoạt động ngoài khuôn viên, có thể sử dụng mô phỏng nghiệp vụ và báo cáo tiến độ.
+
+Không cần tạo hoạt ảnh 3D cho mọi thao tác nhỏ.
+
+⸻
+
+PHẦN IX. HỆ THỐNG GIAO QUYỀN VÀ GIÁM SÁT
+
+Bổ sung khả năng để Chủ tịch lựa chọn mức độ can thiệp.
+
+1. DIRECT CONTROL – CHỈ ĐẠO TRỰC TIẾP
+
+Chủ tịch quyết định từng bước quan trọng.
+
+Phù hợp với:
+
+* Thương vụ chuyển nhượng lớn.
+* Bổ nhiệm HLV trưởng.
+* Sa thải nhân sự cấp cao.
+* Đầu tư lớn.
+* Quyết định chiến lược.
+
+2. DELEGATE – GIAO QUYỀN
+
+Chủ tịch giao nhiệm vụ cho giám đốc hoặc bộ phận thực hiện.
+
+NPC được chủ động xử lý trong phạm vi quyền hạn.
+
+Chủ tịch có thể đặt:
+
+* Mục tiêu.
+* Ngân sách.
+* Thời hạn.
+* Giới hạn quyết định.
+* Điều kiện báo cáo.
+
+3. SUPERVISE – GIÁM SÁT
+
+NPC tự thực hiện, Chủ tịch theo dõi tiến độ.
+
+Chỉ trình Chủ tịch khi:
+
+* Vượt ngân sách.
+* Vượt quyền hạn.
+* Gặp trở ngại lớn.
+* Có thay đổi quan trọng.
+* Cần quyết định mới.
+
+4. APPROVAL REQUIRED – BẮT BUỘC TRÌNH DUYỆT
+
+NPC chỉ được chuẩn bị phương án.
+
+Không được tự hoàn tất quyết định thuộc thẩm quyền Chủ tịch.
+
+Ví dụ:
+
+* Sa thải HLV trưởng.
+* Bán trụ cột nếu quy định nội bộ yêu cầu Chủ tịch duyệt.
+* Đầu tư vượt hạn mức.
+* Ký hợp đồng lớn.
+* Thay đổi mục tiêu chiến lược.
+
+Quyền hạn phải được thiết lập rõ ràng, không để NPC tự ý vượt quyền.
+
+⸻
+
+PHẦN X. CƠ CHẾ QUẢN LÝ TIẾN ĐỘ VÀ TRÁCH NHIỆM
+
+Mỗi quyết định có một ExecutionTask riêng.
+
+Các trạng thái:
+
+* APPROVED: Đã phê duyệt.
+* ASSIGNED: Đã giao người phụ trách.
+* IN_PROGRESS: Đang thực hiện.
+* WAITING_RESPONSE: Chờ phản hồi.
+* BLOCKED: Bị đình trệ.
+* COMPLETED: Hoàn thành.
+* FAILED: Thất bại.
+* CANCELLED: Đã hủy.
+
+Mỗi nhiệm vụ phải có:
+
+* Người chịu trách nhiệm chính.
+* Bộ phận phối hợp.
+* Thời hạn.
+* Mục tiêu.
+* Tiến độ.
+* Kết quả mong đợi.
+* Lịch sử chỉ đạo.
+* Báo cáo.
+
+Cơ chế đánh giá NPC
+
+Đánh giá dựa trên:
+
+* Khả năng hoàn thành.
+* Chất lượng công việc.
+* Mức độ đúng hạn.
+* Khả năng giải quyết vấn đề.
+* Mức độ trung thực khi báo cáo.
+* Khả năng phối hợp.
+* Khả năng sử dụng ngân sách.
+
+Không đánh giá chỉ dựa trên việc hoàn thành nhanh.
+
+NPC có thể:
+
+* Hoàn thành tốt.
+* Hoàn thành chậm.
+* Đề xuất phương án tốt hơn.
+* Thất bại do yếu tố khách quan.
+* Làm việc kém hiệu quả.
+* Không hoàn thành do thiếu năng lực.
+
+Nếu NPC liên tục làm việc kém, Chủ tịch có thể:
+
+* Nhắc nhở.
+* Yêu cầu giải trình.
+* Điều chuyển.
+* Giáng chức.
+* Bổ nhiệm người thay thế.
+* Sa thải theo quy trình.
+
+Không tự động sa thải NPC chỉ vì một lần trễ hạn.
+
+⸻
+
+PHẦN XI. VÍ DỤ THỰC THI QUYẾT ĐỊNH
+
+Các ví dụ sau phải được triển khai thành quy trình nghiệp vụ thực sự.
+
+1. PHÊ DUYỆT MUA CẦU THỦ
+
+Sau khi ký duyệt:
+
+* Giám đốc thể thao nhận nhiệm vụ.
+* Liên hệ CLB sở hữu.
+* Bắt đầu đàm phán.
+* Thương lượng giá.
+* Đàm phán với cầu thủ.
+* Hoàn tất hợp đồng nếu các bên đồng ý.
+* Cập nhật tài chính.
+* Cập nhật PlayerDatabase.
+* Cập nhật đội hình.
+* Cập nhật hợp đồng.
+* Cập nhật số áo.
+* Cập nhật phòng thay đồ.
+* Cập nhật NPC.
+* Cập nhật báo chí.
+
+Nếu đàm phán thất bại, phải báo cáo.
+
+Phê duyệt kế hoạch không đồng nghĩa với việc thương vụ chắc chắn thành công.
+
+2. SA THẢI HLV
+
+Sau khi quyết định có hiệu lực:
+
+* Cập nhật nhân sự.
+* HLV cũ không còn giữ chức vụ.
+* HLV cũ không tiếp tục chỉ đạo đội một.
+* Xử lý hợp đồng theo điều kiện hiện có.
+* Giám đốc thể thao tìm ứng viên thay thế.
+* Ban lãnh đạo đánh giá ứng viên.
+* Chủ tịch xem xét bổ nhiệm.
+* HLV mới tiếp quản đội một sau khi được bổ nhiệm.
+* Cập nhật Ban huấn luyện.
+* Cập nhật chiến thuật và hoạt động chuyên môn.
+* Cập nhật quan hệ cầu thủ – HLV.
+* Báo chí đưa tin chính xác.
+
+Không để tên HLV cũ xuất hiện ở vai trò HLV trưởng sau khi đã chấm dứt nhiệm vụ.
+
+3. NÂNG CẤP CƠ SỞ VẬT CHẤT
+
+Sau khi ký duyệt:
+
+* Giám đốc cơ sở vật chất nhận nhiệm vụ.
+* Giám đốc tài chính kiểm tra ngân sách.
+* Tạo dự án.
+* Phân bổ chi phí.
+* Theo dõi tiến độ.
+* Có thể hiển thị nhân viên thi công.
+* Khi hoàn thành, cập nhật chất lượng công trình.
+* Cập nhật lợi ích đến tập luyện hoặc hoạt động CLB.
+
+Không trừ toàn bộ ngân sách nếu dự án chưa phát sinh khoản thanh toán tương ứng.
+
+4. KÝ HỢP ĐỒNG TÀI TRỢ
+
+Sau khi ký:
+
+* Giám đốc thương mại nhận nhiệm vụ.
+* Bộ phận liên quan kiểm tra điều khoản.
+* Các bên hoàn tất thủ tục.
+* FinanceSystem ghi nhận khoản thu theo lịch thanh toán.
+* Cập nhật nhà tài trợ.
+* Hiển thị logo tại vị trí phù hợp.
+* Truyền thông công bố khi hợp đồng chính thức có hiệu lực.
+
+5. GIAO NHIỆM VỤ CHO HLV
+
+Sau khi giao:
+
+* HLV nhận chỉ đạo.
+* HLV đánh giá tính khả thi.
+* HLV có thể đồng ý, từ chối hoặc đề xuất phương án khác.
+* Nếu đồng ý, đưa vào kế hoạch chuyên môn.
+* Ban huấn luyện thực hiện.
+* Theo dõi kết quả qua tập luyện và Matchday.
+* Báo cáo cho Chủ tịch.
+
+HLV vẫn giữ quyền tự chủ chuyên môn theo hệ thống quan hệ và quyền hạn đã xây dựng.
+
+⸻
+
+PHẦN XII. NPC CHỦ ĐỘNG BÁO CÁO VÀ ĐẾN GẶP CHỦ TỊCH
+
+Tôi muốn văn phòng có cảm giác sống động.
+
+NPC cấp quản lý có thể chủ động đến phòng Chủ tịch khi:
+
+* Có quyết định quan trọng cần trao đổi.
+* Có tiến triển lớn.
+* Gặp vấn đề không thể tự giải quyết.
+* Công việc hoàn thành.
+* Cần Chủ tịch chỉ đạo thêm.
+* Có đề xuất mới.
+
+Ví dụ:
+
+Giám đốc thể thao:
+“Thưa Chủ tịch, chúng tôi đã liên hệ với CLB sở hữu cầu thủ. Họ yêu cầu mức phí cao hơn đề nghị ban đầu. Tôi muốn xin ý kiến chỉ đạo.”
+
+Giám đốc tài chính:
+“Thưa Chủ tịch, ngân sách dự án đã được kiểm tra. Hiện tại chúng ta có thể triển khai nếu điều chỉnh một số khoản chi.”
+
+NPC phải có lời thoại phù hợp với tính cách, chức vụ và tình hình thực tế.
+
+Tận dụng hệ thống AI Dialogue API và Dialogue Personality hiện có.
+
+AI chỉ tạo hội thoại, đề xuất và báo cáo. Game Logic kiểm tra nội dung và quyết định nghiệp vụ.
+
+Không tạo cuộc gặp giả chỉ để làm văn phòng đông đúc.
+
+⸻
+
+PHẦN XIII. XỬ LÝ CHẬM TIẾN ĐỘ, TRỞ NGẠI VÀ THẤT BẠI
+
+NPC không phải lúc nào cũng hoàn thành đúng hạn.
+
+Có thể xảy ra:
+
+* Đối tác không phản hồi.
+* Đàm phán thất bại.
+* Không tìm được ứng viên phù hợp.
+* Thiếu ngân sách.
+* Nhà cung cấp chậm tiến độ.
+* HLV không đồng ý.
+* Cầu thủ từ chối hợp đồng.
+* Nhân viên phụ trách không đủ năng lực.
+
+Khi phát sinh vấn đề:
+
+* Cập nhật trạng thái.
+* Báo cáo nguyên nhân.
+* Thông báo cho Chủ tịch nếu cần can thiệp.
+* Đề xuất phương án thay thế.
+* Không tự động đánh dấu hoàn thành.
+
+Chủ tịch có thể:
+
+* Gia hạn.
+* Thay đổi kế hoạch.
+* Tăng hoặc giảm ngân sách.
+* Giao người khác.
+* Yêu cầu giải trình.
+* Tạm dừng.
+* Hủy nhiệm vụ.
+
+Nếu NPC không hoàn thành công việc, phải ghi nhận trách nhiệm nhưng phân biệt lỗi cá nhân và trở ngại khách quan.
+
+⸻
+
+PHẦN XIV. HỆ THỐNG BÁO CÁO HẰNG NGÀY VÀ CÔNG VIỆC TỒN ĐỌNG
+
+Khi Chủ tịch bắt đầu ngày mới hoặc mở máy Mac, hiển thị:
+
+PRESIDENTIAL DAILY BRIEFING
+
+Nội dung:
+
+1. Hồ sơ khẩn cấp.
+2. Hồ sơ chờ ký.
+3. Công việc cần xử lý.
+4. Công việc sắp hết hạn.
+5. Công việc đang đình trệ.
+6. Công việc đã hoàn thành.
+7. Báo cáo từ các giám đốc.
+8. Tình hình đội một.
+9. Tình hình tài chính.
+10. Lịch làm việc trong ngày.
+
+Không bắt buộc ngày nào cũng có đủ các mục.
+
+Nếu không có vấn đề cần ưu tiên, hiển thị trạng thái ổn định.
+
+Không tạo báo cáo giả.
+
+⸻
+
+PHẦN XV. LIÊN KẾT VỚI ĐIỆN THOẠI VÀ NOTIFICATION CENTER
+
+Điện thoại tiếp tục là thiết bị nhận thông báo.
+
+Khi có hồ sơ:
+
+* Điện thoại nhận thông báo.
+* Chồng giấy tương ứng tăng số lượng.
+* Nếu khẩn cấp, khay URGENT nhận hồ sơ.
+* Máy Mac cập nhật dữ liệu.
+* Task Manager tạo công việc nếu cần.
+
+Khi xử lý xong:
+
+* Cập nhật trạng thái hồ sơ.
+* Cập nhật công việc.
+* Cập nhật thông báo.
+* Cập nhật số lượng trên bàn.
+* Lưu lịch sử.
+
+Không tạo nhiều thông báo độc lập cho cùng một sự kiện.
+
+Không làm gián đoạn Matchday, họp báo hoặc thao tác quan trọng bằng các popup thông thường.
+
+⸻
+
+PHẦN XVI. QUẢN LÝ DỮ LIỆU VÀ TRẠNG THÁI
+
+Mỗi hồ sơ có:
+
+* DocumentId.
+* EventId.
+* DecisionId nếu có quyết định.
+* TransactionId nếu có giao dịch.
+* PlayerId nếu liên quan cầu thủ.
+* DepartmentId.
+* Người gửi.
+* Người phụ trách.
+* Nội dung.
+* Thời hạn.
+* Mức ưu tiên.
+* Trạng thái.
+
+Mỗi quyết định có DecisionId duy nhất.
+
+Mỗi nhiệm vụ có ExecutionTaskId duy nhất.
+
+Trạng thái hồ sơ:
+
+* NEW.
+* PENDING.
+* UNDER_REVIEW.
+* WAITING_INFORMATION.
+* APPROVED.
+* REJECTED.
+* REVISION_REQUIRED.
+* COMPLETED.
+* EXPIRED.
+* ARCHIVED.
+
+Trạng thái nhiệm vụ:
+
+* APPROVED.
+* ASSIGNED.
+* IN_PROGRESS.
+* WAITING_RESPONSE.
+* BLOCKED.
+* COMPLETED.
+* FAILED.
+* CANCELLED.
+
+Không nhầm lẫn giữa APPROVED và COMPLETED.
+
+Không tạo lại cùng một nhiệm vụ khi tải lại game.
+
+Không xóa công việc đang thực hiện.
+
+⸻
+
+PHẦN XVII. ĐỒNG BỘ VỚI TOÀN BỘ GAME
+
+Phải tích hợp với các hệ thống hiện tại:
+
+* TransferSystem.
+* FinanceSystem.
+* HumanResourcesSystem.
+* StaffSystem.
+* ManagerSystem.
+* CoachingStaffSystem.
+* SquadManagement.
+* MarketValueSystem.
+* FacilitySystem.
+* MatchdaySystem.
+* NewsMediaSystem.
+* NPC AI.
+* DialogueSystem.
+* NotificationSystem.
+* TaskManager.
+* EventSystem.
+* SaveLoadSystem.
+
+Đặc biệt:
+
+1. TÀI CHÍNH
+
+Chỉ ghi nhận thu chi khi giao dịch thực sự phát sinh.
+
+Không ghi nhận tiền chưa nhận thành tiền mặt.
+
+Không trừ tiền hai lần.
+
+2. NHÂN SỰ
+
+Bổ nhiệm hoặc chấm dứt nhiệm vụ phải đồng bộ ở tất cả hệ thống.
+
+Không để NPC giữ chức vụ cũ sau khi đã thay đổi.
+
+3. CHUYỂN NHƯỢNG
+
+Một cầu thủ chỉ thuộc một CLB tại một thời điểm, tuân theo quy tắc sở hữu và cho mượn hiện có.
+
+Không tạo bản sao cầu thủ.
+
+4. CƠ SỞ VẬT CHẤT
+
+Nâng cấp phải thay đổi dữ liệu cơ sở vật chất thực sự, không chỉ đổi trạng thái dự án.
+
+5. TRUYỀN THÔNG
+
+Tin tức chỉ được công bố theo tiến độ thật.
+
+Không thông báo thương vụ hoàn tất khi các bên chưa hoàn tất giao dịch.
+
+6. NPC
+
+NPC phải thực hiện công việc theo nhiệm vụ, chức vụ và lịch trình.
+
+Không tạo hoạt ảnh giả thay cho nghiệp vụ thực tế.
+
+⸻
+
+PHẦN XVIII. LƯU GAME VÀ TỐI ƯU HIỆU NĂNG
+
+Yêu cầu:
+
+* Save/Load đầy đủ hồ sơ.
+* Lưu quyết định.
+* Lưu nhiệm vụ.
+* Lưu người chịu trách nhiệm.
+* Lưu tiến độ.
+* Lưu lịch sử báo cáo.
+* Lưu trạng thái khay URGENT.
+* Khôi phục chính xác sau khi tải game.
+
+Tối ưu:
+
+* Tái sử dụng mô hình giấy.
+* Tái sử dụng texture và material.
+* Không tạo lại toàn bộ chồng giấy khi số lượng thay đổi.
+* Không render nội dung hồ sơ khi đang đóng.
+* Không chạy animation không cần thiết.
+* Không cập nhật liên tục khi không có thay đổi.
+* Giới hạn lịch sử và phân trang kho lưu trữ.
+* Không tạo quá nhiều NPC cùng lúc.
+* NPC ngoài khu vực có thể được mô phỏng bằng tác vụ và sự kiện.
+* Không làm giảm FPS trên iPhone Safari.
+
+⸻
+
+PHẦN XIX. KIỂM THỬ BẮT BUỘC
+
+Kiểm tra tối thiểu các trường hợp:
+
+1. Nhận đề nghị mua cầu thủ.
+2. Có nhiều CLB hỏi mua cùng lúc.
+3. Phê duyệt một thương vụ.
+4. Thương vụ bị từ chối.
+5. Đàm phán thất bại.
+6. Bổ nhiệm HLV.
+7. Sa thải HLV.
+8. Nâng cấp cơ sở vật chất.
+9. Ký hợp đồng tài trợ.
+10. Giao nhiệm vụ cho Giám đốc thể thao.
+11. NPC nhận nhiệm vụ và thực hiện.
+12. NPC báo cáo tiến độ.
+13. NPC không hoàn thành đúng hạn.
+14. Nhiệm vụ bị đình trệ.
+15. Chủ tịch thay người phụ trách.
+16. Nhiệm vụ hoàn thành và cập nhật hệ thống.
+17. Hồ sơ khẩn cấp xuất hiện trong khay URGENT.
+18. Hồ sơ được xử lý và rời khỏi khay.
+19. Máy Mac hiển thị đúng tiến độ.
+20. Điện thoại nhận thông báo chính xác.
+21. Không tạo nhiệm vụ trùng.
+22. Save/Load khi có nhiều nhiệm vụ.
+23. NPC rời CLB khi đang phụ trách nhiệm vụ.
+24. Kiểm tra tương tác 3D trên iPhone.
+25. Kiểm tra hiệu năng khi có nhiều hồ sơ và NPC.
+
+⸻
+
+PHẦN XX. QUY TRÌNH TRIỂN KHAI
+
+Trước khi lập trình, hãy audit toàn bộ source code hiện tại.
+
+Xác định:
+
+* Phòng Chủ tịch hiện tại.
+* Vị trí bàn làm việc.
+* Máy Mac.
+* TV.
+* Điện thoại.
+* Hệ thống hồ sơ và phê duyệt.
+* NotificationSystem.
+* TaskManager.
+* Các NPC quản lý.
+* Các hệ thống nghiệp vụ.
+* Cách Save/Load đang hoạt động.
+
+Sau đó triển khai theo từng giai đoạn:
+
+GIAI ĐOẠN 1 – VĂN PHÒNG 3D
+
+Bố trí 6 chồng hồ sơ và khay URGENT trên bàn.
+
+GIAI ĐOẠN 2 – TƯƠNG TÁC HỒ SƠ
+
+Xây dựng chức năng mở, đọc, lật trang, ký, phê duyệt, từ chối và giao việc.
+
+GIAI ĐOẠN 3 – MÁY MAC
+
+Hoàn thiện các danh mục quản lý, báo cáo và phân tích điện tử.
+
+GIAI ĐOẠN 4 – HỆ THỐNG THỰC THI
+
+Xây dựng DecisionRecord, ExecutionTask và quy trình thực thi.
+
+GIAI ĐOẠN 5 – NPC
+
+Tích hợp phân công, thực hiện, báo cáo, trách nhiệm và quyền hạn.
+
+GIAI ĐOẠN 6 – GIÁM SÁT
+
+Hoàn thiện Executive Action Tracker và cơ chế giao quyền.
+
+GIAI ĐOẠN 7 – ĐỒNG BỘ
+
+Kết nối điện thoại, Notification Center, EventSystem và các hệ thống nghiệp vụ.
+
+GIAI ĐOẠN 8 – KIỂM THỬ
+
+Kiểm tra toàn bộ quy trình từ lúc phát sinh hồ sơ đến khi công việc hoàn thành.
+
+Không triển khai tất cả cùng lúc nếu có nguy cơ phá vỡ source code hiện tại.
+
+Mỗi giai đoạn phải được kiểm tra trước khi chuyển sang giai đoạn tiếp theo.
+
+⸻
+
+PHẦN XXI. TIÊU CHUẨN HOÀN THÀNH CUỐI CÙNG
+
+Tôi chỉ coi hệ thống này hoàn thành khi đáp ứng đầy đủ:
+
+1. Có 6 chồng hồ sơ giấy trên bàn Chủ tịch.
+2. Có khay URGENT màu đỏ hoạt động thực tế.
+3. Máy Mac có đầy đủ trung tâm quản lý và báo cáo.
+4. Hồ sơ giấy và báo cáo điện tử được phân chia rõ ràng.
+5. Các sự kiện được tự động phân loại và đưa đúng nơi.
+6. Chủ tịch có thể ký duyệt và giao nhiệm vụ.
+7. NPC thực sự nhận và triển khai nhiệm vụ.
+8. Các hệ thống game thực sự cập nhật dữ liệu.
+9. NPC chủ động báo cáo tiến độ và kết quả.
+10. Chủ tịch có thể giám sát, can thiệp và thay đổi người phụ trách.
+11. Công việc thất bại hoặc đình trệ phải được ghi nhận.
+12. Hồ sơ chỉ hoàn thành khi công việc thực sự hoàn thành.
+13. Toàn bộ dữ liệu được lưu và khôi phục chính xác.
+14. Không có hệ thống nghiệp vụ trùng lặp.
+15. Không làm hỏng các chức năng hiện tại.
+
+KẾT QUẢ MONG MUỐN
+
+Tôi muốn cảm giác mình thực sự đang điều hành Paris Saint-Germain với tư cách Chủ tịch.
+
+Khi bước vào phòng làm việc:
+
+* Trên bàn có các chồng hồ sơ được phân loại.
+* Khay URGENT chứa những quyết định quan trọng.
+* Máy Mac hiển thị toàn bộ tình hình CLB.
+* Điện thoại thông báo những vấn đề cần chú ý.
+
+Khi tôi ký một quyết định:
+
+* NPC nhận nhiệm vụ.
+* Các bộ phận triển khai.
+* Công việc diễn ra trong thế giới game.
+* Dữ liệu được cập nhật.
+* Tiến độ được theo dõi.
+* NPC quay lại báo cáo.
+
+Tôi muốn mỗi chữ ký của Chủ tịch đều có ý nghĩa và tạo ra hậu quả thực tế đối với hoạt động của PSG.
+
+ĐỪNG CHỈ XÂY DỰNG MỘT HỆ THỐNG GIAO DIỆN QUẢN LÝ HỒ SƠ. HÃY XÂY DỰNG MỘT HỆ THỐNG ĐIỀU HÀNH VÀ THỰC THI QUYẾT ĐỊNH THỰC SỰ.

@@ -375,6 +375,33 @@ export class AnimationSystem {
       p.lElbX = -0.75;
       p.rElbX = -0.85;
       p.headRotY = Math.sin(t * 0.9) * 0.18;
+    } else if (state === 'pull_curtain') {
+      // Đưa tay lên ngang tầm thanh/vải rèm và kéo mượt sang hai bên
+      const sweep = Math.sin(t * 2.2);
+      p.pelvisY = basePelvisY;
+      p.torsoRotX = 0.04;
+      p.torsoRotY = sweep * 0.09;
+      p.rShX = -1.52 + Math.sin(t * 3.0) * 0.14;
+      p.rShZ = 0.16 + sweep * 0.30;
+      p.rElbX = -0.38;
+      p.lShX = -1.24 + Math.cos(t * 2.8) * 0.12;
+      p.lShZ = -0.14 - sweep * 0.22;
+      p.lElbX = -0.46;
+      p.headRotX = -0.08;
+      p.headRotY = sweep * 0.14;
+    } else if (state === 'open_door') {
+      // Đưa tay phải ra nắm tay nắm cửa, xoay nhẹ vai đẩy/kéo mở cửa phòng
+      const push = Math.sin(t * 4.2);
+      p.pelvisY = basePelvisY;
+      p.torsoRotX = 0.06;
+      p.torsoRotY = -0.10 + push * 0.08;
+      p.rShX = -1.08 + push * 0.18;
+      p.rShZ = 0.08;
+      p.rElbX = -0.45 - push * 0.12;
+      p.lShX = -0.10;
+      p.lElbX = -0.22;
+      p.headRotX = 0.04;
+      p.headRotY = -0.06;
     } else {
       // idle / stand: giữ chân chạm sàn tuyệt đối (nhịp thở nhẹ trên thân trên, không ấn giày xuyên sàn)
       p.pelvisY = basePelvisY;

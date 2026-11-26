@@ -48,9 +48,9 @@ export class DressingRoomSystem {
     this.tacticalCanvas.height = 360;
     this.tacticalTex = configureFlatCanvasTex(new THREE.CanvasTexture(this.tacticalCanvas));
 
-    // Tọa độ trung tâm tòa nhà 1 tầng cạnh sân tập chính (x ∈ [-48, -26], z ∈ [-56, -32], 22m x 24m)
-    this.cx = -37;
-    this.cz = -44;
+    // Tọa độ trung tâm tòa nhà 1 tầng tại Khuôn viên Huấn Luyện PSG (x ∈ [121, 143], z ∈ [-60, -36], 22m x 24m)
+    this.cx = 132;
+    this.cz = -48;
     this.campus.root.add(this.group);
     this.build();
     this._unsubscribeFormation = this.formation.onChange(() => this.refreshDynamicElements());
@@ -192,9 +192,9 @@ export class DressingRoomSystem {
 
     // Biển hiệu mặt tiền (MeshBasicMaterial nhẹ thay vì PBR)
     const facadeMat = THREE.MeshBasicMaterial
-      ? new THREE.MeshBasicMaterial({ map: this.tex.signTexture('PHÒNG THAY ĐỒ ĐỘI MỘT · PARIS SAINT-GERMAIN', '#00205b', '#ffffff', '#da291c') })
-      : new THREE.MeshStandardMaterial({ map: this.tex.signTexture('PHÒNG THAY ĐỒ ĐỘI MỘT · PARIS SAINT-GERMAIN', '#00205b', '#ffffff', '#da291c') });
-    const facade = new THREE.Mesh(new THREE.PlaneGeometry(13, 1.2), facadeMat);
+      ? new THREE.MeshBasicMaterial({ map: this.tex.signTexture('FIRST TEAM LOCKER ROOM · PHÒNG THAY ĐỒ ĐỘI MỘT PSG', '#00205b', '#ffffff', '#da291c') })
+      : new THREE.MeshStandardMaterial({ map: this.tex.signTexture('FIRST TEAM LOCKER ROOM · PHÒNG THAY ĐỒ ĐỘI MỘT PSG', '#00205b', '#ffffff', '#da291c') });
+    const facade = new THREE.Mesh(new THREE.PlaneGeometry(14.5, 1.2), facadeMat);
     facade.position.set(cx + 11.2, 3.85, cz);
     facade.rotation.y = Math.PI / 2;
     this.shellGroup.add(facade);

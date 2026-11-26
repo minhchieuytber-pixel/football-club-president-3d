@@ -154,6 +154,7 @@ export function renderTransferMarketHTML(state, uiState) {
             </div>
             <div class="btn-row">
               <button class="btn-xs btn-primary tr-consult-bid" data-bid="${b.id}">🏛️ Tham khảo ý kiến các bộ phận</button>
+              <button class="btn-xs btn-secondary tr-open-paper-doc" data-bid="${b.id}">📄 Mở Hồ Sơ Giấy</button>
               <button class="btn-xs btn-secondary tr-review-bid" data-bid="${b.id}">📋 Xử lý tác vụ</button>
               <button class="btn-xs btn-primary tr-accept-bid" data-bid="${b.id}">✅ Chấp nhận (+€${b.fee}M)</button>
               <button class="btn-xs btn-accent tr-counter-bid" data-bid="${b.id}" data-fee="${Math.round(b.fee * 1.15)}">💬 Ép giá (+15%)</button>

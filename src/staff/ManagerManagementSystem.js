@@ -184,6 +184,8 @@ export class ManagerManagementSystem {
       });
     }
 
+    this.state.executionSystem?.handleStaffDeparted?.(roleKey, staff.name, reason);
+    this.state.documentSystem?.syncFromClubState?.();
     this.state.generateDailyBriefing();
     this.state.notifyStaffChanged();
     return { ok: true, departed: staff, severance };

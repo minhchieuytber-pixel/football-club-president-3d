@@ -281,9 +281,11 @@ const game = globalThis.window.__PSG_GAME__;
 test('BOOT-1: FootballPresidentGame3D khởi chạy thành công không lỗi JS với toàn bộ 3D campus + NPC + UI', () => {
   assert(game, 'window.__PSG_GAME__ phải được khởi tạo');
   assert(game.campus, 'PsgCampusScene phải khởi tạo thành công');
+  assert(game.trainingComplex, 'TrainingComplexScene 3D phải khởi tạo');
   assert(game.dressingRoom, 'DressingRoomSystem 3D phải khởi tạo');
   assert(game.museumScene, 'PsgMuseumScene 3D phải khởi tạo');
   assert(game.stadiumZone, 'ParcDesPrincesZone 3D phải khởi tạo');
+  assert(game.state.playerResidenceSystem, 'PlayerResidenceSystem 30 phòng phải khởi tạo');
   assert(game.npcSystem.npcs.length > 20, 'Phải sinh đủ NPC & cầu thủ PSG trong thế giới 3D');
   assert.equal(byId.get('boot-error-banner')?.style.display, 'none', 'Không được hiện boot-error-banner');
 });
@@ -294,13 +296,15 @@ test('BOOT-2: Vòng lặp render/physics, streaming 3D, teleport và tương tá
     game.loop(performance.now() + i * 16);
   }
   game.teleportToRoom('president_office');
+  game.teleportToRoom('training_pitch');
+  game.teleportToRoom('player_residence_f2');
   game.teleportToRoom('stadium_pitch');
   game.teleportToRoom('psg_museum');
   game.updateWorldStreaming(true);
   game.detectAimedTarget();
 });
 
-test('BOOT-3: Mở toàn bộ 18 ứng dụng Máy tính, Điện thoại, TV, Bảo tàng, Matchday & Tham vấn chuyển nhượng không lỗi', () => {
+test('BOOT-3: Mở toàn bộ 18 ứng dụng Máy tính, Điện thoại, TV, Bảo tàng, Matchday, Training Complex & Tham vấn chuyển nhượng không lỗi', () => {
   const ui = game.ui;
   const tabs = [
     'overview', 'approvals', 'squad', 'formation', 'training',
@@ -312,6 +316,15 @@ test('BOOT-3: Mở toàn bộ 18 ứng dụng Máy tính, Điện thoại, TV, B
     ui.openComputer(tab);
     assert(byId.get('modal-body').innerHTML.length > 50, `Tab ${tab} phải render nội dung hợp lệ`);
   }
+
+  ui.openMedicalCenterModal();
+  assert(byId.get('modal-body').innerHTML.includes('6 Khu Chức Năng'));
+  ui.openFitnessCenterModal();
+  assert(byId.get('modal-body').innerHTML.includes('FITNESS & PERFORMANCE'));
+  ui.openPlayerResidenceModal(1);
+  assert(byId.get('modal-body').innerHTML.includes('ROOM 01'));
+  ui.openTechnicalDepartmentModal();
+  assert(byId.get('modal-body').innerHTML.includes('PHÒNG KỸ THUẬT PSG'));
 
   // Tạo 1 incoming bid thực tế rồi mở Phone, TaskModal và TransferConsultationModal
   const target = game.state.getPsgSquad().find((p) => p.position !== 'GK');

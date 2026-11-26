@@ -117,35 +117,35 @@ test('CAMPUS-4: Khi đến SVĐ Parc des Princes -> tự động stream LOD Cao 
   assert.equal(farHqNpc.mesh.visible, true);
 });
 
-test('CAMPUS-5: Đã xóa sân tập ngoài trời — Toàn bộ cầu thủ, 12 HLV & đạo cụ tập luyện 3D đều hoạt động bên trong SVĐ Parc des Princes', () => {
+test('CAMPUS-5: Toàn bộ cầu thủ, BHL & đạo cụ tập luyện 3D hoạt động tại PSG TRAINING PITCH thuộc Training Center (tách biệt SVĐ Parc des Princes)', () => {
   const playerProfiles = createInitialNpcProfiles().filter((p) => p.isPlayer);
   assert.ok(playerProfiles.length >= 6);
   for (const pl of playerProfiles) {
-    assert.ok(pl.home.z <= -128 && pl.home.z >= -176 && pl.home.x >= -36 && pl.home.x <= 36,
-      `Cầu thủ ${pl.name} phải tập trong lòng sân Parc des Princes (thực tế: ${pl.home.x}, ${pl.home.z})`);
+    assert.ok(pl.home.x >= 150 && pl.home.x <= 234 && pl.home.z >= -146 && pl.home.z <= -54,
+      `Cầu thủ ${pl.name} phải tập tại PSG TRAINING PITCH khu Huấn luyện (thực tế: ${pl.home.x}, ${pl.home.z})`);
   }
 
   const coachRoles = Object.values(STAFF_ROLE_META).filter((m) => m.isCoachingStaff && m.pitchSpot);
   assert.ok(coachRoles.length >= 10);
   for (const cr of coachRoles) {
-    assert.ok(cr.pitchSpot.z <= -128 && cr.pitchSpot.z >= -176 && cr.pitchSpot.x >= -36 && cr.pitchSpot.x <= 36,
-      `Vị trí đứng sân của ${cr.title} phải nằm trong SVĐ Parc des Princes (thực tế: ${cr.pitchSpot.x}, ${cr.pitchSpot.z})`);
+    assert.ok(cr.pitchSpot.x >= 145 && cr.pitchSpot.x <= 234 && cr.pitchSpot.z >= -146 && cr.pitchSpot.z <= -30,
+      `Vị trí đứng sân/chuyên môn của ${cr.title} phải thuộc PSG Training Center (thực tế: ${cr.pitchSpot.x}, ${cr.pitchSpot.z})`);
   }
 
-  // Kiểm tra đạo cụ tập luyện 3D (bóng chuyền, bóng sút, bóng đấu tập) được đặt trong Parc des Princes
+  // Kiểm tra đạo cụ tập luyện 3D (bóng chuyền, bóng sút, bóng đấu tập) được đặt tại PSG TRAINING PITCH
   globalThis.THREE.ConeGeometry = class {};
   globalThis.THREE.SphereGeometry = class {};
   const ts = new TrainingSystem({});
   ts.build3DTrainingEquipment(mockCampus);
-  assert.ok(ts.balls.passing.position.z <= -130 && ts.balls.passing.position.z >= -175);
-  assert.ok(ts.balls.shooting.position.z <= -130 && ts.balls.shooting.position.z >= -175);
-  assert.ok(ts.balls.scrimmage.position.z <= -130 && ts.balls.scrimmage.position.z >= -175);
+  assert.ok(ts.balls.passing.position.x >= 155 && ts.balls.passing.position.z >= -120 && ts.balls.passing.position.z <= -58);
+  assert.ok(ts.balls.shooting.position.x >= 155 && ts.balls.shooting.position.z >= -120 && ts.balls.shooting.position.z <= -58);
+  assert.ok(ts.balls.scrimmage.position.x >= 155 && ts.balls.scrimmage.position.z >= -120 && ts.balls.scrimmage.position.z <= -58);
 
-  // Kiểm tra Pathfinding từ Phòng Thay Đồ (-35, -41) đi vào giữa sân SVĐ Parc des Princes (0, -152)
+  // Kiểm tra Pathfinding từ Phòng Thay Đồ (133, -45) ra giữa PSG TRAINING PITCH (192, -86)
   const pf = new PathfindingSystem();
-  const route = pf.findPath(-35, -41, 0, -152);
-  assert.ok(route.length >= 4, 'Phải có đường đi từ Phòng Thay Đồ vào trong SVĐ Parc des Princes');
-  assert.ok(route.some((pt) => pt.z <= -130), 'Đường đi phải dẫn thẳng vào lòng sân SVĐ Parc des Princes');
+  const route = pf.findPath(133, -45, 192, -86);
+  assert.ok(route.length >= 4, 'Phải có đường đi từ Phòng Thay Đồ tới PSG TRAINING PITCH');
+  assert.ok(route.some((pt) => pt.x >= 165 && pt.z <= -65), 'Đường đi phải dẫn thẳng ra PSG TRAINING PITCH');
 });
 
 test('CAMPUS-6: Cầu thủ KHÔNG được tự ý đi vào Nhà làm việc (chỉ vào khi Chủ tịch triệu tập hoặc dự Lễ ký kết/Họp báo)', () => {

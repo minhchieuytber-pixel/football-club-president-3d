@@ -8,6 +8,7 @@ import { renderTransferMarketHTML } from './TransferMarketView.js';
 import { renderMarketValueCenterHTML } from './MarketValueCenterView.js';
 import { renderSigningEventHubHTML, renderLiveCeremonySheetHTML } from './SigningEventView.js';
 import { renderFormationPitchTabHTML, bindFormationPitchEvents } from './FormationPitchView.js';
+import { CURTAIN_STATES, CURTAIN_LABELS_VI, PRIVACY_PREFERENCES, PRIVACY_LABELS_VI } from '../club/PlayerResidenceSystem.js';
 import { STAFF_ROLE_META } from '../staff/StaffDatabase.js';
 import { PSG_LEGENDS } from '../trophies/TrophyDatabase.js';
 import {
@@ -39,6 +40,26 @@ import {
   formatBidClausesText,
   normalizeBidObject
 } from '../transfers/TransferConsultationSystem.js';
+import {
+  renderStackDossierListHTML,
+  renderUrgentTrayHTML,
+  renderPaperDossierReaderHTML
+} from './PaperDocumentView.js';
+import {
+  renderActionTrackerHTML,
+  renderDocumentArchiveHTML,
+  renderStrategicPlanningHTML,
+  renderStaffAccountabilityHTML
+} from './ExecutiveMacViews.js';
+import {
+  DOC_CATEGORY,
+  DOC_STACK_META,
+  URGENT_TRAY_META,
+  ROLE_RESPONSIBILITY_MAP,
+  EXEC_ACTIONS,
+  DELEGATION_MODE,
+  qualifiesForUrgentTray
+} from '../executive/DocumentTypes.js';
 // src/ui/UIManager.js
 // Giao diện cảm ứng iPhone Landscape/Portrait tối ưu + Trung tâm Điều hành Chủ tịch (Máy tính 17 ứng dụng, TV 9 kênh, Điện thoại thông minh)
 export class UIManager {
@@ -90,6 +111,11 @@ export class UIManager {
       mdReportKey: 'head_coach'
     };
     this._mdLiveTimer = null;
+    this.paperStackFilter = 'active';
+    this.paperReaderPage = 0;
+    this.paperReturnContext = null;
+    this.trackerFilter = { status: 'ACTIVE', owner: 'ALL' };
+    this.archiveFilters = { query: '', category: 'ALL', status: 'ALL', dept: 'ALL' };
 
     // Quản lý thống nhất trạng thái thanh Dock macOS (không bao giờ reset khi bấm app/đóng cửa sổ)
     const initialDockState = saveManager?.loadSettings?.()?.dockState || state?.uiPrefs?.dockState || null;
@@ -177,10 +203,24 @@ export class UIManager {
     this._hudEls = null;
     this._ceremonyHeaderSpan = null;
     this._lastCeremonyHeaderText = '';
+    this._deskDocMenuHovered = false;
+    this._deskDocMenuGraceUntil = 0;
+    this._deskDocMenuSig = '';
+    this._deskDocMenuActiveId = null;
+    this._deskDocMenuDismissedForId = null;
   }
 
   _getHudEls() {
     if (this._hudEls || typeof document === 'undefined') return this._hudEls;
+    const deskDocMenu = document.getElementById('desk-doc-menu');
+    if (deskDocMenu && !deskDocMenu.dataset.boundHover) {
+      deskDocMenu.dataset.boundHover = '1';
+      deskDocMenu.addEventListener('mouseenter', () => { this._deskDocMenuHovered = true; });
+      deskDocMenu.addEventListener('mouseleave', () => {
+        this._deskDocMenuHovered = false;
+        this._deskDocMenuGraceUntil = Date.now() + 260;
+      });
+    }
     this._hudEls = {
       season: document.getElementById('hud-season'),
       clock: document.getElementById('hud-clock'),
@@ -190,6 +230,7 @@ export class UIManager {
       phoneBadge: document.getElementById('phone-badge'),
       interactBtn: document.getElementById('btn-interact'),
       hintPill: document.getElementById('interact-hint'),
+      deskDocMenu,
       pauseBtn: document.getElementById('btn-time-pause'),
       speedBtns: Array.from(document.querySelectorAll('[data-speed]'))
     };
@@ -364,7 +405,161 @@ export class UIManager {
     return `${ts.getFullHudString()}${ts.isPaused() ? ' · ⏸️' : ts.speedMultiplier > 1 ? ` · x${ts.speedMultiplier}` : ''}`;
   }
 
-  updateTopHUD(fps, aimedPrompt) {
+  hideDeskDocMenu() {
+    this._deskDocMenuHovered = false;
+    this._deskDocMenuGraceUntil = 0;
+    this._deskDocMenuActiveId = null;
+    this._deskDocMenuSig = '';
+    const menuEl = this._getHudEls()?.deskDocMenu;
+    if (menuEl) menuEl.classList.remove('open');
+  }
+
+  updateDeskDocMenu(aimedTarget) {
+    const menuEl = this._getHudEls()?.deskDocMenu;
+    if (!menuEl) return;
+
+    if (this.isModalOpen?.()) {
+      this.hideDeskDocMenu();
+      return;
+    }
+
+    const act = aimedTarget?.type === 'obj' ? aimedTarget.data?.action : null;
+    const isDocTarget = act === 'open_doc_stack' || act === 'open_urgent_tray';
+    const targetId = isDocTarget ? aimedTarget.data.id : null;
+
+    if (!isDocTarget) {
+      this._deskDocMenuDismissedForId = null;
+      if (this._deskDocMenuHovered || (this._deskDocMenuActiveId && Date.now() < this._deskDocMenuGraceUntil)) {
+        return;
+      }
+      if (menuEl.classList.contains('open')) {
+        menuEl.classList.remove('open');
+        this._deskDocMenuActiveId = null;
+        this._deskDocMenuSig = '';
+      }
+      return;
+    }
+
+    if (this._deskDocMenuDismissedForId === targetId) {
+      menuEl.classList.remove('open');
+      return;
+    }
+
+    this._deskDocMenuActiveId = targetId;
+    this._deskDocMenuGraceUntil = Date.now() + 340;
+
+    const docSys = this.state.documentSystem;
+    const isUrgentTray = act === 'open_urgent_tray';
+    const category = isUrgentTray ? null : (aimedTarget.data.extra?.category || DOC_CATEGORY.EXECUTIVE);
+    const meta = isUrgentTray
+      ? URGENT_TRAY_META
+      : (DOC_STACK_META.find((m) => m.category === category) || DOC_STACK_META[0]);
+
+    const allDocs = isUrgentTray
+      ? (docSys?.getUrgentDocuments?.() || [])
+      : (docSys?.getDocumentsByCategory?.(category, false) || []);
+    const urgentCount = docSys?.getUrgentCount?.() || 0;
+    const topDocs = allDocs.slice(0, 2);
+
+    const esc = (v) => String(v ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+    const sig = `${targetId}|${allDocs.length}|${urgentCount}|${topDocs.map((d) => `${d.id}:${d.status}`).join(',')}`;
+    if (sig !== this._deskDocMenuSig) {
+      this._deskDocMenuSig = sig;
+      menuEl.classList.toggle('is-urgent', isUrgentTray || topDocs.some((d) => qualifiesForUrgentTray(d)));
+
+      const badgeText = isUrgentTray
+        ? (allDocs.length > 0 ? `URGENT: ${String(allDocs.length).padStart(2, '0')}` : 'EMPTY')
+        : `${allDocs.length} chờ duyệt`;
+
+      const previewHtml = topDocs.length > 0
+        ? topDocs.map((d) => {
+          const isUrg = qualifiesForUrgentTray(d);
+          return `
+            <button type="button" class="ddm-doc-row ${isUrg ? 'urgent' : ''}" data-docid="${esc(d.id)}">
+              <span class="ddm-doc-name">${isUrg ? '🚨' : '📄'} [${esc(d.code)}] ${esc(d.title)}</span>
+              <span class="ddm-doc-meta">${esc(d.deadlineLabel || 'Chờ duyệt')} →</span>
+            </button>`;
+        }).join('')
+        : `<div class="ddm-empty">${isUrgentTray ? 'Khay Khẩn Cấp đang trống — không có hồ sơ vượt ngưỡng.' : 'Chồng hồ sơ này hiện đã xử lý hết (0 văn bản chờ duyệt).'}</div>`;
+
+      const topDoc = topDocs[0] || null;
+      menuEl.innerHTML = `
+        <div class="ddm-head">
+          <div class="ddm-title-wrap">
+            <span class="ddm-icon">${meta.icon}</span>
+            <div style="min-width:0;">
+              <div class="ddm-title">${esc(meta.label)}</div>
+              <div class="ddm-sub">${esc(isUrgentTray ? 'Ưu tiên trực tiếp của Chủ tịch PSG' : (meta.dept || 'Văn phòng Chủ tịch PSG'))}</div>
+            </div>
+          </div>
+          <span class="ddm-badge ${isUrgentTray && allDocs.length > 0 ? 'urgent' : ''}">${esc(badgeText)}</span>
+          <button type="button" class="ddm-close" id="ddm-close-btn" title="Đóng menu">✕</button>
+        </div>
+        <div class="ddm-preview-list">${previewHtml}</div>
+        <div class="ddm-actions">
+          <button type="button" class="ddm-btn ${isUrgentTray ? 'urgent' : 'primary'}" id="ddm-open-stack">
+            ${isUrgentTray ? '🚨 Mở Khay KHẨN [E]' : `📂 Mở chồng hồ sơ (${allDocs.length}) [E]`}
+          </button>
+          ${topDoc ? `<button type="button" class="ddm-btn" id="ddm-open-top" data-docid="${esc(topDoc.id)}">📄 Đọc hồ sơ đầu</button>` : ''}
+          ${!isUrgentTray && urgentCount > 0 ? `<button type="button" class="ddm-btn urgent" id="ddm-open-urgent">🚨 Khay KHẨN (${urgentCount})</button>` : ''}
+          <button type="button" class="ddm-btn" id="ddm-open-archive">🗄️ Lưu trữ</button>
+        </div>`;
+
+      menuEl.querySelector('#ddm-close-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._deskDocMenuDismissedForId = targetId;
+        this.hideDeskDocMenu();
+      });
+      menuEl.querySelector('#ddm-open-stack')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.audio?.playClick?.();
+        this.hideDeskDocMenu();
+        if (isUrgentTray) this.openUrgentTrayModal();
+        else this.openDocumentStackModal(category);
+      });
+      menuEl.querySelector('#ddm-open-top')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const did = e.currentTarget.dataset.docid;
+        if (!did) return;
+        this.audio?.playClick?.();
+        this.hideDeskDocMenu();
+        this.paperReaderPage = 0;
+        this.openPaperDossierReader(did, isUrgentTray ? { returnTo: 'urgent' } : { returnTo: 'stack', category });
+      });
+      menuEl.querySelector('#ddm-open-urgent')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.audio?.playClick?.();
+        this.hideDeskDocMenu();
+        this.openUrgentTrayModal();
+      });
+      menuEl.querySelector('#ddm-open-archive')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.audio?.playClick?.();
+        this.hideDeskDocMenu();
+        this.openComputer('archive');
+      });
+      menuEl.querySelectorAll('.ddm-doc-row').forEach((rowBtn) => {
+        rowBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const did = rowBtn.dataset.docid;
+          if (!did) return;
+          this.audio?.playClick?.();
+          this.hideDeskDocMenu();
+          this.paperReaderPage = 0;
+          this.openPaperDossierReader(did, isUrgentTray ? { returnTo: 'urgent' } : { returnTo: 'stack', category });
+        });
+      });
+    }
+
+    menuEl.classList.add('open');
+  }
+
+  updateTopHUD(fps, aimedPrompt, aimedTarget = undefined) {
     const els = this._getHudEls();
     if (!els) return;
     const s = this.state;
@@ -463,6 +658,10 @@ export class UIManager {
         els.interactBtn.classList.remove('ready');
         els.hintPill.classList.remove('show');
       }
+    }
+
+    if (aimedTarget !== undefined) {
+      this.updateDeskDocMenu(aimedTarget);
     }
   }
 
@@ -937,6 +1136,27 @@ export class UIManager {
           else this.closeModal(true);
           break;
         }
+        case 'doc_stack':
+          this.openDocumentStackModal(p.category || DOC_CATEGORY.EXECUTIVE, opts);
+          break;
+        case 'urgent_tray':
+          this.openUrgentTrayModal(opts);
+          break;
+        case 'paper_dossier':
+          this.openPaperDossierReader(p.docId, opts);
+          break;
+        case 'medical_center':
+          this.openMedicalCenterModal(opts);
+          break;
+        case 'fitness_center':
+          this.openFitnessCenterModal(opts);
+          break;
+        case 'player_residence':
+          this.openPlayerResidenceModal(p.focusRoomNumber ?? null, opts);
+          break;
+        case 'technical_dept':
+          this.openTechnicalDepartmentModal(opts);
+          break;
         default:
           this.openComputer('overview', opts);
           break;
@@ -1315,6 +1535,8 @@ export class UIManager {
         <div class="card-sub">${m.title}</div>
         <p>${m.body}</p>
         ${m.actionType === 'open_market_value' ? `<div class="btn-row" style="margin-top:6px;"><button type="button" class="btn-xs btn-primary ph-open-valuation">${m.actionLabel || 'XEM CHI TIẾT'}</button></div>` : ''}
+        ${m.actionType === 'open_paper_doc' && m.docId ? `<div class="btn-row" style="margin-top:6px;"><button type="button" class="btn-xs btn-danger ph-open-paper-doc" data-docid="${m.docId}">${m.actionLabel || '📄 Mở Hồ Sơ Giấy'}</button></div>` : ''}
+        ${m.actionType === 'open_action_tracker' ? `<div class="btn-row" style="margin-top:6px;"><button type="button" class="btn-xs btn-primary ph-open-tracker">${m.actionLabel || '📌 Mở Action Tracker'}</button></div>` : ''}
       </div>`).join('');
 
     const html = `
@@ -1371,8 +1593,10 @@ export class UIManager {
         </div>` : ''}
 
       <div class="phone-quick-actions">
+        <button class="btn-danger" id="ph-urgent-tray">🚨 Khay KHẨN (${s.documentSystem?.getUrgentDocuments?.().length || 0})</button>
         <button class="btn-primary" id="ph-tv">📺 TV Truyền Thông PSG</button>
-        <button class="btn-primary" id="ph-pc">💻 Máy tính (18 App)</button>
+        <button class="btn-primary" id="ph-pc">💻 Máy tính (${22} App)</button>
+        <button class="btn-accent" id="ph-tracker">📌 Action Tracker (${s.executionSystem?.getActiveTasks?.().length || 0})</button>
         <button class="btn-accent" id="ph-approvals">📥 Việc chờ duyệt (${pendingTotal})</button>
         <button class="btn-primary" id="ph-board">🏛️ Họp Ban Lãnh Đạo</button>
         <button class="btn-accent" id="ph-player">🗣️ Họp Riêng Cầu Thủ</button>
@@ -1436,6 +1660,14 @@ export class UIManager {
     document.querySelectorAll('.ph-open-valuation').forEach((b) => {
       b.addEventListener('click', () => this.openComputer('valuation'));
     });
+    document.getElementById('ph-urgent-tray')?.addEventListener('click', () => this.openUrgentTrayModal());
+    document.getElementById('ph-tracker')?.addEventListener('click', () => this.openComputer('action_tracker'));
+    document.querySelectorAll('.ph-open-paper-doc').forEach((b) => {
+      b.addEventListener('click', () => this.openPaperDossierReader(b.dataset.docid, { returnTo: 'phone' }));
+    });
+    document.querySelectorAll('.ph-open-tracker').forEach((b) => {
+      b.addEventListener('click', () => this.openComputer('action_tracker'));
+    });
   }
 
   openTelevisionModal(switching = false, opts = {}) {
@@ -1498,20 +1730,26 @@ export class UIManager {
 
   openFastTravel(opts = {}) {
     const places = [
-      ['president', '🏢 Phòng Chủ tịch Phạm Minh Chiêu'],
-      ['boardroom', '🏛️ Phòng Họp Ban Lãnh Đạo'],
-      ['lobby', '✨ Sảnh Lễ Tân PSG'],
-      ['sporting', '🎯 Phòng Giám Đốc Thể Thao'],
-      ['coach', '📋 Phòng HLV Trưởng'],
-      ['finance', '💶 Phòng Tài Chính'],
-      ['medical', '🏥 Trung Tâm Y Tế PSG'],
+      ['training_pitch', '⚽ Sân Tập Chính · PSG Training Center'],
+      ['dressing_room', '👕 Phòng Thay Đồ Đội Một · Training Center'],
+      ['medical', '🏥 Trung Tâm Y Tế PSG (6 Khu · Training Center)'],
+      ['fitness', '💪 Trung Tâm Thể Lực & Gym (Training Center)'],
+      ['residence', '🏨 Khu Nghỉ Dưỡng Cầu Thủ (8 Tầng · 30 Phòng Tầng 1)'],
+      ['residence_floor2', '🛋️ Sảnh & Lounge Nghỉ Dưỡng Cầu Thủ (Tầng 1)'],
+      ['training_parking', '🅿️ Bãi Đỗ Xe Khu Huấn Luyện PSG'],
+      ['president', '🏢 Phòng Chủ tịch Phạm Minh Chiêu (HQ)'],
+      ['technical', '📊 Phòng Kỹ Thuật PSG (Trụ sở HQ)'],
+      ['boardroom', '🏛️ Phòng Họp Ban Lãnh Đạo (HQ)'],
+      ['lobby', '✨ Sảnh Lễ Tân PSG (HQ)'],
+      ['sporting', '🎯 Phòng Giám Đốc Thể Thao (HQ)'],
+      ['coach', '📋 Phòng HLV Trưởng (HQ)'],
+      ['finance', '💶 Phòng Tài Chính (HQ)'],
       ['museum', '🏛️ Bảo tàng Lịch sử & Danh hiệu PSG'],
-      ['dressing_room', '👕 Tòa Nhà Phòng Thay Đồ Cầu Thủ PSG'],
       ['signing_room', '✍️ Phòng Ký Hợp Đồng Cao Cấp 3D'],
       ['press_hall', '📺 Phòng Họp Báo & Trường Quay PSG TV'],
       ['logistics_gate', '🛣️ Khu Dịch Vụ, Hậu Cần & Trạm Kiểm Soát SVĐ'],
       ['stadium_plaza', '🏟️ Quảng Trường SVĐ Parc des Princes'],
-      ['stadium_pitch', '⚽ Mặt Sân SVĐ Parc des Princes (Tập luyện 3D & Thi đấu)'],
+      ['stadium_pitch', '🏟️ Mặt Sân SVĐ Parc des Princes (Thi đấu chính thức)'],
       ['parking', '🚘 Bãi Đỗ Xe Ban Lãnh Đạo PSG']
     ];
     const zInfo = this.cb.getStadiumZoneStatus ? this.cb.getStadiumZoneStatus() : null;
@@ -1523,7 +1761,7 @@ export class UIManager {
       <div class="btn-row" style="margin-top:8px;">
         <button class="btn-accent" id="nav-open-cctv" style="width:100%;">📹 Xem Camera Giám Sát SVĐ Parc des Princes từ xa (Không cần tải LOD Cao)</button>
       </div>`;
-    this.openModal('🗺️ BẢN ĐỒ KHUÔN VIÊN TỔNG THỂ PSG (6 KHU VỰC)', html, 'normal', { skipRefreshBack: true });
+    this.openModal('🗺️ BẢN ĐỒ KHUÔN VIÊN TỔNG THỂ PSG (HQ · SVĐ · TRAINING CENTER)', html, 'normal', { skipRefreshBack: true });
     this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
     this._recordNavigation({ routeKey: 'fast_travel', screen: 'fast_travel', label: 'Bản đồ Khuôn viên PSG' }, opts);
     this._bindScrollAndCollapseTrackers();
@@ -1553,7 +1791,22 @@ export class UIManager {
         ${t.finalReport ? `<p style="color:#86efac;">📄 ${t.finalReport}</p>` : ''}
       </div>`).join('') : '<div class="muted">Chưa có nhiệm vụ nào đang giao cho nhân vật này.</div>';
 
+    const visitBannerHtml = npc.officeVisitData ? `
+      <div class="card-item urgent" style="border-left:4px solid #d4af37;margin-bottom:8px;">
+        <div class="card-head">
+          <strong>🚪 Báo cáo trực tiếp tại Văn phòng Chủ tịch</strong>
+          <span class="tag ok">${npc.officeVisitData.type === 'blocked' ? 'Vướng mắc' : 'Báo cáo kết quả'}</span>
+        </div>
+        <p>${npc.officeVisitData.summary || 'Xin phép báo cáo trực tiếp tình hình công việc với Chủ tịch.'}</p>
+        <div class="btn-row">
+          ${npc.officeVisitData.docId ? `<button type="button" class="btn-xs btn-primary" id="npc-open-visit-doc" data-docid="${npc.officeVisitData.docId}">📄 Mở Hồ Sơ Giấy Liên Quan</button>` : ''}
+          <button type="button" class="btn-xs btn-accent" id="npc-open-visit-tracker">📌 Mở Action Tracker</button>
+          <button type="button" class="btn-xs btn-secondary" id="npc-dismiss-visit">✅ Tiếp nhận & Cho nhân sự quay lại làm việc</button>
+        </div>
+      </div>` : '';
+
     const html = `
+      ${visitBannerHtml}
       <div class="npc-header">
         <div>
           <h3>${npc.name}</h3>
@@ -1614,6 +1867,184 @@ export class UIManager {
           npc.relation = Math.min(100, npc.relation + 2);
           this.audio.playClick();
           this.openNpcDialogue(npc, opt.reply, { skipHistory: true, preserveScroll: true });
+        }
+      });
+    });
+
+    document.getElementById('npc-open-visit-doc')?.addEventListener('click', (e) => {
+      const did = e.currentTarget.dataset.docid;
+      this.cb.dismissOfficeVisitor?.(npc.id);
+      if (did) this.openPaperDossierReader(did);
+    });
+    document.getElementById('npc-open-visit-tracker')?.addEventListener('click', () => {
+      this.cb.dismissOfficeVisitor?.(npc.id);
+      this.openComputer('action_tracker');
+    });
+    document.getElementById('npc-dismiss-visit')?.addEventListener('click', () => {
+      this.cb.dismissOfficeVisitor?.(npc.id);
+      this.audio.playSuccess();
+      this.toast(`✅ Đã tiếp nhận báo cáo của ${npc.name}.`, 'success');
+      this.closeModal(true);
+    });
+  }
+
+  // --- 2B. HỆ THỐNG HỒ SƠ GIẤY 3D & KHAY KHẨN CẤP TRÊN BÀN CHỦ TỊCH ---
+  openDocumentStackModal(category = DOC_CATEGORY.EXECUTIVE, opts = {}) {
+    this.hideDeskDocMenu();
+    this.state.documentSystem?.syncFromClubState?.();
+    const meta = DOC_STACK_META.find((m) => m.category === category) || DOC_STACK_META[0];
+    this.paperReturnContext = { type: 'stack', category };
+    const html = renderStackDossierListHTML(this.state, category, this.paperStackFilter || 'active');
+    this.openModal(`${meta.icon} CHỒNG HỒ SƠ GIẤY · ${meta.label.toUpperCase()}`, html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: `doc_stack:${category}`, screen: 'doc_stack', label: meta.label, params: { category } }, opts);
+    this._bindScrollAndCollapseTrackers();
+
+    document.querySelectorAll('.pd-stack-filter').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.audio?.playClick?.();
+        this.paperStackFilter = b.dataset.flt || 'active';
+        this.openDocumentStackModal(b.dataset.cat || category, { skipHistory: true });
+      });
+    });
+    document.querySelectorAll('.pd-open-doc').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.audio?.playClick?.();
+        this.paperReaderPage = 0;
+        this.openPaperDossierReader(b.dataset.docid, { returnTo: 'stack', category });
+      });
+    });
+  }
+
+  openUrgentTrayModal(opts = {}) {
+    this.hideDeskDocMenu();
+    this.state.documentSystem?.syncFromClubState?.();
+    this.paperReturnContext = { type: 'urgent' };
+    const html = renderUrgentTrayHTML(this.state);
+    this.openModal('🚨 PRESIDENTIAL PRIORITY · KHAY ĐỎ HỒ SƠ KHẨN CẤP', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: 'urgent_tray', screen: 'urgent_tray', label: 'Khay KHẨN CẤP' }, opts);
+    this._bindScrollAndCollapseTrackers();
+
+    document.querySelectorAll('.pd-open-doc').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.audio?.playClick?.();
+        this.paperReaderPage = 0;
+        this.openPaperDossierReader(b.dataset.docid, { returnTo: 'urgent' });
+      });
+    });
+  }
+
+  openPaperDossierReader(docId, opts = {}) {
+    const docSys = this.state.documentSystem;
+    const execSys = this.state.executionSystem;
+    const doc = docSys?.openDocumentForReading?.(docId);
+    if (!doc) {
+      this.toast('Không tìm thấy hồ sơ văn bản giấy này.', 'warn');
+      this.closeModal(true);
+      return;
+    }
+    if (opts.returnTo === 'urgent') this.paperReturnContext = { type: 'urgent' };
+    else if (opts.returnTo === 'stack') this.paperReturnContext = { type: 'stack', category: opts.category || doc.category };
+    else if (opts.returnTo === 'phone') this.paperReturnContext = { type: 'phone' };
+    else if (!this.paperReturnContext) this.paperReturnContext = { type: 'stack', category: doc.category };
+
+    this.cb.refreshDeskDocs?.();
+    const totalPages = (doc.pages || []).length + 2;
+    const pageIdx = Number.isFinite(opts.pageIdx) ? opts.pageIdx : (this.paperReaderPage || 0);
+    this.paperReaderPage = Math.max(0, Math.min(totalPages - 1, pageIdx));
+
+    const draft = opts.draft || {
+      ownerRoleKey: doc.defaultOwnerRoleKey || 'ceo',
+      delegationMode: DELEGATION_MODE.SUPERVISE,
+      instruction: ''
+    };
+    const html = renderPaperDossierReaderHTML(this.state, doc, this.paperReaderPage, draft);
+    this.openModal(`📄 [${doc.code}] ${doc.title}`, html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: `paper_doc:${doc.id}`, screen: 'paper_dossier', label: doc.code, params: { docId: doc.id } }, opts);
+    this._bindScrollAndCollapseTrackers();
+
+    const goBackToSource = () => {
+      const ctx = this.paperReturnContext;
+      if (ctx?.type === 'urgent') this.openUrgentTrayModal({ skipHistory: true });
+      else if (ctx?.type === 'phone') this.openPhone({ skipHistory: true });
+      else this.openDocumentStackModal(ctx?.category || doc.category, { skipHistory: true });
+    };
+
+    const getCurrentDraft = () => ({
+      ownerRoleKey: document.getElementById('pd-owner-sel')?.value || doc.defaultOwnerRoleKey || 'ceo',
+      delegationMode: document.getElementById('pd-delegation-sel')?.value || DELEGATION_MODE.SUPERVISE,
+      instruction: document.getElementById('pd-instruction-inp')?.value || ''
+    });
+
+    document.getElementById('pd-back-list')?.addEventListener('click', () => {
+      this.audio?.playClick?.();
+      goBackToSource();
+    });
+    document.querySelectorAll('.pd-page-tab').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.audio?.playClick?.();
+        this.openPaperDossierReader(doc.id, { skipHistory: true, pageIdx: Number(b.dataset.pidx || 0), draft: getCurrentDraft() });
+      });
+    });
+    document.getElementById('pd-prev-page')?.addEventListener('click', () => {
+      this.audio?.playClick?.();
+      this.openPaperDossierReader(doc.id, { skipHistory: true, pageIdx: Math.max(0, this.paperReaderPage - 1), draft: getCurrentDraft() });
+    });
+    document.getElementById('pd-next-page')?.addEventListener('click', () => {
+      this.audio?.playClick?.();
+      this.openPaperDossierReader(doc.id, { skipHistory: true, pageIdx: Math.min(totalPages - 1, this.paperReaderPage + 1), draft: getCurrentDraft() });
+    });
+    document.getElementById('pd-jump-tracker')?.addEventListener('click', () => {
+      this.audio?.playClick?.();
+      this.openComputer('action_tracker');
+    });
+
+    const commitAction = (act, payload) => {
+      const res = execSys?.submitDocumentDecision?.(doc.id, { action: act, ...payload });
+      if (!res || !res.ok) {
+        this.audio?.playAlert?.();
+        this.toast(res?.error || 'Không thể xử lý quyết định cho hồ sơ này.', 'error');
+        return;
+      }
+      this.cb.refreshDeskDocs?.();
+      if (act === EXEC_ACTIONS.REJECT) this.audio?.playClick?.();
+      else this.audio?.playSuccess?.();
+      this.toast(res.message || 'Đã ghi nhận chỉ đạo của Chủ tịch.', res.task?.status === 'BLOCKED' ? 'warn' : 'success');
+
+      if (act === EXEC_ACTIONS.APPROVE || act === EXEC_ACTIONS.SIGN || act === EXEC_ACTIONS.REJECT || act === EXEC_ACTIONS.ASSIGN_TASK) {
+        goBackToSource();
+      } else {
+        this.openPaperDossierReader(doc.id, { skipHistory: true, pageIdx: this.paperReaderPage });
+      }
+    };
+
+    document.querySelectorAll('.pd-act-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const act = b.dataset.act;
+        if (act === EXEC_ACTIONS.CLOSE) {
+          this.audio?.playClick?.();
+          goBackToSource();
+          return;
+        }
+        const payload = getCurrentDraft();
+        const needsConfirm = act === EXEC_ACTIONS.APPROVE || act === EXEC_ACTIONS.SIGN || act === EXEC_ACTIONS.REJECT;
+        if (needsConfirm && typeof document !== 'undefined' && document.getElementById('smart-confirm-overlay')) {
+          const actionNames = {
+            APPROVE: 'PHÊ DUYỆT hồ sơ',
+            SIGN: 'KÝ BAN HÀNH văn bản',
+            REJECT: 'TỪ CHỐI đề xuất'
+          };
+          this.showSmartConfirmDialog({
+            title: `⚖️ Xác nhận ${actionNames[act] || act}`,
+            message: `[${doc.code}] ${doc.title}\nNgười thực thi: ${ROLE_RESPONSIBILITY_MAP[payload.ownerRoleKey]?.title || payload.ownerRoleKey}`,
+            confirmLabel: 'Xác nhận ký quyết định',
+            cancelLabel: 'Xem lại hồ sơ',
+            onConfirm: () => commitAction(act, payload)
+          });
+        } else {
+          commitAction(act, payload);
         }
       });
     });
@@ -2084,8 +2515,14 @@ export class UIManager {
     const bidsCnt = this.state.transferSystem?.incomingBids?.length || 0;
 
     const conflictsCnt = this.state.relationshipSystem?.conflicts?.filter((c) => c.status === 'active').length || 0;
+    const activeExecTasks = this.state.executionSystem?.getActiveTasks?.() || [];
+    const activeExecCnt = activeExecTasks.length;
+    const blockedExecCnt = activeExecTasks.filter((t) => t.status === 'BLOCKED').length;
     const apps = [
       { id: 'overview', icon: '🏢', name: 'Tổng quan', bg: 'linear-gradient(135deg,#2563eb,#1e3a8a)' },
+      { id: 'action_tracker', icon: '📌', name: `Thực thi (${activeExecCnt}${blockedExecCnt > 0 ? ` · ⚠️${blockedExecCnt}` : ''})`, bg: 'linear-gradient(135deg,#0284c7,#1e3a8a)' },
+      { id: 'archive', icon: '🗄️', name: 'Văn thư lưu trữ', bg: 'linear-gradient(135deg,#475569,#0f172a)' },
+      { id: 'strategy', icon: '🧭', name: 'Chiến lược CLB', bg: 'linear-gradient(135deg,#b45309,#78350f)' },
       { id: 'squad', icon: '⚽', name: 'Đội một PSG', bg: 'linear-gradient(135deg,#1d4ed8,#0f172a)' },
       { id: 'academy', icon: '🎓', name: 'Đội trẻ', bg: 'linear-gradient(135deg,#16a34a,#14532d)' },
       { id: 'coach', icon: '👔', name: 'Ban huấn luyện', bg: 'linear-gradient(135deg,#0891b2,#164e63)' },
@@ -2111,6 +2548,9 @@ export class UIManager {
 
     let content = '';
     if (resolvedTab === 'overview') content = renderExecutiveOverviewHTML(this.state, apps);
+    else if (resolvedTab === 'action_tracker') content = renderActionTrackerHTML(this.state, this.trackerFilter);
+    else if (resolvedTab === 'archive') content = renderDocumentArchiveHTML(this.state, this.archiveFilters);
+    else if (resolvedTab === 'strategy') content = renderStrategicPlanningHTML(this.state);
     else if (resolvedTab === 'squad') content = this.renderSquadTab();
     else if (resolvedTab === 'academy') content = this.renderAcademyTab();
     else if (resolvedTab === 'coach') content = renderStaffCoachTabHTML(this.state, this.staffSubTab, this.directiveDraft);
@@ -2165,7 +2605,7 @@ export class UIManager {
             <div class="mac-menu-left">
               <span class="mac-apple"></span>
               <b id="mac-app-title">${currentApp.name}</b>
-              <span class="mac-menu-item">PSG OS</span>
+              <span class="mac-menu-item">PSG PRESIDENTIAL MANAGEMENT SYSTEM</span>
               <span class="mac-menu-item">Chủ tịch Phạm Minh Chiêu</span>
             </div>
             <div class="mac-menu-right">
@@ -2279,18 +2719,21 @@ export class UIManager {
   }
 
   renderDepartmentsTab() {
-    return `<div class="scroll-list">${this.state.departments.map((d) => `
-      <div class="card-item">
-        <div class="card-head"><strong>${d.name}</strong><span class="tag ok">Hiệu suất ${d.performance}% · Hài lòng ${d.morale}%</span></div>
-        <div class="muted">Trưởng phòng: <b>${d.head}</b> · Nhân sự: ${d.staffCount} · Ngân sách: €${d.budget}M/năm</div>
-        <p>Đang làm: ${d.activeTask}</p>
-        ${d.proposalApproved ? '' : `
-          <p class="proposal-txt">💡 Đề xuất chờ duyệt: ${d.proposal}</p>
-          <div class="btn-row">
-            <button class="btn-primary dept-approve" data-dept="${d.id}">✅ Phê duyệt (-€1.2M, +5%)</button>
-            <button class="btn-secondary dept-boost" data-dept="${d.id}">📌 Giao KPI (+3%)</button>
-          </div>`}
-      </div>`).join('')}</div>`;
+    return `
+      <div class="scroll-list" style="max-height:38vh;margin-bottom:10px;">${this.state.departments.map((d) => `
+        <div class="card-item">
+          <div class="card-head"><strong>${d.name}</strong><span class="tag ok">Hiệu suất ${d.performance}% · Hài lòng ${d.morale}%</span></div>
+          <div class="muted">Trưởng phòng: <b>${d.head}</b> · Nhân sự: ${d.staffCount} · Ngân sách: €${d.budget}M/năm</div>
+          <p>Đang làm: ${d.activeTask}</p>
+          ${d.proposalApproved ? '' : `
+            <p class="proposal-txt">💡 Đề xuất chờ duyệt: ${d.proposal}</p>
+            <div class="btn-row">
+              <button class="btn-primary dept-approve" data-dept="${d.id}">✅ Phê duyệt (-€1.2M, +5%)</button>
+              <button class="btn-secondary dept-boost" data-dept="${d.id}">📌 Giao KPI (+3%)</button>
+            </div>`}
+        </div>`).join('')}</div>
+      <div class="section-label">🏛️ Phân quyền, Tải công việc & Đánh giá Năng lực Ban Điều Hành</div>
+      ${renderStaffAccountabilityHTML(this.state)}`;
   }
 
   renderFormationTab() {
@@ -2969,9 +3412,12 @@ export class UIManager {
             <div class="card-item">
               <div class="card-head"><strong>${p.title}</strong><span class="tag ${done ? 'ok' : ''}">${done ? 'Đã hoàn tất' : `€${p.cost}M`}</span></div>
               <p class="muted">${p.detail}</p>
-              <button type="button" class="btn-xs ${done ? 'btn-secondary' : 'btn-primary'} fin-open-task" data-fid="${p.id}">
-                ${done ? '🔄 Mở lại tác vụ' : '📋 Mở tác vụ duyệt'}
-              </button>
+              <div class="btn-row">
+                <button type="button" class="btn-xs ${done ? 'btn-secondary' : 'btn-primary'} fin-open-task" data-fid="${p.id}">
+                  ${done ? '🔄 Mở lại tác vụ' : '📋 Mở tác vụ duyệt'}
+                </button>
+                <button type="button" class="btn-xs btn-secondary fin-raise-doc" data-fid="${p.id}">📄 Trình hồ sơ giấy</button>
+              </div>
             </div>`;
         }).join('')}
       </div>
@@ -3087,6 +3533,7 @@ export class UIManager {
       document.getElementById('ov-board')?.addEventListener('click', () => this.openBoardMeeting());
       document.getElementById('ov-player-meet')?.addEventListener('click', () => this.openPlayerMeetingSelector());
       document.getElementById('ov-open-tv')?.addEventListener('click', () => this.openTelevisionModal());
+      document.querySelector('.ov-open-urgent')?.addEventListener('click', () => this.openUrgentTrayModal());
       document.querySelectorAll('.ov-jump-app').forEach((b) => {
         b.addEventListener('click', () => {
           if (b.dataset.msub) this.mediaSubTab = b.dataset.msub;
@@ -3139,7 +3586,7 @@ export class UIManager {
       }));
     } else if (tab === 'training') {
       document.querySelectorAll('[data-trtab]').forEach((b) => b.addEventListener('click', () => { this.trainingSubTab = b.dataset.trtab; this.openComputer('training', { skipHistory: true }); }));
-      document.getElementById('tr-go-pitch')?.addEventListener('click', () => { this.cb.teleport('stadium_pitch'); this.closeModal(true); this.toast('🏟️ Đã di chuyển vào SVĐ Parc des Princes quan sát toàn đội tập luyện 3D!', 'info'); });
+      document.getElementById('tr-go-pitch')?.addEventListener('click', () => { this.cb.teleport('training_pitch'); this.closeModal(true); this.toast('⚽ Đã di chuyển ra PSG TRAINING PITCH (Khu Huấn Luyện PSG) quan sát toàn đội tập luyện 3D!', 'info'); });
       document.getElementById('tr-run-eval')?.addEventListener('click', () => {
         const rep = this.state.trainingSystem.concludeTrainingSession();
         this.audio.playSuccess();
@@ -3282,6 +3729,15 @@ export class UIManager {
       });
       document.querySelectorAll('.tr-consult-bid').forEach((b) => {
         b.addEventListener('click', () => this.openTransferConsultationModal(b.dataset.bid));
+      });
+      document.querySelectorAll('.tr-open-paper-doc').forEach((b) => {
+        b.addEventListener('click', () => {
+          const bidId = b.dataset.bid;
+          this.state.documentSystem?.syncFromClubState?.();
+          const doc = this.state.documentSystem?.documents?.find((d) => d.eventKey === `transfer_bid_${bidId}` || d.linkedEntityId === bidId);
+          if (doc) this.openPaperDossierReader(doc.id, { returnTo: 'stack', category: doc.category });
+          else this.toast('Hồ sơ giấy của đề nghị này chưa có trong hàng đợi.', 'info');
+        });
       });
       document.querySelectorAll('.tr-review-bid').forEach((b) => {
         b.addEventListener('click', () => this.openIncomingBidTaskModal(b.dataset.bid));
@@ -3458,6 +3914,15 @@ export class UIManager {
           this.openComputer('sponsors', stayOpts);
         });
       });
+      document.querySelectorAll('.sp-open-paper').forEach((b) => {
+        b.addEventListener('click', () => {
+          const oid = b.dataset.oid;
+          this.state.documentSystem?.syncFromClubState?.();
+          const doc = this.state.documentSystem?.documents?.find((d) => d.eventKey === `sponsor_offer_${oid}` || d.linkedEntityId === oid);
+          if (doc) this.openPaperDossierReader(doc.id, { returnTo: 'stack', category: doc.category });
+          else this.toast('Không tìm thấy hồ sơ tài trợ tương ứng.', 'info');
+        });
+      });
     } else if (tab === 'facilities') {
       document.querySelectorAll('.fac-upgrade-btn').forEach((b) => {
         b.addEventListener('click', () => {
@@ -3470,6 +3935,24 @@ export class UIManager {
             this.toast(res.error, 'error');
           }
           this.openComputer('facilities', stayOpts);
+        });
+      });
+      document.querySelectorAll('.fac-raise-doc').forEach((b) => {
+        b.addEventListener('click', () => {
+          const fid = b.dataset.fid;
+          const cost = Number(b.dataset.cost || 12);
+          const lvl = Number(b.dataset.lvl || 4);
+          const doc = this.state.documentSystem?.raiseDossierFromComputer?.('facility_upgrade', {
+            facilityId: fid,
+            costM: cost,
+            targetLevel: lvl
+          });
+          if (doc) {
+            this.cb.refreshDeskDocs?.();
+            this.audio.playSuccess();
+            this.toast(`📄 Đã trình hồ sơ [${doc.code}] lên bàn giấy Chủ tịch!`, 'success');
+            this.openPaperDossierReader(doc.id, { returnTo: 'stack', category: doc.category });
+          }
         });
       });
     } else if (tab === 'commercial') {
@@ -3489,6 +3972,25 @@ export class UIManager {
     } else if (tab === 'finance') {
       document.querySelectorAll('.fin-open-task').forEach((b) => {
         b.addEventListener('click', () => this.openBudgetApprovalTaskModal(b.dataset.fid));
+      });
+      document.querySelectorAll('.fin-raise-doc').forEach((b) => {
+        b.addEventListener('click', () => {
+          const prop = this._getFinanceProposals().find((x) => x.id === b.dataset.fid);
+          if (!prop) return;
+          const doc = this.state.documentSystem?.raiseDossierFromComputer?.('budget_proposal', {
+            proposalId: prop.id,
+            title: prop.title,
+            costM: prop.cost,
+            dept: prop.dept,
+            detail: prop.detail
+          });
+          if (doc) {
+            this.cb.refreshDeskDocs?.();
+            this.audio.playSuccess();
+            this.toast(`📄 Đã trình hồ sơ tài chính [${doc.code}] lên bàn Chủ tịch!`, 'success');
+            this.openPaperDossierReader(doc.id, { returnTo: 'stack', category: doc.category });
+          }
+        });
       });
     } else if (tab === 'coach') {
       document.querySelectorAll('[data-stftab]').forEach((b) => b.addEventListener('click', () => { this.staffSubTab = b.dataset.stftab; this.openComputer('coach', { skipHistory: true }); }));
@@ -3733,7 +4235,190 @@ export class UIManager {
         });
       });
       this._bindSigningEventHubButtons();
+    } else if (tab === 'action_tracker') {
+      const exec = this.state.executionSystem;
+      document.getElementById('trk-flt-status')?.addEventListener('change', (e) => {
+        this.trackerFilter.status = e.target.value;
+        this.openComputer('action_tracker', stayOpts);
+      });
+      document.getElementById('trk-flt-owner')?.addEventListener('change', (e) => {
+        this.trackerFilter.owner = e.target.value;
+        this.openComputer('action_tracker', stayOpts);
+      });
+      document.querySelectorAll('.trk-req-report').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = exec?.requestReport?.(b.dataset.tid);
+          if (res?.ok) { this.audio.playSuccess(); this.toast(`📊 Đã nhận báo cáo tiến độ từ ${res.report.author}.`, 'info'); }
+          else { this.audio.playAlert(); this.toast(res?.error || 'Không thể yêu cầu báo cáo.', 'error'); }
+          this.openComputer('action_tracker', stayOpts);
+        });
+      });
+      document.querySelectorAll('.trk-extend').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = exec?.extendDeadline?.(b.dataset.tid, 3);
+          if (res?.ok) { this.audio.playSuccess(); this.toast('⏰ Đã gia hạn thêm +3 ngày xử lý.', 'success'); }
+          else { this.audio.playAlert(); this.toast(res?.error || 'Không thể gia hạn.', 'error'); }
+          this.openComputer('action_tracker', stayOpts);
+        });
+      });
+      document.querySelectorAll('.trk-pause').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = exec?.pauseTask?.(b.dataset.tid);
+          if (res?.ok) { this.audio.playClick(); this.toast(`Trạng thái mới: ${res.task.statusLabel}`, 'info'); }
+          this.openComputer('action_tracker', stayOpts);
+        });
+      });
+      document.querySelectorAll('.trk-unblock').forEach((b) => {
+        b.addEventListener('click', () => {
+          const res = exec?.resolveBlockerAndContinue?.(b.dataset.tid);
+          if (res?.ok) { this.audio.playSuccess(); this.toast(res.message || 'Đã tháo gỡ vướng mắc!', 'success'); }
+          else { this.audio.playAlert(); this.toast(res?.error || 'Chưa thể tháo gỡ vướng mắc.', 'error'); }
+          this.cb.refreshDeskDocs?.();
+          this.openComputer('action_tracker', stayOpts);
+        });
+      });
+      document.querySelectorAll('.trk-send-inst').forEach((b) => {
+        b.addEventListener('click', () => this.openTrackerInterventionModal(b.dataset.tid, 'instruction'));
+      });
+      document.querySelectorAll('.trk-reassign').forEach((b) => {
+        b.addEventListener('click', () => this.openTrackerInterventionModal(b.dataset.tid, 'reassign'));
+      });
+      document.querySelectorAll('.trk-explain').forEach((b) => {
+        b.addEventListener('click', () => this.openTrackerInterventionModal(b.dataset.tid, 'explain'));
+      });
+      document.querySelectorAll('.trk-cancel').forEach((b) => {
+        b.addEventListener('click', () => {
+          const runCancel = () => {
+            const res = exec?.cancelTask?.(b.dataset.tid, 'Chủ tịch lệnh hủy bỏ nhiệm vụ');
+            if (res?.ok) { this.audio.playClick(); this.toast('🚫 Đã hủy bỏ nhiệm vụ thực thi.', 'warn'); }
+            this.cb.refreshDeskDocs?.();
+            this.openComputer('action_tracker', stayOpts);
+          };
+          if (typeof document !== 'undefined' && document.getElementById('smart-confirm-overlay')) {
+            this.showSmartConfirmDialog({
+              title: '🚫 Xác nhận hủy nhiệm vụ',
+              message: 'Hủy nhiệm vụ này sẽ dừng triển khai ngay lập tức. Bạn chắc chắn muốn hủy?',
+              confirmLabel: 'Hủy nhiệm vụ',
+              cancelLabel: 'Giữ lại',
+              onConfirm: runCancel
+            });
+          } else {
+            runCancel();
+          }
+        });
+      });
+      document.querySelectorAll('.trk-open-doc').forEach((b) => {
+        b.addEventListener('click', () => this.openPaperDossierReader(b.dataset.docid));
+      });
+    } else if (tab === 'archive') {
+      document.getElementById('arc-search')?.addEventListener('change', (e) => {
+        this.archiveFilters.query = e.target.value;
+        this.openComputer('archive', stayOpts);
+      });
+      document.getElementById('arc-cat')?.addEventListener('change', (e) => {
+        this.archiveFilters.category = e.target.value;
+        this.openComputer('archive', stayOpts);
+      });
+      document.getElementById('arc-status')?.addEventListener('change', (e) => {
+        this.archiveFilters.status = e.target.value;
+        this.openComputer('archive', stayOpts);
+      });
+      document.querySelectorAll('.arc-open-doc').forEach((b) => {
+        b.addEventListener('click', () => this.openPaperDossierReader(b.dataset.docid));
+      });
+      document.querySelectorAll('.arc-open-task').forEach((b) => {
+        b.addEventListener('click', () => this.openComputer('action_tracker'));
+      });
+    } else if (tab === 'strategy') {
+      document.getElementById('str-raise-kpi-doc')?.addEventListener('click', () => {
+        const doc = this.state.documentSystem?.raiseDossierFromComputer?.('kpi_review', { costM: 0 });
+        if (doc) {
+          this.cb.refreshDeskDocs?.();
+          this.audio.playSuccess();
+          this.toast(`📄 Đã trình Tờ trình KPI [${doc.code}] ra bàn giấy Chủ tịch!`, 'success');
+          this.openPaperDossierReader(doc.id, { returnTo: 'stack', category: doc.category });
+        }
+      });
+      document.getElementById('str-raise-youth-doc')?.addEventListener('click', () => {
+        const doc = this.state.documentSystem?.raiseDossierFromComputer?.('budget_proposal', {
+          proposalId: `youth_inv_s${this.state.season}`,
+          title: 'Gói đầu tư Quỹ Đào Tạo Học Viện & Tuyển Trạch U19',
+          costM: 8,
+          dept: 'Học viện Trẻ PSG',
+          detail: 'Mở rộng tuyển trạch tài năng trẻ khu vực Paris & nâng cấp cơ sở đào tạo U19.'
+        });
+        if (doc) {
+          this.cb.refreshDeskDocs?.();
+          this.audio.playSuccess();
+          this.toast(`🎓 Đã trình Hồ sơ Đầu tư Học viện [${doc.code}] ra bàn Chủ tịch!`, 'success');
+          this.openPaperDossierReader(doc.id, { returnTo: 'stack', category: doc.category });
+        }
+      });
+      document.getElementById('str-jump-tracker')?.addEventListener('click', () => this.openComputer('action_tracker'));
     }
+  }
+
+  openTrackerInterventionModal(taskId, mode = 'instruction') {
+    const exec = this.state.executionSystem;
+    const task = exec?.getTaskById?.(taskId);
+    if (!task) return;
+    const ownerChoices = Object.values(ROLE_RESPONSIBILITY_MAP).map((r) => {
+      const resolved = exec.resolveOwnerNpc(r.roleKey);
+      return `<option value="${r.roleKey}" ${r.roleKey === task.ownerRoleKey ? 'selected' : ''}>${resolved?.name || r.title} · ${r.title}</option>`;
+    }).join('');
+
+    let title = '📌 CHỈ ĐẠO THỰC THI NHIỆM VỤ';
+    let bodyHtml = '';
+    if (mode === 'reassign') {
+      title = `🔄 ĐỔI NGƯỜI PHỤ TRÁCH · ${task.documentCode}`;
+      bodyHtml = `
+        <div class="card-item"><p>Hiện tại: <b>${task.ownerName}</b> (${task.department})</p></div>
+        <div class="form-row"><label>Chọn người phụ trách mới:</label><select id="ti-owner" class="input-ctrl">${ownerChoices}</select></div>
+        <div class="form-row"><label>Lý do điều chuyển:</label><input id="ti-note" class="input-ctrl" value="Tối ưu năng lực triển khai và tiến độ hoàn thành" /></div>`;
+    } else if (mode === 'explain') {
+      title = `🗣️ YÊU CẦU GIẢI TRÌNH · ${task.ownerName}`;
+      bodyHtml = `
+        <div class="card-item"><p>Trạng thái: <b>${task.statusLabel}</b> · Đã qua ${task.daysElapsed}/${task.deadlineDays} ngày.</p></div>
+        <div class="form-row"><label>Câu hỏi chất vấn của Chủ tịch:</label><input id="ti-note" class="input-ctrl" value="Báo cáo rõ nguyên nhân chậm tiến độ và cam kết mốc hoàn thành mới." /></div>`;
+    } else {
+      bodyHtml = `
+        <div class="card-item"><p>Nhiệm vụ: <b>${task.title}</b> (${task.ownerName})</p></div>
+        <div class="form-row"><label>Nội dung chỉ đạo mới từ Chủ tịch:</label><input id="ti-note" class="input-ctrl" placeholder="Nhập mệnh lệnh cụ thể để đẩy nhanh tiến độ..." value="Ưu tiên xử lý dứt điểm trong 48 giờ tới và báo cáo trực tiếp." /></div>`;
+    }
+    bodyHtml += `
+      <div class="btn-row" style="margin-top:10px;">
+        <button type="button" class="btn-primary" id="ti-submit">✅ Xác nhận gửi</button>
+        <button type="button" class="btn-secondary" id="ti-cancel">↩️ Đóng</button>
+      </div>`;
+
+    this.openTaskWindow({
+      taskId: `trk_int_${taskId}_${mode}`,
+      taskType: 'tracker_intervention',
+      title,
+      html: bodyHtml,
+      narrow: true
+    });
+    document.getElementById('ti-cancel')?.addEventListener('click', () => this.requestCloseTaskWindow());
+    document.getElementById('ti-submit')?.addEventListener('click', () => {
+      const note = document.getElementById('ti-note')?.value || '';
+      let res = null;
+      if (mode === 'reassign') {
+        const newKey = document.getElementById('ti-owner')?.value;
+        res = exec.reassignOwner(taskId, newKey, note);
+      } else if (mode === 'explain') {
+        res = exec.demandExplanation(taskId, note);
+      } else {
+        res = exec.sendInstruction(taskId, note);
+      }
+      if (res?.ok) {
+        this.audio.playSuccess();
+        const msg = mode === 'explain' ? (res.reply || `${task.ownerName} đã giải trình.`) : (res.message || 'Đã cập nhật chỉ đạo.');
+        this.completeAndCloseTaskWindow(`trk_int_${taskId}_${mode}`, msg);
+      } else {
+        this.audio.playAlert();
+        this._setTaskErrorState(`trk_int_${taskId}_${mode}`, res?.error || 'Không thể cập nhật tác vụ.');
+      }
+    });
   }
 
   _bindSigningEventHubButtons() {
@@ -4596,4 +5281,482 @@ export class UIManager {
       this.audio.playClick();
     });
   }
+
+  // ==================== TRUNG TÂM Y TẾ, THỂ LỰC, KHU NGHỈ DƯỠNG 30 PHÒNG & PHÒNG KỸ THUẬT ====================
+  openMedicalCenterModal(opts = {}) {
+    const squad = this.state.getPsgSquad();
+    const injured = squad.filter((p) => (p.injuryDays || 0) > 0);
+    const rehabList = squad.filter((p) => (p.injuryDays || 0) === 0 && ((p.health?.fitness ?? 88) < 76 || (p.health?.fatigue ?? 15) > 55));
+    const headMed = this.state.managerSystem?.getActiveByRole('head_medical') || this.state.staffDb?.active?.find((s) => s.roleKey === 'head_medical');
+    const rehabCoach = this.state.coachingSystem?.getCoachByRole('rehab_coach');
+    const mults = this.state.coachingSystem?.getTrainingQualityMultipliers?.() || { rehab: 1.0 };
+    const medLv = this.state.commercialSystem?.getFacilityLevel('medical_lab') || 3;
+
+    const zones = [
+      ['1. Khu Khám Tổng Quát', 'Khám lâm sàng, siêu âm cơ và đánh giá chấn thương ban đầu.'],
+      ['2. Vật Lý Trị Liệu (Physio)', '3 giường trị liệu chuyên sâu giảm căng cơ & phục hồi khớp.'],
+      ['3. Bể Lạnh Cryo & Thủy Trị Liệu', 'Ngâm lạnh Cryo & bể thủy lực đẩy nhanh thải axit lactic sau trận.'],
+      ['4. Kiểm Tra Thể Lực (Bio-Lab)', 'Đo VO2max, nhịp tim gắng sức và ngưỡng quá tải vận động.'],
+      ['5. Văn Phòng Bác Sĩ & Phục Hồi', 'Nơi làm việc của Bác sĩ trưởng & HLV Phục hồi theo dõi phác đồ.'],
+      ['6. Khu Nghỉ Ngơi Phục Hồi Tĩnh', 'Giường theo dõi yên tĩnh dành riêng cho cầu thủ chấn thương.']
+    ];
+
+    const html = `
+      <div class="kpi-grid">
+        <div class="kpi-card"><span>Đang chấn thương</span><strong style="color:${injured.length ? '#f87171' : '#4ade80'};">${injured.length} cầu thủ</strong></div>
+        <div class="kpi-card"><span>Cần hồi phục nhẹ</span><strong>${rehabList.length} cầu thủ</strong></div>
+        <div class="kpi-card"><span>Cấp Phòng Y Tế</span><strong>Cấp ${medLv}/5</strong></div>
+        <div class="kpi-card"><span>Hệ số Phục hồi BHL</span><strong>x${mults.rehab}</strong></div>
+      </div>
+
+      <div class="card-item">
+        <div class="card-head">
+          <strong>👨‍⚕️ Phụ trách Trung Tâm Y Tế PSG</strong>
+          <span class="tag ok">Training Center · Độc lập chuyên môn</span>
+        </div>
+        <div class="muted">Trưởng bộ phận Y tế: <b>${headMed?.name || 'Bác sĩ CLB'}</b> · HLV Phục hồi: <b>${rehabCoach?.name || 'Chưa bổ nhiệm'}</b> · Cầu thủ chấn thương được tách khỏi giáo án nặng trên sân tập và theo dõi hồi phục theo từng ngày thi đấu thực tế.</div>
+      </div>
+
+      <div class="section-label">🏥 6 Khu Chức Năng Trung Tâm Y Tế PSG</div>
+      <div class="grid-2" style="margin-bottom:8px;">
+        ${zones.map(([t, d]) => `<div class="card-item" style="padding:7px 10px;"><b>${t}</b><div class="muted">${d}</div></div>`).join('')}
+      </div>
+
+      <div class="section-label">🩹 Danh sách Cầu thủ Chấn thương (${injured.length})</div>
+      ${injured.length === 0
+        ? '<div class="card-item muted">💚 Toàn bộ đội một PSG đều khỏe mạnh, không có ca chấn thương nào.</div>'
+        : `<div class="table-wrap" style="max-height:24vh;"><table class="data-table">
+            <thead><tr><th>Cầu thủ</th><th>Vị trí</th><th>Loại chấn thương</th><th>Còn lại</th><th>Phác đồ đặc biệt</th></tr></thead>
+            <tbody>
+              ${injured.map((p) => {
+                const treatedWeek = p._medCareWeek === this.state.week;
+                return `<tr>
+                  <td><button class="btn-xs open-profile-btn" data-pid="${p.id}">#${p.shirtNumber || '-'} ${p.name}</button></td>
+                  <td>${p.position}</td>
+                  <td>${p.health?.injuryType || 'Chấn thương vận động'}</td>
+                  <td><b style="color:#f87171;">${p.injuryDays} ngày</b></td>
+                  <td><button class="btn-xs ${treatedWeek ? 'btn-secondary' : 'btn-primary'} med-cryo-btn" data-pid="${p.id}" ${treatedWeek ? 'disabled' : ''}>${treatedWeek ? 'Đã trị liệu tuần này' : '❄️ Trị liệu Cryo (-1 ngày · €0.15M)'}</button></td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table></div>`}
+
+      <div class="section-label">🔋 Cầu thủ Thể lực thấp / Cần phục hồi (${rehabList.length})</div>
+      ${rehabList.length === 0
+        ? '<div class="card-item muted">✅ Thể lực các cầu thủ lành lặn đang ở mức tốt (>= 76%).</div>'
+        : `<div class="scroll-list" style="max-height:18vh;">
+            ${rehabList.map((p) => `<div class="card-item" style="padding:6px 10px;">
+              <div class="card-head">
+                <button class="btn-xs open-profile-btn" data-pid="${p.id}">#${p.shirtNumber || '-'} ${p.name} (${p.position})</button>
+                <span>Thể lực: <b>${p.health?.fitness ?? 80}%</b> · Mệt mỏi: <b>${p.health?.fatigue ?? 20}%</b></span>
+              </div>
+            </div>`).join('')}
+          </div>`}
+
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn-secondary" id="med-open-fitness">💪 Sang Khu Thể Lực & Gym</button>
+        <button class="btn-accent" id="med-open-training">📅 Xem Lịch Tập & Phục Hồi</button>
+      </div>`;
+
+    this.openModal('🏥 TRUNG TÂM Y TẾ & PHỤC HỒI PSG (TRAINING CENTER)', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: 'medical_center', screen: 'medical_center', label: 'Trung Tâm Y Tế PSG' }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
+
+    document.querySelectorAll('#modal-body .open-profile-btn').forEach((b) => {
+      b.addEventListener('click', () => this.openPlayerProfileModal(b.dataset.pid, 'health'));
+    });
+    document.querySelectorAll('.med-cryo-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const p = this.state.getPlayerById(b.dataset.pid);
+        if (!p || (p.injuryDays || 0) <= 0 || p._medCareWeek === this.state.week) return;
+        if (this.state.finance.budget < 0.15) {
+          this.toast('Ngân sách CLB không đủ €0.15M cho gói trị liệu đặc biệt!', 'warn');
+          return;
+        }
+        p._medCareWeek = this.state.week;
+        p.injuryDays = Math.max(1, p.injuryDays - 1);
+        if (p.health) p.health.injuryDays = p.injuryDays;
+        this.state.addLedger(`Trị liệu Cryo tăng cường cho ${p.name}`, -0.15);
+        this.audio.playSuccess();
+        this.toast(`❄️ Đã áp dụng liệu trình Cryo cho ${p.name} (còn ${p.injuryDays} ngày hồi phục).`, 'success');
+        this.openMedicalCenterModal({ skipHistory: true, preserveScroll: true });
+      });
+    });
+    document.getElementById('med-open-fitness')?.addEventListener('click', () => this.openFitnessCenterModal());
+    document.getElementById('med-open-training')?.addEventListener('click', () => { this.trainingSubTab = 'schedule'; this.openComputer('training'); });
+  }
+
+  openFitnessCenterModal(opts = {}) {
+    const squad = [...this.state.getPsgSquad()].sort((a, b) => (a.health?.fitness ?? 88) - (b.health?.fitness ?? 88));
+    const fitCoach = this.state.coachingSystem?.getCoachByRole('fitness_coach');
+    const perfAnalyst = this.state.coachingSystem?.getCoachByRole('performance_analyst');
+    const mults = this.state.coachingSystem?.getTrainingQualityMultipliers?.() || { fitness: 1.0 };
+    const avgFit = squad.length ? Math.round(squad.reduce((s, p) => s + (p.health?.fitness ?? 88), 0) / squad.length) : 0;
+    const lowFit = squad.filter((p) => (p.health?.fitness ?? 88) < 78).length;
+
+    const html = `
+      <div class="kpi-grid">
+        <div class="kpi-card"><span>Thể lực TB Đội Một</span><strong>${avgFit}%</strong></div>
+        <div class="kpi-card"><span>Hệ số Thể lực BHL</span><strong>x${mults.fitness}</strong></div>
+        <div class="kpi-card"><span>Giáo án hiện tại</span><strong>${this.state.trainingSystem?.intensity || 'Trung bình'}</strong></div>
+        <div class="kpi-card"><span>Cảnh báo quá tải</span><strong style="color:${lowFit ? '#fbbf24' : '#4ade80'};">${lowFit} cầu thủ</strong></div>
+      </div>
+
+      <div class="card-item">
+        <div class="card-head">
+          <strong>💪 FITNESS & PERFORMANCE CENTER · Ban Thể Lực</strong>
+          <span class="tag ok">Training Center</span>
+        </div>
+        <div class="muted">HLV Thể lực: <b>${fitCoach?.name || 'Đang trống'}</b> · Chuyên viên Hiệu suất: <b>${perfAnalyst?.name || 'Đang trống'}</b> · Trang bị máy chạy Treadmill, xe đạp công suất Wattbike, giàn tạ Power Rack và màn hình đo hiệu suất thời gian thực.</div>
+      </div>
+
+      <div class="table-wrap" style="max-height:42vh;">
+        <table class="data-table">
+          <thead><tr><th>Cầu thủ</th><th>Vị trí</th><th>Thể lực</th><th>Mệt mỏi</th><th>Sẵn sàng trận</th><th>Trạng thái</th></tr></thead>
+          <tbody>
+            ${squad.map((p) => {
+              const fit = p.health?.fitness ?? 88;
+              const fat = p.health?.fatigue ?? 12;
+              const mFit = p.health?.matchFitness ?? 85;
+              const st = (p.injuryDays || 0) > 0
+                ? `<span class="tag bad">Chấn thương (${p.injuryDays}n)</span>`
+                : fit < 75 ? '<span class="tag warn">Cần giảm tải</span>' : '<span class="tag ok">Sung mãn</span>';
+              return `<tr>
+                <td><button class="btn-xs open-profile-btn" data-pid="${p.id}">#${p.shirtNumber || '-'} ${p.name}</button></td>
+                <td>${p.position}</td>
+                <td><b>${fit}%</b></td>
+                <td>${fat}%</td>
+                <td>${mFit}%</td>
+                <td>${st}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn-primary" id="fit-open-training">⚙️ Điều chỉnh Giáo án Thể lực</button>
+        <button class="btn-secondary" id="fit-open-medical">🏥 Sang Trung Tâm Y Tế</button>
+        <button class="btn-accent" id="fit-go-pitch">⚽ Ra Sân Tập PSG Training Pitch</button>
+      </div>`;
+
+    this.openModal('💪 TRUNG TÂM THỂ LỰC & HIỆU SUẤT (FITNESS & PERFORMANCE CENTER)', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: 'fitness_center', screen: 'fitness_center', label: 'Trung Tâm Thể Lực PSG' }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
+
+    document.querySelectorAll('#modal-body .open-profile-btn').forEach((b) => {
+      b.addEventListener('click', () => this.openPlayerProfileModal(b.dataset.pid, 'health'));
+    });
+    document.getElementById('fit-open-training')?.addEventListener('click', () => { this.trainingSubTab = 'schedule'; this.openComputer('training'); });
+    document.getElementById('fit-open-medical')?.addEventListener('click', () => this.openMedicalCenterModal());
+    document.getElementById('fit-go-pitch')?.addEventListener('click', () => { this.audio.playDoor(); this.cb.teleport('training_pitch'); this.closeModal(true); });
+  }
+
+  openPlayerResidenceModal(focusRoomNumber = null, opts = {}) {
+    const resSys = this.state.playerResidenceSystem;
+    if (!resSys) return;
+    resSys.syncWithSquad({ silentLog: true, silentAlert: true });
+    const summary = resSys.getSummary();
+    const rooms = resSys.getRooms();
+    const overflow = resSys.getOverflowPlayers();
+    const focusRoom = focusRoomNumber ? resSys.getRoomByNumber(Number(focusRoomNumber)) : null;
+
+    if (focusRoom) {
+      this._residenceWingTab = focusRoom.wing === 'Đông' ? 'Đông' : 'Tây';
+    } else if (!this._residenceWingTab) {
+      this._residenceWingTab = 'Tây';
+    }
+    const activeWing = this._residenceWingTab === 'Đông' ? 'Đông' : 'Tây';
+    const wingRooms = rooms.filter((r) => r.wing === activeWing);
+
+    const html = `
+      <div class="card-item" style="padding:7px 10px;margin-bottom:8px;">
+        <strong>✨ Kiến trúc Luxury Modern 8 Tầng · Paris Saint-Germain</strong>
+        <div class="muted">Toàn bộ Sảnh PSG, Khu Sinh Hoạt Chung và 30 phòng nghỉ riêng được bố trí hoàn chỉnh tại <b>Tầng 1</b> (Cánh Tây: ROOM 01–15 &amp; Cánh Đông: ROOM 16–30). Tầng 2–8 là kiến trúc ngoại thất sang trọng.</div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card"><span>Tổng số phòng cố định</span><strong>30 Phòng</strong></div>
+        <div class="kpi-card"><span>Đang có cầu thủ ở</span><strong>${summary.occupied} / 30</strong></div>
+        <div class="kpi-card"><span>Phòng trống (AVAILABLE)</span><strong style="color:#38bdf8;">${summary.available} Phòng</strong></div>
+        <div class="kpi-card"><span>Chờ cấp phòng (>30)</span><strong style="color:${summary.overflowCount > 0 ? '#f87171' : '#4ade80'};">${summary.overflowCount}</strong></div>
+      </div>
+
+      ${overflow.length > 0 ? `
+        <div class="card-item urgent">
+          <div class="card-head"><strong>⚠️ CẢNH BÁO VƯỢT QUÁ SỨC CHỨA 30 PHÒNG!</strong><span class="tag bad">${overflow.length} cầu thủ chưa có phòng</span></div>
+          <div class="muted">Tòa nhà Nghỉ dưỡng cố định đúng 30 phòng riêng (1 phòng / 1 cầu thủ, không ở chung, không tạo Phòng 31). Các cầu thủ đang chờ: <b>${overflow.map((x) => `${x.name}${x.shirtNumber ? ` (#${x.shirtNumber})` : ''}`).join(', ')}</b>. Hãy bán/cho mượn bớt cầu thủ để giải phóng phòng trống.</div>
+        </div>` : ''}
+
+      ${focusRoom ? (() => {
+        const curLabel = CURTAIN_LABELS_VI[focusRoom.curtainState] || focusRoom.curtainState;
+        const autoOn = focusRoom.curtainAutomationEnabled !== false;
+        const overrideActive = resSys.isManualOverrideActive(focusRoom);
+        const prefKey = focusRoom.privacyPreference || (focusRoom.occupantId ? resSys.getPrivacyPreferenceForPlayer(focusRoom.occupantId) : null);
+        const lastAct = focusRoom.lastCurtainAction;
+        const formatClock = (h) => {
+          if (typeof h !== 'number') return '';
+          const hh = String(Math.floor(((h % 24) + 24) % 24)).padStart(2, '0');
+          const mm = String(Math.floor((h % 1) * 60)).padStart(2, '0');
+          return `${hh}:${mm}`;
+        };
+        return `
+        <div class="card-item urgent">
+          <div class="card-head">
+            <strong>🚪 Đang kiểm tra trực tiếp: ${focusRoom.code} (Tầng 1 · Cánh ${focusRoom.wing})</strong>
+            <span class="tag ${focusRoom.status === 'OCCUPIED' ? 'ok' : ''}">${focusRoom.status}</span>
+          </div>
+          ${focusRoom.occupantId
+            ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                <div>Cầu thủ lưu trú: <b>${focusRoom.occupantName}</b> ${focusRoom.shirtNumber ? `· Số áo <b>#${focusRoom.shirtNumber}</b>` : ''} · Vị trí: <b>${focusRoom.position}</b></div>
+                <button class="btn-xs btn-primary open-profile-btn" data-pid="${focusRoom.occupantId}">👤 Mở Hồ sơ ${focusRoom.occupantName}</button>
+              </div>`
+            : '<div class="muted">Phòng hiện chưa có cầu thủ ở (AVAILABLE). Tự động cấp cho tân binh hoặc cầu thủ học viện vừa đôn lên đội một.</div>'}
+          <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(148,163,184,0.22);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <span>🪟 <b>Rèm cửa sổ:</b> ${curLabel}${overrideActive ? ' · <span style="color:#fbbf24;">Chủ tịch vừa chỉnh tay</span>' : ''}</span>
+              <button class="btn-xs ${autoOn ? 'btn-primary' : 'btn-secondary'}" id="res-toggle-curtain-auto" data-room="${focusRoom.roomNumber}">
+                🤖 Tự động NPC: ${autoOn ? 'BẬT' : 'TẮT'}
+              </button>
+            </div>
+            <div class="btn-row" style="margin-top:6px;gap:6px;flex-wrap:wrap;">
+              ${CURTAIN_STATES.map((st) => `
+                <button class="btn-xs ${focusRoom.curtainState === st ? 'btn-primary' : 'btn-secondary'} res-curtain-btn" data-room="${focusRoom.roomNumber}" data-state="${st}">
+                  ${CURTAIN_LABELS_VI[st]}
+                </button>`).join('')}
+            </div>
+            ${focusRoom.occupantId && prefKey ? `
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:7px;">
+                <span class="muted">🔒 Thói quen riêng tư:</span>
+                <select id="res-privacy-select" data-pid="${focusRoom.occupantId}" style="background:#1e293b;color:#f8fafc;border:1px solid rgba(148,163,184,0.35);border-radius:6px;padding:3px 8px;font-size:12px;">
+                  ${PRIVACY_PREFERENCES.map((pk) => `<option value="${pk}" ${pk === prefKey ? 'selected' : ''}>${PRIVACY_LABELS_VI[pk]}</option>`).join('')}
+                </select>
+              </div>` : ''}
+            ${lastAct ? `<div class="muted" style="margin-top:5px;">🕒 Tác động gần nhất: <b>${lastAct.actorName || 'Hệ thống'}</b> (${formatClock(lastAct.clockHour)}) — ${lastAct.reason || CURTAIN_LABELS_VI[lastAct.state] || ''}</div>` : ''}
+            <div class="btn-row" style="margin-top:8px;gap:6px;flex-wrap:wrap;">
+              <button class="btn-xs ${focusRoom.doorOpen ? 'btn-primary' : 'btn-secondary'}" id="res-toggle-door" data-room="${focusRoom.roomNumber}">
+                🚪 Cửa phòng: ${focusRoom.doorOpen ? 'Đang MỞ' : 'Đang ĐÓNG'}
+              </button>
+              <button class="btn-xs ${focusRoom.lightOn !== false ? 'btn-primary' : 'btn-secondary'}" id="res-toggle-light" data-room="${focusRoom.roomNumber}">
+                💡 Đèn phòng: ${focusRoom.lightOn !== false ? 'BẬT' : 'TẮT'}
+              </button>
+              <button class="btn-xs ${focusRoom.tvOn ? 'btn-primary' : 'btn-secondary'}" id="res-toggle-tv" data-room="${focusRoom.roomNumber}">
+                📺 TV phòng: ${focusRoom.tvOn ? 'BẬT' : 'TẮT'}
+              </button>
+              <button class="btn-xs ${focusRoom.wardrobeOpen ? 'btn-primary' : 'btn-secondary'}" id="res-toggle-ward" data-room="${focusRoom.roomNumber}">
+                🧥 Tủ áo: ${focusRoom.wardrobeOpen ? 'Đang MỞ' : 'Đang ĐÓNG'}
+              </button>
+            </div>
+          </div>
+        </div>`;
+      })() : ''}
+
+      <div class="tab-strip">
+        <button class="tab-btn ${activeWing === 'Tây' ? 'active' : ''}" data-reswing="Tây">🏢 Cánh Tây (Tầng 1) · ROOM 01 – 15</button>
+        <button class="tab-btn ${activeWing === 'Đông' ? 'active' : ''}" data-reswing="Đông">🛏️ Cánh Đông (Tầng 1) · ROOM 16 – 30</button>
+      </div>
+
+      <div class="grid-2" style="max-height:38vh;overflow-y:auto;">
+        ${wingRooms.map((r) => {
+          const isOcc = r.status === 'OCCUPIED' && r.occupantId;
+          const isFocused = focusRoom && focusRoom.roomNumber === r.roomNumber;
+          const doorShort = r.doorOpen ? '🔓 Mở' : '🚪 Đóng';
+          const curtainShort = r.curtainState === 'closed' ? '🪟 Đóng kín' : r.curtainState === 'partial_closed' ? '🪟 Khép vừa' : r.curtainState === 'partial_open' ? '🪟 Mở hé' : '🪟 Mở hết';
+          return `
+            <div class="card-item ${isFocused ? 'urgent' : ''}" style="padding:8px 10px;">
+              <div class="card-head">
+                <strong>${r.code} · Cánh ${r.wing} (T1)</strong>
+                <span class="tag ${isOcc ? 'ok' : ''}">${isOcc ? (r.shirtNumber ? `#${r.shirtNumber}` : 'Đang ở') : 'AVAILABLE'}</span>
+              </div>
+              ${isOcc
+                ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:4px;">
+                    <span><b>${r.occupantName}</b> <span class="muted">(${r.position})</span></span>
+                    <div style="display:flex;gap:4px;">
+                      <button class="btn-xs btn-secondary res-quick-door-btn" data-room="${r.roomNumber}" title="Mở/Đóng cửa">${doorShort}</button>
+                      <button class="btn-xs btn-secondary res-focus-room-btn" data-room="${r.roomNumber}">${curtainShort}</button>
+                      <button class="btn-xs btn-secondary open-profile-btn" data-pid="${r.occupantId}">Hồ sơ</button>
+                    </div>
+                  </div>`
+                : `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:4px;">
+                    <span class="muted">Phòng riêng trống · Sẵn sàng cấp 1 cầu thủ đội một</span>
+                    <div style="display:flex;gap:4px;">
+                      <button class="btn-xs btn-secondary res-quick-door-btn" data-room="${r.roomNumber}" title="Mở/Đóng cửa">${doorShort}</button>
+                      <button class="btn-xs btn-secondary res-focus-room-btn" data-room="${r.roomNumber}">${curtainShort}</button>
+                    </div>
+                  </div>`}
+            </div>`;
+        }).join('')}
+      </div>
+
+      ${(resSys.activityLog || []).length > 0 ? `
+        <div class="section-label">📜 Nhật ký Cấp / Giải phóng Phòng gần đây</div>
+        <div class="scroll-list" style="max-height:14vh;">
+          ${resSys.activityLog.slice(0, 6).map((l) => `<div class="card-item" style="padding:5px 8px;"><span class="muted">${l.date}:</span> ${l.text}</div>`).join('')}
+        </div>` : ''}
+
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn-primary" id="res-go-f1">🏢 Tới Sảnh Tầng 1 & Logo PSG 3D</button>
+        <button class="btn-accent" id="res-go-lounge">🛋️ Tới Khu Sinh Hoạt Chung (Tầng 1)</button>
+        <button class="btn-secondary" id="res-open-squad">👥 Danh sách Đội một</button>
+      </div>`;
+
+    this.openModal('🏨 TÒA NHÀ NGHỈ DƯỠNG CẦU THỦ PSG (8 TẦNG · 30 PHÒNG TẦNG 1)', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({
+      routeKey: focusRoomNumber ? `player_residence:${focusRoomNumber}` : 'player_residence',
+      screen: 'player_residence',
+      label: focusRoom ? `Phòng ${focusRoom.code}` : 'Player Residence (30 Phòng)',
+      params: { focusRoomNumber }
+    }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
+
+    document.querySelectorAll('[data-reswing]').forEach((b) => {
+      b.addEventListener('click', () => {
+        this._residenceWingTab = b.dataset.reswing === 'Đông' ? 'Đông' : 'Tây';
+        this.audio.playClick();
+        this.openPlayerResidenceModal(null, { skipHistory: true });
+      });
+    });
+    document.querySelectorAll('#modal-body .res-focus-room-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.audio.playClick();
+        this.openPlayerResidenceModal(Number(b.dataset.room), { skipHistory: true });
+      });
+    });
+    document.querySelectorAll('#modal-body .res-quick-door-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const rn = Number(b.dataset.room);
+        const isOpen = resSys.toggleRoomDoor(rn, { by: 'player' });
+        this.audio.playDoor();
+        this.toast(`${isOpen ? '🚪 Đã mở cửa' : '🚪 Đã đóng cửa'} ROOM ${String(rn).padStart(2, '0')}`, 'info');
+        this.openPlayerResidenceModal(focusRoomNumber, { skipHistory: true });
+      });
+    });
+    document.getElementById('res-toggle-door')?.addEventListener('click', (e) => {
+      const rn = Number(e.currentTarget.dataset.room);
+      const isOpen = resSys.toggleRoomDoor(rn, { by: 'player' });
+      this.audio.playDoor();
+      this.toast(`${isOpen ? '🚪 Đã mở cửa' : '🚪 Đã đóng cửa'} ROOM ${String(rn).padStart(2, '0')}`, 'info');
+      this.openPlayerResidenceModal(rn, { skipHistory: true });
+    });
+    document.getElementById('res-toggle-light')?.addEventListener('click', (e) => {
+      const rn = Number(e.currentTarget.dataset.room);
+      const isOn = resSys.toggleRoomLight(rn);
+      this.audio.playClick();
+      this.toast(`💡 ${isOn ? 'Đã bật' : 'Đã tắt'} đèn ROOM ${String(rn).padStart(2, '0')}`, 'info');
+      this.openPlayerResidenceModal(rn, { skipHistory: true });
+    });
+    document.getElementById('res-toggle-tv')?.addEventListener('click', (e) => {
+      const rn = Number(e.currentTarget.dataset.room);
+      const isOn = resSys.toggleRoomTv(rn);
+      this.audio.playClick();
+      this.toast(`📺 ${isOn ? 'Đã bật' : 'Đã tắt'} TV ROOM ${String(rn).padStart(2, '0')}`, 'info');
+      this.openPlayerResidenceModal(rn, { skipHistory: true });
+    });
+    document.getElementById('res-toggle-ward')?.addEventListener('click', (e) => {
+      const rn = Number(e.currentTarget.dataset.room);
+      const isOpen = resSys.toggleRoomWardrobe(rn);
+      this.audio.playDoor();
+      this.toast(`🧥 ${isOpen ? 'Đã mở' : 'Đã đóng'} tủ áo ROOM ${String(rn).padStart(2, '0')}`, 'info');
+      this.openPlayerResidenceModal(rn, { skipHistory: true });
+    });
+    document.querySelectorAll('#modal-body .res-curtain-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const rn = Number(b.dataset.room);
+        const st = b.dataset.state;
+        if (resSys.setRoomCurtainState(rn, st, { by: 'player', reason: 'Chủ tịch điều chỉnh rèm trực tiếp' })) {
+          this.audio.playClick();
+          this.toast(`🪟 Đã chỉnh rèm ROOM ${String(rn).padStart(2, '0')} sang: ${CURTAIN_LABELS_VI[st]}`, 'info');
+          this.openPlayerResidenceModal(rn, { skipHistory: true });
+        }
+      });
+    });
+    document.getElementById('res-toggle-curtain-auto')?.addEventListener('click', (e) => {
+      const rn = Number(e.currentTarget.dataset.room);
+      const rm = resSys.getRoomByNumber(rn);
+      if (rm) {
+        const nextAuto = rm.curtainAutomationEnabled === false;
+        resSys.setRoomCurtainAutomation(rn, nextAuto);
+        this.audio.playClick();
+        this.toast(`🤖 Tự động kéo rèm NPC cho ${rm.code}: ${nextAuto ? 'ĐÃ BẬT' : 'ĐÃ TẮT'}`, 'info');
+        this.openPlayerResidenceModal(rn, { skipHistory: true });
+      }
+    });
+    document.getElementById('res-privacy-select')?.addEventListener('change', (e) => {
+      const pid = e.currentTarget.dataset.pid;
+      const pref = e.currentTarget.value;
+      if (resSys.setPlayerPrivacyPreference(pid, pref)) {
+        this.audio.playClick();
+        this.toast(`🔒 Đã cập nhật thói quen riêng tư: ${PRIVACY_LABELS_VI[pref]}`, 'info');
+      }
+    });
+    document.querySelectorAll('#modal-body .open-profile-btn').forEach((b) => {
+      b.addEventListener('click', () => this.openPlayerProfileModal(b.dataset.pid, 'overview'));
+    });
+    document.getElementById('res-go-f1')?.addEventListener('click', () => { this.audio.playDoor(); this.cb.teleport('residence'); this.closeModal(true); });
+    document.getElementById('res-go-lounge')?.addEventListener('click', () => { this.audio.playDoor(); this.cb.teleport('residence_floor2'); this.closeModal(true); });
+    document.getElementById('res-open-squad')?.addEventListener('click', () => this.openComputer('squad'));
+  }
+
+  openTechnicalDepartmentModal(opts = {}) {
+    const squad = this.state.getPsgSquad();
+    const totalVal = squad.reduce((s, p) => s + (p.valuation?.current ?? p.value ?? 0), 0);
+    const activeBids = (this.state.transferSystem?.incomingBids || []).filter((b) => b.status === 'pending').length;
+    const sd = this.state.managerSystem?.getActiveByRole('sporting_director');
+    const tacAnalyst = this.state.coachingSystem?.getCoachByRole('tactical_analyst');
+    const perfAnalyst = this.state.coachingSystem?.getCoachByRole('performance_analyst');
+    const leadScout = this.state.staffDb?.active?.find((s) => s.roleKey === 'chief_scout' || s.id === 'npc_scout2');
+
+    const html = `
+      <div class="kpi-grid">
+        <div class="kpi-card"><span>Quân số Đội Một</span><strong>${squad.length} / 30</strong></div>
+        <div class="kpi-card"><span>Tổng Giá trị Đội hình</span><strong>€${Math.round(totalVal)}M</strong></div>
+        <div class="kpi-card"><span>Sơ đồ đang dùng</span><strong>${this.state.formationSystem?.formation || '4-3-3'}</strong></div>
+        <div class="kpi-card"><span>Đề nghị CN chờ xử lý</span><strong>${activeBids} hồ sơ</strong></div>
+      </div>
+
+      <div class="card-item">
+        <div class="card-head">
+          <strong>📊 PHÒNG KỸ THUẬT PSG · PHÂN TÍCH, TUYỂN TRẠCH & ĐỊNH GIÁ</strong>
+          <span class="tag ok">Trụ sở Chính PSG (HQ)</span>
+        </div>
+        <div class="muted">Sau khi chuyển toàn bộ Trung tâm Y tế sang <b>PSG Training Center</b>, căn phòng tại Trụ sở Chính đã được tái quy hoạch thành Trung tâm Kỹ thuật, Phân tích dữ liệu trận đấu, Tuyển trạch & Đánh giá chuyển nhượng của Chủ tịch.</div>
+      </div>
+
+      <div class="grid-2" style="margin-bottom:8px;">
+        <div class="card-item" style="padding:8px 10px;"><b>🎯 Giám đốc Thể thao:</b> ${sd?.name || 'Luis Campos'}<div class="muted">Phối hợp chiến lược chuyển nhượng & cấu trúc đội hình</div></div>
+        <div class="card-item" style="padding:8px 10px;"><b>📐 Chuyên viên Chiến thuật:</b> ${tacAnalyst?.name || 'Phân tích chiến thuật'}<div class="muted">Mổ băng đối thủ, heatmap & sơ đồ thi đấu</div></div>
+        <div class="card-item" style="padding:8px 10px;"><b>📈 Chuyên viên Hiệu suất:</b> ${perfAnalyst?.name || 'Dữ liệu hiệu suất'}<div class="muted">Theo dõi thông số thể lực, xG và phong độ</div></div>
+        <div class="card-item" style="padding:8px 10px;"><b>🔎 Trưởng ban Tuyển trạch:</b> ${leadScout?.name || 'Tuyển trạch viên'}<div class="muted">Săn tìm tài năng & báo cáo mục tiêu chuyển nhượng</div></div>
+      </div>
+
+      <div class="section-label">🖥️ Truy cập nhanh Hệ thống Chuyên môn</div>
+      <div class="grid-2">
+        <button class="btn-primary" id="tech-open-transfers">🔁 Thị Trường Chuyển Nhượng & Tuyển Trạch</button>
+        <button class="btn-accent" id="tech-open-valuation">💎 Trung Tâm Định Giá Cầu Thủ</button>
+        <button class="btn-secondary" id="tech-open-formation">🧩 Chiến Thuật & Đội Hình Thi Đấu</button>
+        <button class="btn-secondary" id="tech-open-squad">📋 Hồ Sơ & Chỉ Số Cầu Thủ PSG</button>
+        <button class="btn-secondary" id="tech-open-coach">👔 Ban Huấn Luyện & Chuyên Viên (12 Vị Trí)</button>
+        <button class="btn-secondary" id="tech-go-training">⚽ Sang Khu Huấn Luyện PSG Training Center</button>
+      </div>`;
+
+    this.openModal('📊 PHÒNG KỸ THUẬT PSG · TECHNICAL & ANALYTICS DEPT', html, 'wide', { skipRefreshBack: true });
+    this._dirtyTracker = { baseline: new Map(), dirty: false, activeLockReason: null };
+    this._recordNavigation({ routeKey: 'technical_dept', screen: 'technical_dept', label: 'Phòng Kỹ Thuật PSG' }, opts);
+    this._bindScrollAndCollapseTrackers();
+    this._applyDomSnapshotAfterRender(opts.restoredSnapshot);
+
+    document.getElementById('tech-open-transfers')?.addEventListener('click', () => this.openComputer('transfers'));
+    document.getElementById('tech-open-valuation')?.addEventListener('click', () => this.openComputer('valuation'));
+    document.getElementById('tech-open-formation')?.addEventListener('click', () => this.openComputer('formation'));
+    document.getElementById('tech-open-squad')?.addEventListener('click', () => this.openComputer('squad'));
+    document.getElementById('tech-open-coach')?.addEventListener('click', () => { this.staffSubTab = 'coaching_12'; this.openComputer('coach'); });
+    document.getElementById('tech-go-training')?.addEventListener('click', () => { this.audio.playDoor(); this.cb.teleport('training_pitch'); this.closeModal(true); });
+  }
 }
+

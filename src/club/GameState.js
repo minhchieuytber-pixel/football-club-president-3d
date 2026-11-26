@@ -33,6 +33,9 @@ import { ContextPressConferenceRunner } from '../media/PressConferenceSystem.js'
 import { ClubRelationshipSystem } from '../relations/ClubRelationshipSystem.js';
 import { DynamicMarketValueSystem } from '../valuation/DynamicMarketValueSystem.js';
 import { GlobalClubAISystem } from '../ai/GlobalClubAISystem.js';
+import { ExecutiveDocumentSystem } from '../executive/ExecutiveDocumentSystem.js';
+import { DecisionExecutionSystem } from '../executive/DecisionExecutionSystem.js';
+import { PlayerResidenceSystem } from './PlayerResidenceSystem.js';
 
 export class GameState {
   constructor() {
@@ -46,6 +49,7 @@ export class GameState {
   }
 
   notifySquadChanged() {
+    this.playerResidenceSystem?.syncWithSquad();
     this._squadListeners.forEach((fn) => { try { fn(this); } catch (_) {} });
   }
 
@@ -247,6 +251,12 @@ export class GameState {
     this.matchdaySystem.syncScheduleFromState();
     this.valuationSystem = new DynamicMarketValueSystem(this);
     this.globalClubAI = new GlobalClubAISystem(this);
+    this.documentSystem = new ExecutiveDocumentSystem(this);
+    this.executionSystem = new DecisionExecutionSystem(this);
+    this.playerResidenceSystem = new PlayerResidenceSystem(this);
+    this.formationSystem.onChange(() => {
+      this.playerResidenceSystem?.syncWithSquad({ silentAlert: true, silentLog: true });
+    });
 
     this._bindCoreEventBus();
 
@@ -264,6 +274,7 @@ export class GameState {
       imageType: 'boardroom', imageCaption: 'BAN LÃNH ĐẠO PSG · MÙA GIẢI MỚI', relatedEntity: 'Chủ tịch Phạm Minh Chiêu', fanTone: 'win'
     });
     this.morningNewsSystem.generateDigest(true);
+    this.documentSystem.syncFromClubState();
   }
 
   _bindCoreEventBus() {
@@ -310,12 +321,11 @@ export class GameState {
   }
 
   getTotalPendingApprovalsCount() {
-    const rep = this.pendingReports?.length || 0;
-    const bids = this.transferSystem?.incomingBids?.length || 0;
+    const docsPending = this.documentSystem ? this.documentSystem.getPendingDocuments().length : (this.pendingReports?.length || 0);
+    const blockedTasks = this.executionSystem ? this.executionSystem.getActiveTasks().filter((t) => t.status === 'BLOCKED').length : 0;
     const rumors = (this.rumorCrisisSystem?.rumors || []).filter((r) => !r.handled).length;
-    const crises = (this.rumorCrisisSystem?.crises || []).filter((c) => c.status === 'active').length;
     const events = this.signingEventSystem?.pendingEvents?.length || 0;
-    return rep + bids + rumors + crises + events;
+    return docsPending + blockedTasks + rumors + events;
   }
 
   // ==================== SINGLE SOURCE OF TRUTH LOOKUPS ====================
@@ -395,6 +405,7 @@ export class GameState {
 
     // 3. Tiến độ nhiệm vụ, Bản tin ngày & Bản Tin Sáng PSG Morning News
     TaskAssignmentSystem.advanceTasks(this, 35 * daysPassed);
+    this.executionSystem?.advanceTimeDays(daysPassed);
     this.generateDailyBriefing();
     this.morningNewsSystem?.generateDigest(false);
     this.matchdaySystem?.onTimeAdvanced(this.timeSystem, { bulkJump: daysPassed > 1 });
@@ -748,6 +759,7 @@ export class GameState {
     }
 
     TaskAssignmentSystem.advanceTasks(this, 60);
+    this.documentSystem?.syncFromClubState();
     this.generateDailyBriefing();
     this.morningNewsSystem?.generateDigest(true);
     if (!this.getNextFixture()) this.concludeSeason();
@@ -908,6 +920,9 @@ export class GameState {
       matchdayState: this.matchdaySystem?.exportState?.() || null,
       valuationState: this.valuationSystem?.exportState?.() || null,
       globalClubAIState: this.globalClubAI?.exportState?.() || null,
+      documentState: this.documentSystem?.exportState?.() || null,
+      executionState: this.executionSystem?.exportState?.() || null,
+      residenceState: this.playerResidenceSystem?.exportState?.() || null,
       uiPrefs: this.uiPrefs || null,
       playerPos
     };
@@ -968,6 +983,12 @@ export class GameState {
     this.ensureFinanceIntegrity();
     this.globalClubAI?.importState(snap.globalClubAIState || null);
     this.valuationSystem?.importState(snap.valuationState || null);
+
+    if (snap.documentState) this.documentSystem?.importState(snap.documentState);
+    else this.documentSystem?.syncFromClubState();
+    if (snap.executionState) this.executionSystem?.importState(snap.executionState);
+    if (snap.residenceState) this.playerResidenceSystem?.importState(snap.residenceState);
+    else this.playerResidenceSystem?.syncWithSquad({ silentAlert: true, silentLog: true });
 
     if (snap.uiPrefs) this.uiPrefs = snap.uiPrefs;
 

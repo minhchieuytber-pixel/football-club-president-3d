@@ -877,6 +877,129 @@
       .md-tabs-sticky { overflow-x: auto; flex-wrap: nowrap; }
       .md-tabs-sticky .tab-btn { flex-shrink: 0; min-height: 44px; }
     }
+
+    /* Giao diện Đọc Hồ Sơ Văn Bản Giấy & Khay KHẨN CẤP (tách biệt hẳn màn hình Máy tính Mac OS) */
+    .paper-desk-header {
+      background: #fffbeb; color: #0f172a; border-radius: 11px; padding: 10px 13px;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+    }
+    .paper-kicker { font-size: 10.5px; font-weight: 800; letter-spacing: 0.7px; color: #475569; text-transform: uppercase; }
+    .paper-muted { color: #475569; font-size: 11.5px; }
+    .paper-list-card {
+      background: #fefce8; color: #0f172a; border: 1px solid #cbd5e1; border-left: 4px solid #1e3a8a;
+      border-radius: 10px; padding: 9px 12px; margin-bottom: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+    }
+    .paper-list-card.is-urgent { border-left-color: #dc2626; background: #fff7ed; }
+    .paper-meta-row { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: #334155; margin-top: 4px; }
+    .urgent-tray-banner {
+      background: linear-gradient(135deg, #7f1d1d, #b91c1c); border: 1.5px solid #d4af37;
+      border-radius: 12px; padding: 11px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .urgent-badge-pill {
+      background: #fef08a; color: #7f1d1d; font-weight: 900; font-size: 13px;
+      padding: 6px 12px; border-radius: 8px; border: 2px solid #d4af37; white-space: nowrap;
+    }
+    .paper-reader-shell { display: flex; flex-direction: column; gap: 8px; }
+    .paper-reader-topbar {
+      display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;
+      background: #1e293b; padding: 7px 10px; border-radius: 10px;
+    }
+    .paper-page-tabs { display: flex; gap: 5px; flex-wrap: wrap; }
+    .paper-page-nav { display: flex; gap: 5px; }
+    .paper-sheet {
+      background: linear-gradient(180deg, #fffdf7 0%, #fef9ee 100%); color: #0f172a;
+      border: 1px solid #d6cbb5; border-radius: 8px; padding: 14px 16px;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
+      font-family: "Georgia", "Times New Roman", serif;
+    }
+    .paper-crest-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-bottom: 2px solid #00205b; padding-bottom: 6px; margin-bottom: 8px; }
+    .paper-seal { font-size: 11px; font-weight: 800; color: #00205b; letter-spacing: 0.9px; font-family: sans-serif; }
+    .paper-doc-title { margin: 6px 0 3px; font-size: 16.5px; color: #00205b; line-height: 1.3; }
+    .paper-doc-sub { font-size: 12px; color: #475569; margin-bottom: 10px; font-family: sans-serif; }
+    .paper-grid-meta {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px 12px;
+      background: rgba(15, 23, 42, 0.05); border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px;
+      margin-bottom: 10px; font-family: sans-serif; font-size: 11.5px;
+    }
+    .paper-grid-meta span { color: #64748b; margin-right: 4px; }
+    .paper-callout {
+      background: rgba(30, 58, 138, 0.06); border-left: 3px solid #00205b; padding: 8px 10px; border-radius: 5px;
+      margin-top: 8px; font-family: sans-serif; font-size: 12px; line-height: 1.5;
+    }
+    .paper-callout.warn { background: rgba(180, 83, 9, 0.08); border-left-color: #b45309; }
+    .paper-callout p { margin: 3px 0; color: #1e293b; }
+    .paper-page-num { font-size: 10.5px; font-weight: 700; color: #64748b; text-transform: uppercase; font-family: sans-serif; }
+    .paper-bullets { margin: 6px 0 0 18px; padding: 0; font-family: sans-serif; font-size: 12px; line-height: 1.55; color: #1e293b; }
+    .paper-bullets li { margin-bottom: 4px; }
+
+    /* Menu Tương tác Hồ sơ nổi khi trỏ chuột / tâm ngắm vào chồng hồ sơ hoặc Khay Đỏ URGENT */
+    .desk-doc-menu {
+      position: fixed;
+      left: 50%;
+      bottom: max(76px, calc(env(safe-area-inset-bottom) + 64px));
+      transform: translate(-50%, 10px);
+      z-index: 32;
+      width: min(440px, 92vw);
+      background: rgba(8, 15, 32, 0.94);
+      border: 1.5px solid var(--psg-gold);
+      border-radius: 14px;
+      padding: 10px 12px;
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.72);
+      backdrop-filter: blur(14px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.16s ease, transform 0.16s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      color: #f8fafc;
+    }
+    .desk-doc-menu.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translate(-50%, 0);
+    }
+    .desk-doc-menu.is-urgent {
+      border-color: #f87171;
+      box-shadow: 0 18px 44px rgba(153, 27, 27, 0.45);
+    }
+    .ddm-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .ddm-title-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+    .ddm-icon { font-size: 20px; flex-shrink: 0; }
+    .ddm-title { font-size: 13px; font-weight: 800; color: #fef3c7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ddm-sub { font-size: 10.5px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ddm-badge {
+      padding: 3px 8px; border-radius: 8px; font-size: 11px; font-weight: 800; white-space: nowrap;
+      background: rgba(30, 58, 138, 0.85); border: 1px solid rgba(147, 197, 253, 0.45); color: #dbeafe;
+    }
+    .ddm-badge.urgent { background: #b91c1c; border-color: #fde047; color: #fef08a; }
+    .ddm-close {
+      background: rgba(255,255,255,0.1); color: #cbd5e1; border: none; border-radius: 7px;
+      width: 24px; height: 24px; font-size: 12px; cursor: pointer; flex-shrink: 0;
+    }
+    .ddm-preview-list { display: flex; flex-direction: column; gap: 4px; }
+    .ddm-doc-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      width: 100%; text-align: left;
+      background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px; padding: 5px 8px; color: #e2e8f0; font-size: 11.5px; cursor: pointer;
+    }
+    .ddm-doc-row:hover { background: rgba(59, 130, 246, 0.22); border-color: rgba(212, 175, 55, 0.65); }
+    .ddm-doc-row.urgent { border-left: 3px solid #ef4444; background: rgba(153, 27, 27, 0.22); }
+    .ddm-doc-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+    .ddm-doc-meta { font-size: 10.5px; color: #fde68a; white-space: nowrap; flex-shrink: 0; }
+    .ddm-empty { font-size: 11px; color: #94a3b8; padding: 3px 2px; }
+    .ddm-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ddm-btn {
+      flex: 1; min-width: 112px; border: 1px solid rgba(255,255,255,0.2); border-radius: 9px;
+      padding: 6px 9px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+      background: rgba(30, 41, 59, 0.92); color: #f8fafc;
+    }
+    .ddm-btn.primary { background: linear-gradient(135deg, #004170, #00205b); border-color: var(--psg-gold); color: #fef3c7; }
+    .ddm-btn.urgent { background: linear-gradient(135deg, #b91c1c, #7f1d1d); border-color: #fde047; color: #fef08a; }
+    .ddm-btn:hover { filter: brightness(1.12); }
   </style>
 </head>
 <body>
@@ -919,6 +1042,9 @@
 
     <!-- Joystick cảm ứng góc dưới trái -->
     <div id="joy-zone" aria-label="Joystick di chuyển"><div id="joy-knob"></div></div>
+
+    <!-- Menu Tương tác nổi khi trỏ vào chồng hồ sơ / Khay KHẨN trên Bàn Chủ tịch -->
+    <div id="desk-doc-menu" class="desk-doc-menu" role="region" aria-label="Menu tương tác hồ sơ"></div>
 
     <!-- Góc dưới phải tối giản: CHỈ giữ Điện thoại & Chạy; nút Tương tác chỉ hiện khi trỏ vào vật thể -->
     <div class="right-controls">

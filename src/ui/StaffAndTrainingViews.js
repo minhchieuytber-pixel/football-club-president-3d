@@ -134,12 +134,12 @@ export function renderTrainingTabHTML(state, subTab = 'schedule') {
     body = `
       <div class="card-item urgent">
         <div class="card-head">
-          <strong>🏟️ Tập luyện 3D tại SVĐ Parc des Princes (${state.timeSystem.getTimeString()})</strong>
+          <strong>⚽ Tập luyện 3D tại PARIS SAINT-GERMAIN TRAINING CENTER (${state.timeSystem.getTimeString()})</strong>
           <span class="tag ok">${activeSlot ? activeSlot.title : 'Ngoài giờ tập · Phục hồi'}</span>
         </div>
-        <div class="muted">Địa điểm: <b>SVĐ Parc des Princes</b> · Phụ trách: <b>${activeSlot ? activeSlot.ownerLabel : 'Ban huấn luyện'}</b> · Sơ đồ đồng bộ: <b>${state.formationSystem.formation}</b> · BHL trên sân: <b>${state.coachingSystem.getActiveCount()}/12</b></div>
+        <div class="muted">Địa điểm: <b>PSG TRAINING PITCH · Khu Huấn Luyện PSG</b> · Phụ trách: <b>${activeSlot ? activeSlot.ownerLabel : 'Ban huấn luyện'}</b> · Sơ đồ đồng bộ: <b>${state.formationSystem.formation}</b> · BHL trên sân: <b>${state.coachingSystem.getActiveCount()}/12</b></div>
         <div class="btn-row" style="margin-top:8px;">
-          <button class="btn-primary" id="tr-go-pitch">🏟️ Đến ngay SVĐ Parc des Princes quan sát tập luyện 3D</button>
+          <button class="btn-primary" id="tr-go-pitch">⚽ Đến ngay Sân Tập PSG Training Center quan sát tập luyện 3D</button>
           <button class="btn-accent" id="tr-run-eval">📊 Tổng kết & Đánh giá buổi tập ngay</button>
         </div>
       </div>

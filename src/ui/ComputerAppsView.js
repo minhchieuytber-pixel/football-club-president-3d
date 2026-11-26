@@ -13,6 +13,7 @@ import { REPUTATION_PILLARS } from '../club/ReputationSystem.js';
 import { FACILITY_DEFS } from '../club/CommercialFacilitySystem.js';
 import { RUMOR_STATUS } from '../media/RumorAndCrisisSystem.js';
 import { renderSigningEventHubHTML } from './SigningEventView.js';
+import { renderDailyBriefingWidgetHTML } from './ExecutiveMacViews.js';
 
 function esc(str) {
   return String(str ?? '')
@@ -71,6 +72,8 @@ export function renderExecutiveOverviewHTML(state, appsList = []) {
       </div>
     </div>
 
+    ${renderDailyBriefingWidgetHTML(state)}
+
     ${activeCrises.length > 0 ? `
       <div class="card-item urgent">
         <div class="card-head">
@@ -100,7 +103,7 @@ export function renderExecutiveOverviewHTML(state, appsList = []) {
       </div>
     </div>
 
-    <div class="section-label">💻 Toàn bộ 17 Ứng dụng Quản trị PSG</div>
+    <div class="section-label">💻 Toàn bộ ${appsList.length || 20} Ứng dụng Quản trị PSG</div>
     <div class="app-launcher-grid">
       ${appsList.map((a) => `
         <button class="app-tile-btn" data-pctab="${a.id}">
@@ -224,6 +227,7 @@ export function renderSponsorsHTML(state) {
             <p class="muted">Mục tiêu: ${esc(o.objective)}</p>
             <div class="btn-row">
               <button class="btn-xs ${eligible ? 'btn-primary' : 'btn-secondary'} sp-sign-offer" data-oid="${o.id}" ${!eligible ? 'disabled' : ''}>${eligible ? '✍️ Ký Hợp Đồng Tài Trợ & Tổ Chức Lễ Công Bố' : `Chưa đủ uy tín (${o.minPrestige})`}</button>
+              <button class="btn-xs btn-secondary sp-open-paper" data-oid="${o.id}">📄 Mở Hồ Sơ Giấy</button>
             </div>
           </div>`;
       }).join('')}
@@ -278,7 +282,8 @@ export function renderFacilitiesHTML(state) {
             <div class="btn-row">
               ${isMax
                 ? '<span class="tag ok">Đã đạt chuẩn Tối đa Châu Âu</span>'
-                : `<button class="btn-xs btn-primary fac-upgrade-btn" data-fid="${def.id}">⬆️ Nâng cấp lên Cấp ${fac.level + 1} (-€${nextCost}M)</button>`}
+                : `<button class="btn-xs btn-primary fac-upgrade-btn" data-fid="${def.id}">⬆️ Nâng cấp lên Cấp ${fac.level + 1} (-€${nextCost}M)</button>
+                   <button class="btn-xs btn-secondary fac-raise-doc" data-fid="${def.id}" data-cost="${nextCost}" data-lvl="${fac.level + 1}">📄 Trình Hồ Sơ Giấy</button>`}
             </div>
           </div>`;
       }).join('')}

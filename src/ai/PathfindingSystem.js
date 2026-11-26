@@ -11,20 +11,20 @@ const GRID_DIRS = [
 export class PathfindingSystem {
   constructor(campusScene = null) {
     this.campus = campusScene;
-    this.gridStep = 1.0; // Độ phân giải lưới 1m x 1m trên toàn khuôn viên 120m x 116m
-    this.minX = -60;
-    this.maxX = 60;
-    this.minZ = -62;
+    this.gridStep = 1.0; // Độ phân giải lưới 1m x 1m bao phủ HQ + SVĐ + Khu Huấn Luyện PSG
+    this.minX = -65;
+    this.maxX = 240;
+    this.minZ = -150;
     this.maxZ = 54;
     this.cols = Math.ceil((this.maxX - this.minX) / this.gridStep);
     this.rows = Math.ceil((this.maxZ - this.minZ) / this.gridStep);
     this.staticGrid = null; // Uint8Array: 0 = đi được, 1 = vật cản cố định
 
-    // 2D Spatial Hash cho toàn bộ colliders (4m x 4m, bao phủ toàn khuôn viên gồm cả SVĐ Parc des Princes z ∈ [-200, 60])
+    // 2D Spatial Hash cho toàn bộ colliders (4m x 4m, bao phủ toàn khuôn viên gồm HQ, SVĐ Parc des Princes & Training Center)
     this.hashStep = 4.0;
     this.hashMinX = -70;
-    this.hashMaxX = 78;
-    this.hashMinZ = -200;
+    this.hashMaxX = 250;
+    this.hashMinZ = -205;
     this.hashMaxZ = 60;
     this.hashCols = Math.ceil((this.hashMaxX - this.hashMinX) / this.hashStep);
     this.hashRows = Math.ceil((this.hashMaxZ - this.hashMinZ) / this.hashStep);
@@ -123,12 +123,12 @@ export class PathfindingSystem {
 
       se_1:       { x: 13.2,  z: 12.2 },
       se_2:       { x: 27.2,  z: 12.2 },
-      medic_door: { x: 13.2,  z: 13.8, doorId: 'door_medical' },
-      medic_in:   { x: 13.2,  z: 16.0 },
+      tech_door:  { x: 13.2,  z: 13.8, doorId: 'door_medical' },
+      tech_in:    { x: 13.2,  z: 16.0 },
       hr_door:    { x: 27.2,  z: 13.8, doorId: 'door_hr' },
       hr_in:      { x: 27.2,  z: 16.0 },
 
-      // Ngoài trời: Sân tập chính, Khu tập chuyên môn & Tòa nhà Phòng Thay Đồ
+      // Ngoài trời: Công viên nội bộ HQ -> SVĐ Parc des Princes & Bảo tàng PSG
       out_north:    { x: 3.0,   z: -25.5 },
       out_nw:       { x: -15.0, z: -28.0 },
       out_ne:       { x: 20.0,  z: -28.0 },
@@ -150,19 +150,57 @@ export class PathfindingSystem {
       museum_intl:     { x: 41.0, z: -48.2 },
       museum_legends:  { x: 42.0, z: -38.5 },
       museum_seasons:  { x: 27.5, z: -39.5 },
-      dr_outside:   { x: -23.2, z: -43.5 },
-      dr_door:      { x: -26.0, z: -43.5, doorId: 'door_dressing_main' },
-      dr_in:        { x: -28.5, z: -43.5 },
-      dr_center:    { x: -35.0, z: -41.0 },
-      dr_south:     { x: -34.0, z: -38.0 },
 
-      // Đường nội bộ kết nối Khu Sân Tập -> Khu Hậu Cần / Bãi xe -> Khu SVĐ Parc des Princes (trong cùng khuôn viên)
+      // Khuôn viên Huấn Luyện & Nghỉ Dưỡng PSG (PARIS SAINT-GERMAIN TRAINING CENTER: x ∈ [104, 236], z ∈ [-146, 28])
+      tc_boulevard:   { x: 88.0,  z: -24.0 },
+      tc_gate:        { x: 104.0, z: -24.0 },
+      tc_ave_mid:     { x: 114.0, z: -24.0 },
+      tc_ave_n:       { x: 114.0, z: -62.0 },
+      tc_ave_s:       { x: 114.0, z: 4.0 },
+      tc_parking:     { x: 122.0, z: -4.0 },
+      tc_plaza_w:     { x: 148.0, z: -24.0 },
+      tc_plaza_c:     { x: 168.0, z: -24.0 },
+      tc_plaza_e:     { x: 200.0, z: -24.0 },
+      tc_pitch_walk:  { x: 149.0, z: -56.0 },
+      tc_pitch_south: { x: 192.0, z: -58.0 },
+      tc_pitch_mid:   { x: 192.0, z: -86.0 },
+      tc_pitch_gk:    { x: 158.0, z: -86.0 },
+      tc_pitch_shoot: { x: 210.0, z: -86.0 },
+      tc_pitch_rehab: { x: 192.0, z: -131.0 },
+      tc_equip_door:  { x: 142.5, z: -74.0 },
+
+      // Tòa nhà Phòng Thay Đồ Đội Một PSG (di dời về Khu Huấn Luyện: cx=132, cz=-48)
+      dr_outside:     { x: 145.5, z: -47.5 },
+      dr_door:        { x: 143.0, z: -47.5, doorId: 'door_dressing_main' },
+      dr_in:          { x: 140.5, z: -47.5 },
+      dr_center:      { x: 134.5, z: -48.8 },
+      dr_south:       { x: 133.5, z: -43.0 },
+
+      // Trung tâm Y tế PSG (di dời về Khu Huấn Luyện: cx=168, cz=-38)
+      medic_door:     { x: 168.0, z: -28.0, doorId: 'door_tc_medical' },
+      medic_in:       { x: 168.0, z: -34.0 },
+      medic_recovery: { x: 172.0, z: -38.0 },
+
+      // Trung tâm Thể Lực & Gym (cx=200, cz=-38)
+      fit_door:       { x: 200.0, z: -28.0, doorId: 'door_fitness' },
+      fit_in:         { x: 200.0, z: -35.0 },
+
+      // Tòa nhà Nghỉ Dưỡng Cầu Thủ 8 Tầng Luxury Modern (Nội thất Tầng 1 · 30 Phòng · cx=184, cz=9)
+      res_door:       { x: 184.0, z: -6.0, doorId: 'door_residence' },
+      res_atrium:     { x: 184.0, z: 2.0 },
+      res_pass_w:     { x: 180.0, z: 7.2 },
+      res_pass_e:     { x: 188.0, z: 7.2 },
+      res_cor_w:      { x: 162.0, z: 9.0 },
+      res_cor_e:      { x: 204.0, z: 9.0 },
+      res_lounge:     { x: 184.0, z: 13.5 },
+
+      // Đường nội bộ kết nối Khu Trụ sở -> Khu Hậu Cần / Bãi xe -> Khu SVĐ Parc des Princes
       parkway_s:      { x: 0.0,   z: -62.0 },
       parkway_mid:    { x: 0.0,   z: -82.0 },
       logistics_hub:  { x: -20.0, z: -82.0 },
       stadium_park:   { x: 32.0,  z: -82.0 },
       east_road_s:    { x: 66.0,  z: 28.0 },
-      east_road_mid:  { x: 66.0,  z: -34.0 },
+      east_road_mid:  { x: 66.0,  z: -24.0 },
       east_road_n:    { x: 66.0,  z: -96.0 },
       stadium_plaza:  { x: 0.0,   z: -101.0 },
       stadium_pitch:  { x: 0.0,   z: -136.0 },
@@ -211,18 +249,18 @@ export class PathfindingSystem {
     link('sw_2', 'trans_door'); link('trans_door', 'trans_in');
 
     link('lobby_e', 'se_1'); link('se_1', 'se_2');
-    link('se_1', 'medic_door'); link('medic_door', 'medic_in');
+    link('se_1', 'tech_door'); link('tech_door', 'tech_in');
     link('se_2', 'hr_door'); link('hr_door', 'hr_in');
 
-    // Ngoài trời & Sân công viên & Bảo tàng PSG & Phòng Thay Đồ
+    // Ngoài trời & Sân công viên HQ & Bảo tàng PSG
     link('out_north', 'pitch_n'); link('out_north', 'out_nw'); link('out_north', 'out_ne');
-    link('out_nw', 'pitch_w'); link('out_nw', 'dr_outside');
+    link('out_nw', 'pitch_w');
     link('out_ne', 'pitch_e'); link('out_ne', 'museum_plaza');
     link('pitch_n', 'pitch_w'); link('pitch_n', 'pitch_e'); link('pitch_n', 'pitch_mid');
-    link('pitch_w', 'pitch_mid'); link('pitch_w', 'pitch_gk'); link('pitch_w', 'dr_outside');
+    link('pitch_w', 'pitch_mid'); link('pitch_w', 'pitch_gk');
     link('pitch_e', 'pitch_mid'); link('pitch_e', 'pitch_shoot'); link('pitch_e', 'museum_plaza');
     link('pitch_mid', 'pitch_gk'); link('pitch_mid', 'pitch_shoot'); link('pitch_mid', 'pitch_south');
-    link('pitch_gk', 'dr_outside'); link('pitch_gk', 'pitch_south');
+    link('pitch_gk', 'pitch_south');
     link('pitch_shoot', 'pitch_south'); link('pitch_shoot', 'museum_plaza');
     link('museum_plaza', 'museum_door'); link('museum_door', 'museum_in');
     link('museum_in', 'museum_domestic'); link('museum_in', 'museum_seasons');
@@ -230,7 +268,26 @@ export class PathfindingSystem {
     link('museum_history', 'museum_east_hall');
     link('museum_east_hall', 'museum_intl'); link('museum_east_hall', 'museum_legends');
     link('pitch_east_side', 'east_road_mid');
+
+    // Kết nối Khuôn viên Huấn Luyện & Nghỉ Dưỡng PSG (PARIS SAINT-GERMAIN TRAINING CENTER)
+    link('east_road_mid', 'tc_boulevard'); link('tc_boulevard', 'tc_gate'); link('tc_gate', 'tc_ave_mid');
+    link('tc_ave_mid', 'tc_ave_n'); link('tc_ave_mid', 'tc_ave_s'); link('tc_ave_s', 'tc_parking');
+    link('tc_ave_mid', 'tc_plaza_w'); link('tc_plaza_w', 'tc_plaza_c'); link('tc_plaza_c', 'tc_plaza_e');
+    link('tc_plaza_w', 'tc_pitch_walk'); link('tc_plaza_w', 'dr_outside');
+    link('tc_ave_n', 'dr_outside'); link('tc_ave_n', 'tc_equip_door');
+    link('tc_equip_door', 'tc_pitch_walk'); link('tc_pitch_walk', 'dr_outside');
+    link('tc_pitch_walk', 'tc_pitch_south');
+    link('tc_pitch_south', 'tc_pitch_mid'); link('tc_pitch_south', 'tc_pitch_gk'); link('tc_pitch_south', 'tc_pitch_shoot');
+    link('tc_pitch_mid', 'tc_pitch_gk'); link('tc_pitch_mid', 'tc_pitch_shoot'); link('tc_pitch_mid', 'tc_pitch_rehab');
+    link('tc_pitch_gk', 'tc_pitch_rehab'); link('tc_pitch_shoot', 'tc_pitch_rehab');
     link('dr_outside', 'dr_door'); link('dr_door', 'dr_in'); link('dr_in', 'dr_center'); link('dr_in', 'dr_south'); link('dr_center', 'dr_south');
+    link('tc_plaza_c', 'medic_door'); link('medic_door', 'medic_in'); link('medic_in', 'medic_recovery');
+    link('tc_plaza_e', 'fit_door'); link('fit_door', 'fit_in');
+    link('tc_plaza_c', 'res_door'); link('tc_plaza_w', 'res_door'); link('tc_plaza_e', 'res_door');
+    link('res_door', 'res_atrium');
+    link('res_atrium', 'res_pass_w'); link('res_atrium', 'res_pass_e');
+    link('res_pass_w', 'res_cor_w'); link('res_pass_w', 'res_lounge');
+    link('res_pass_e', 'res_cor_e'); link('res_pass_e', 'res_lounge');
 
     // Kết nối đường nội bộ & đại lộ cảnh quan tới SVĐ Parc des Princes trong cùng khuôn viên PSG
     link('pitch_south', 'parkway_s'); link('parkway_s', 'parkway_mid');
@@ -459,6 +516,47 @@ export class PathfindingSystem {
 
   // Xác định nút NavGraph gần nhất trong cùng phòng/khu vực (ưu tiên không nhảy qua tường)
   nearestNode(x, z) {
+    // 1. Khuôn viên Huấn Luyện & Nghỉ Dưỡng PSG (x > 78)
+    if (x > 78) {
+      if (x < 98) return 'tc_boulevard';
+      if (x < 109) return 'tc_gate';
+      if (x < 121 && z > -20) return z > -2 ? 'tc_ave_s' : 'tc_ave_mid';
+      if (x >= 115 && x < 142 && z > -20) return 'tc_parking';
+      // Phòng Thay Đồ Đội Một (x ∈ [121, 143], z ∈ [-60, -36])
+      if (x >= 120 && x <= 143.2 && z >= -61 && z <= -35) {
+        if (x > 138.5) return 'dr_in';
+        return z > -45.5 ? 'dr_south' : 'dr_center';
+      }
+      // Kho dụng cụ (136, -74)
+      if (x >= 128 && x <= 144 && z <= -66 && z >= -82) return 'tc_equip_door';
+      // Trung tâm Y tế PSG (x ∈ [155, 181], z ∈ [-48, -28])
+      if (x >= 154.5 && x <= 181.5 && z >= -48.5 && z <= -27.5) {
+        return x > 170 ? 'medic_recovery' : 'medic_in';
+      }
+      // Trung tâm Thể lực & Gym (x ∈ [185.5, 214.5], z ∈ [-48.5, -27.5])
+      if (x >= 185.5 && x <= 214.5 && z >= -48.5 && z <= -27.5) {
+        return 'fit_in';
+      }
+      // Tòa nhà Nghỉ Dưỡng Cầu Thủ (x ∈ [143.5, 224.5], z ∈ [-6.5, 24.5])
+      if (x >= 143.5 && x <= 224.5 && z >= -6.5 && z <= 24.5) {
+        if (x < 177) return 'res_cor_w';
+        if (x > 191) return 'res_cor_e';
+        return z > 12 ? 'res_lounge' : 'res_atrium';
+      }
+      // Sân tập phụ / Hồi phục
+      if (z < -114) return 'tc_pitch_rehab';
+      // Sân tập chính PSG Training Pitch (192, -86)
+      if (z < -62) {
+        if (x < 146) return 'tc_pitch_walk';
+        if (x < 172) return 'tc_pitch_gk';
+        if (x > 204) return 'tc_pitch_shoot';
+        return 'tc_pitch_mid';
+      }
+      if (z < -50) return x < 160 ? 'tc_pitch_walk' : 'tc_pitch_south';
+      if (z < -30) return x < 152 ? 'dr_outside' : 'tc_plaza_c';
+      return x < 156 ? 'tc_plaza_w' : (x > 186 ? 'tc_plaza_e' : 'tc_plaza_c');
+    }
+
     if (z < -112) return 'stadium_pitch';
     if (z < -92) return x > 42 ? 'east_road_n' : 'stadium_plaza';
     if (z < -60) return x < -12 ? 'logistics_hub' : (x > 18 ? 'stadium_park' : (z < -72 ? 'parkway_mid' : 'parkway_s'));
@@ -468,7 +566,6 @@ export class PathfindingSystem {
       if (z > 2.2) return x > 49 ? 'press_stage_l' : (z > 8 ? 'press_aisle' : 'press_in');
       return 'media_corridor';
     }
-    if (x < -25.2 && z < -31.5 && z > -56.5) return x < -31 ? 'dr_center' : 'dr_in';
     if (x >= 18.0 && x <= 50.2 && z >= -57.2 && z <= -30.8) {
       if (x < 22.2) return 'museum_in';
       if (x < 34.5) {
@@ -509,7 +606,7 @@ export class PathfindingSystem {
       if (x < -20) return 'trans_in';
       if (x < -6) return 'acad_in';
       if (x <= 6) return 'lobby_s';
-      if (x < 20) return 'medic_in';
+      if (x < 20) return 'tech_in';
       return 'hr_in';
     }
     let best = 'c_0', bestDSq = 1e18;
@@ -994,12 +1091,13 @@ export class PathfindingSystem {
       mkt_sponsor: { x: 13.0, z: 6.0, label: 'Phòng Tài Chính' },
       cost_audit: { x: 12.5, z: -7.5, label: 'Phòng Tổng Giám Đốc' },
       match_prep: { x: -27.0, z: 6.0, label: 'Phòng Ban Huấn Luyện' },
-      def_drill: { x: 0.0, z: -136.0, label: 'SVĐ Parc des Princes (Khu Tập Luyện)' },
+      def_drill: { x: 192.0, z: -86.0, label: 'Sân Tập PSG Training Center' },
       youth_chance: { x: -13.0, z: 16.5, label: 'Phòng Học Viện' },
       acad_eval: { x: -27.0, z: 6.0, label: 'Phòng HLV Trưởng' },
-      med_check: { x: -35.0, z: -41.0, label: 'Phòng Thay Đồ Cầu Thủ' },
-      cap_rally: { x: -35.0, z: -41.0, label: 'Phòng Thay Đồ Cầu Thủ' },
-      player_morale: { x: -35.0, z: -41.0, label: 'Phòng Thay Đồ Cầu Thủ' },
+      med_check: { x: 168.0, z: -34.0, label: 'Trung tâm Y tế PSG' },
+      cap_rally: { x: 134.5, z: -48.8, label: 'Phòng Thay Đồ Cầu Thủ' },
+      player_morale: { x: 134.5, z: -48.8, label: 'Phòng Thay Đồ Cầu Thủ' },
+      tech_analysis: { x: 13.0, z: 16.5, label: 'Phòng Kỹ Thuật PSG' },
       dept_audit: { x: 0.0, z: 6.5, label: 'Sảnh & Các Phòng Ban' },
       season_plan: { x: -10.0, z: -8.0, label: 'Phòng Họp Ban Giám Đốc' },
       media_pr: { x: -27.0, z: 6.0, label: 'Phòng HLV Trưởng' },

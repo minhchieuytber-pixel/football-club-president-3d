@@ -3,6 +3,8 @@
 // Phòng Chủ tịch có sảnh đệm mở sang trọng và chỉ cần mở ĐÚNG 1 cửa gỗ cao cấp để bước vào!
 // Tối ưu Phase 2 cho WebGL/iPhone: giảm PointLights 6->2, gộp mesh tĩnh theo vật liệu (batching), đóng băng ma trận tĩnh, chống trùng raycastMeshes.
 
+import { OfficeDeskDocuments3D } from './OfficeDeskDocuments3D.js';
+
 export class PsgCampusScene {
   constructor(scene, texFactory, furnitureFactory, vehicleSystem) {
     this.scene = scene;
@@ -188,8 +190,8 @@ export class PsgCampusScene {
     }
   }
 
-  addCollider(cx, cz, w, d) {
-    const c = { minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, active: true };
+  addCollider(cx, cz, w, d, minY = null, maxY = null) {
+    const c = { minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, minY, maxY, active: true };
     this.colliders.push(c);
     return c;
   }
@@ -247,10 +249,11 @@ export class PsgCampusScene {
     this.addCollider(x, z, rot ? 0.24 : w, rot ? w : 0.24);
   }
 
-  addWoodenDoor(id, x, z, rotY = 0, width = 1.9, isLuxury = false) {
+  addWoodenDoor(id, x, z, rotY = 0, width = 1.9, isLuxury = false, opts = {}) {
     const frameMat = isLuxury ? this.furn.mats.darkWood : this.furn.mats.walnut;
     const leafMat = isLuxury ? this.furn.mats.walnut : this.furn.mats.oakLight;
     const handleMat = isLuxury ? this.furn.mats.gold : this.furn.mats.chrome;
+    const compactCeiling = !!(opts && opts.compactCeiling);
 
     // Khung cửa tĩnh (tách riêng để gộp tĩnh trong HQ shell mà không ảnh hưởng pivot mở cửa!)
     const frameGroup = new THREE.Group();
@@ -265,8 +268,10 @@ export class PsgCampusScene {
     postR.position.set(width / 2, 1.3, 0);
     const lintel = new THREE.Mesh(this._boxGeo(width + 0.14, 0.16, 0.26), frameMat);
     lintel.position.set(0, 2.62, 0);
-    const transom = new THREE.Mesh(this._boxGeo(width + 0.18, 1.82, 0.22), this._doorTransomMat);
-    transom.position.set(0, 3.58, 0);
+    const transomH = compactCeiling ? 1.22 : 1.82;
+    const transomY = compactCeiling ? 3.31 : 3.58;
+    const transom = new THREE.Mesh(this._boxGeo(width + 0.18, transomH, 0.22), this._doorTransomMat);
+    transom.position.set(0, transomY, 0);
     frameGroup.add(postL, postR, lintel, transom);
 
     // Nhóm cánh cửa động (KHÔNG bao giờ đóng băng matrixAutoUpdate của pivot!)
@@ -319,6 +324,7 @@ export class PsgCampusScene {
   updateDoors(dt, playerPos = null, npcs = []) {
     for (let i = 0; i < this.doors.length; i++) {
       const d = this.doors[i];
+      if (d.isResidenceDoor) continue;
       let npcNear = false;
       for (let j = 0; j < npcs.length; j++) {
         const n = npcs[j];
@@ -366,9 +372,9 @@ export class PsgCampusScene {
     }
   }
 
-  resolveCollision(x, z, radius = 0.42) {
-    let px = Math.max(-112, Math.min(112, x));
-    let pz = Math.max(-210, Math.min(62, z));
+  resolveCollision(x, z, radius = 0.42, entityY = 0.14) {
+    let px = Math.max(-130, Math.min(310, x));
+    let pz = Math.max(-220, Math.min(90, z));
     const r2 = radius * radius;
     const cols = this.colliders;
     const len = cols.length;
@@ -376,6 +382,8 @@ export class PsgCampusScene {
       for (let i = 0; i < len; i++) {
         const b = cols[i];
         if (!b.active) continue;
+        if (b.minY != null && entityY < b.minY - 0.1) continue;
+        if (b.maxY != null && entityY > b.maxY + 0.1) continue;
         const cx = Math.max(b.minX, Math.min(px, b.maxX));
         const cz = Math.max(b.minZ, Math.min(pz, b.maxZ));
         const dx = px - cx, dz = pz - cz, d2 = dx * dx + dz * dz;
@@ -489,11 +497,11 @@ export class PsgCampusScene {
 
   buildGroundAndRoads() {
     const ground = new THREE.Mesh(
-      this._planeGeo(440, 440),
+      this._planeGeo(640, 540),
       this._tagShared(new THREE.MeshStandardMaterial({ color: 0x2a5734, roughness: 0.92 }))
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(0, -0.02, -68);
+    ground.position.set(80, -0.02, -75);
     ground.receiveShadow = true;
     this.root.add(ground);
 
@@ -717,9 +725,9 @@ export class PsgCampusScene {
     this.root.add(ledInst);
 
     this.addRoomLabel('← KHU B: BAN GIÁM ĐỐC · PHÒNG CHỦ TỊCH', -14, 0, Math.PI / 2, true);
-    this.addRoomLabel('KHU D: HÀNH CHÍNH & Y TẾ →', 14, 0, -Math.PI / 2, true);
+    this.addRoomLabel('KHU D: HÀNH CHÍNH & KỸ THUẬT →', 14, 0, -Math.PI / 2, true);
     this.addRoomLabel('← HÀNH LANG CHUYỂN NHƯỢNG & HỌC VIỆN', -6.3, 12.2, Math.PI / 2, true);
-    this.addRoomLabel('HÀNH LANG Y TẾ & NHÂN SỰ →', 6.3, 12.2, -Math.PI / 2, true);
+    this.addRoomLabel('HÀNH LANG KỸ THUẬT & NHÂN SỰ →', 6.3, 12.2, -Math.PI / 2, true);
 
     // Gom toàn bộ nội thất chi tiết bên trong Trụ sở vào 1 nhóm riêng để tự động culling khi Chủ tịch sang SVĐ Parc des Princes!
     this.hqInteriorGroup = new THREE.Group();
@@ -833,7 +841,16 @@ export class PsgCampusScene {
     presDesk.rotation.y = Math.PI;
     this.root.add(presDesk);
     this.addCollider(-26.0, -16.8, 3.4, 1.32);
-    this.tagInteractable(presDesk, 'pres_pc', 'Mở Máy tính macOS Chủ tịch', '💻', 'open_computer');
+
+    // Gắn hit-proxy riêng cho Máy tính Mac ở trung tâm bàn Chủ tịch (không bao trùm 2 cánh bàn nơi đặt 6 chồng hồ sơ & Khay Đỏ URGENT)
+    const presPcProxy = new THREE.Mesh(this._boxGeo(0.78, 0.58, 0.52), this._hitProxyMat);
+    presPcProxy.position.set(-26.0, 1.21, -16.75);
+    presPcProxy.userData.dynamicObject = true;
+    this.root.add(presPcProxy);
+    this.tagInteractable(presPcProxy, 'pres_pc', 'Mở Máy tính macOS Chủ tịch', '💻', 'open_computer');
+
+    this.deskDocuments = new OfficeDeskDocuments3D(this);
+    this.root.add(this.deskDocuments.group);
 
     const presChair = this.furn.createSwivelChair(true);
     presChair.position.set(-26.0, 0.14, -18.0);
@@ -1135,42 +1152,58 @@ export class PsgCampusScene {
     this.furnishLargeDepartment({ id: 'media', label: 'TRUYỀN THÔNG & MARKETING', cx: 27, cz: 6.5, signZ: 2.56, screenTitle: 'PSG MEDIA & BRAND' });
     this.furnishLargeDepartment({ id: 'hr', label: 'NHÂN SỰ & QUẢN LÝ CSVC', cx: 27, cz: 17.9, signZ: 13.96, screenTitle: 'HR & STADIUM OPS', hasPrinter: true });
 
-    // Trung tâm Y tế PSG (độc lập, cửa mở ra hành lang phụ z = 13.8)
-    this.roomWaypoints.medical = { x: 13.0, z: 15.6 };
-    this.addRoomLabel('TRUNG TÂM Y TẾ PSG', 11.35, 13.66, Math.PI);
-    const medDesk = this.furn.createExecutiveDesk(2.1, 1.0, false);
-    medDesk.position.set(17.2, 0.14, 16.4);
-    this.root.add(medDesk);
-    this.addCollider(17.2, 16.4, 2.1, 1.0);
-    const medChair = this.furn.createSwivelChair(true);
-    medChair.position.set(17.2, 0.14, 17.35);
-    this.root.add(medChair);
-    this.registerChairPosition(17.2, 17.35, 0.14);
-    [-2.8, 0, 2.8].forEach((ox, i) => {
-      const bed = this.furn.createMedicalBed();
-      bed.position.set(11.8 + ox, 0.14, 19.3);
-      bed.rotation.y = Math.PI / 2;
-      this.root.add(bed);
-      this.addCollider(11.8 + ox, 19.3, 0.95, 2.1);
-      this.tagInteractable(bed, `med_bed_${i}`, 'Kiểm tra Y tế & Chấn thương', '🏥', 'open_medical');
-    });
+    // Phòng Kỹ Thuật PSG (cải tạo từ phòng Y tế cũ, cửa mở ra hành lang phụ z = 13.8 — Trung tâm Y tế đã chuyển sang Training Center!)
+    this.roomWaypoints.technical = { x: 13.0, z: 16.5 };
+    this.addRoomLabel('PHÒNG KỸ THUẬT PSG · TECHNICAL DEPT', 11.35, 13.66, Math.PI);
+
+    const techTable = this.furn.createConferenceTable(3.8, 1.5);
+    techTable.position.set(13.0, 0.14, 18.2);
+    this.root.add(techTable);
+    this.addCollider(13.0, 18.2, 3.8, 1.5);
+    this.tagInteractable(techTable, 'tech_dept_table', 'Mở Phòng Kỹ Thuật PSG (Phân tích · Định giá · Chiến thuật)', '📊', 'open_technical');
+
+    // 2 Bàn Phân tích Chiến thuật & Hiệu suất (khớp chair cho tactical_analyst / npc_scout2 & performance_analyst)
+    const anDeskE = this.furn.createStaffDesk('SCOUTING & TACTICS');
+    anDeskE.position.set(17.5, 0.14, 16.4);
+    this.root.add(anDeskE);
+    this.addCollider(17.5, 16.4, 1.65, 0.82);
+    this.tagInteractable(anDeskE, 'tech_desk_east', 'Phân tích Tuyển trạch & Định giá Cầu thủ', '🔍', 'open_technical');
+    const anChairE = this.furn.createSwivelChair(false);
+    anChairE.position.set(17.5, 0.14, 18.0);
+    this.root.add(anChairE);
+    this.registerChairPosition(17.5, 18.0, 0.14);
+
+    const anDeskW = this.furn.createStaffDesk('PERFORMANCE ANALYTICS');
+    anDeskW.position.set(8.5, 0.14, 16.4);
+    this.root.add(anDeskW);
+    this.addCollider(8.5, 16.4, 1.65, 0.82);
+    this.tagInteractable(anDeskW, 'tech_desk_west', 'Phân tích Dữ liệu & Chiến thuật Đội hình', '💻', 'open_technical');
+    const anChairW = this.furn.createSwivelChair(false);
+    anChairW.position.set(8.5, 0.14, 18.0);
+    this.root.add(anChairW);
+    this.registerChairPosition(8.5, 18.0, 0.14);
+
+    // Màn hình phân tích sơ đồ đội hình & tủ hồ sơ kỹ thuật
+    const techScreen = this.furn.createWallScreen(4.0, 1.9, 'PSG TECHNICAL · TACTICS & VALUATION');
+    techScreen.position.set(13.0, 2.25, 21.75);
+    techScreen.rotation.y = Math.PI;
+    this.root.add(techScreen);
+    this.tagInteractable(techScreen, 'tech_dept_screen', 'Mở Sơ Đồ Chiến Thuật & Phòng Kỹ Thuật', '🖥️', 'open_technical');
+
+    const techCab = this.furn.createFilingCabinet(1.6, 2.0, 0.48);
+    techCab.position.set(19.2, 0.14, 20.0);
+    techCab.rotation.y = -Math.PI / 2;
+    this.root.add(techCab);
+    this.addCollider(19.2, 20.0, 0.55, 1.65);
+    this.tagInteractable(techCab, 'tech_dept_cabinet', 'Hồ sơ Kỹ thuật & Tuyển trạch PSG', '📂', 'open_technical');
   }
 
-  // Xóa bỏ sân tập riêng: thay bằng trục công viên cảnh quan xanh kết nối Trụ sở & Phòng Thay Đồ thẳng tới SVĐ Parc des Princes!
+  // Trục công viên cảnh quan xanh kết nối Trụ sở & Bảo tàng thẳng tới SVĐ Parc des Princes!
   buildNorthParkway() {
     const mainPath = new THREE.Mesh(this._boxGeo(9.0, 0.07, 42), this._walkwayMat);
     mainPath.position.set(0, 0.015, -42);
     mainPath.receiveShadow = true;
     this.root.add(mainPath);
-
-    // Nhánh đường đi bộ nối từ Phòng Thay Đồ (-25, -43.5) thẳng ra trục công viên tới SVĐ Parc des Princes
-    const drLink = new THREE.Mesh(this._boxGeo(26, 0.07, 5.2), this._walkwayMat);
-    drLink.position.set(-13, 0.015, -43.5);
-    drLink.receiveShadow = true;
-    this.root.add(drLink);
-
-    // Điểm đến tập luyện nay nằm ngay trên mặt cỏ SVĐ Parc des Princes!
-    this.roomWaypoints.pitch = { x: 0, z: -134 };
   }
 
   buildParkingAndVehicles() {

@@ -79,8 +79,11 @@ export class TextureFactory {
     this.cache.clear();
   }
 
-  woodTexture(base = '#4a2f23', grain = '#2f1b13') {
-    return this.get(`wood_${base}_${grain}`, () => {
+  woodTexture(base = '#4a2f23', grain = '#2f1b13', opts = {}) {
+    const rep = opts?.repeat ?? true;
+    const repKey = Array.isArray(rep) ? `${rep[0]}x${rep[1]}` : String(rep);
+    const aniso = opts?.anisotropy ?? 2;
+    return this.get(`wood_${base}_${grain}_${repKey}_${aniso}`, () => {
       const [c, ctx] = this.makeCanvas(256, 256);
       ctx.fillStyle = base;
       ctx.fillRect(0, 0, 256, 256);
@@ -96,7 +99,7 @@ export class TextureFactory {
       }
       ctx.globalAlpha = 1;
       const tex = new THREE.CanvasTexture(c);
-      return this._configureTexture(tex, { mipmaps: true, repeat: true, anisotropy: 2 });
+      return this._configureTexture(tex, { mipmaps: true, repeat: rep, anisotropy: aniso });
     });
   }
 
@@ -356,4 +359,80 @@ export class TextureFactory {
       return this._configureTexture(tex, { mipmaps: false });
     });
   }
+
+  psgArtworkTexture(variant = 'parc') {
+    return this.get(`psg_art_${variant}`, () => {
+      const [c, ctx] = this.makeCanvas(256, 256);
+      const grad = ctx.createLinearGradient(0, 0, 256, 256);
+      grad.addColorStop(0, '#0f172a');
+      grad.addColorStop(1, '#00205b');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 256, 256);
+
+      ctx.strokeStyle = '#d4af37';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(12, 12, 232, 232);
+
+      if (variant === 'parc') {
+        // Minimalist Parc des Princes & Hechter luxury graphic
+        ctx.fillStyle = '#da291c';
+        ctx.fillRect(114, 24, 28, 208);
+        ctx.fillStyle = '#e5e7eb';
+        ctx.fillRect(108, 24, 4, 208);
+        ctx.fillRect(144, 24, 4, 208);
+
+        ctx.fillStyle = '#0b1220';
+        ctx.beginPath();
+        ctx.ellipse(128, 134, 82, 42, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#e5e7eb';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.fillStyle = '#1e3a8a';
+        ctx.beginPath();
+        ctx.ellipse(128, 134, 58, 26, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = 'bold 16px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('PARC DES PRINCES', 128, 208);
+        ctx.fillStyle = '#fde68a';
+        ctx.font = 'bold 13px Inter, sans-serif';
+        ctx.fillText('ICI C\'EST PARIS', 128, 52);
+      } else {
+        // Minimalist Eiffel & PSG crest heritage print
+        ctx.strokeStyle = '#d4af37';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(128, 118, 66, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = '#da291c';
+        ctx.beginPath();
+        ctx.moveTo(128, 62);
+        ctx.lineTo(148, 122);
+        ctx.lineTo(170, 166);
+        ctx.lineTo(142, 166);
+        ctx.quadraticCurveTo(128, 134, 114, 166);
+        ctx.lineTo(86, 166);
+        ctx.lineTo(108, 122);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = 'bold 17px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('PARIS SAINT-GERMAIN', 128, 206);
+        ctx.fillStyle = '#93c5fd';
+        ctx.font = 'bold 12px Inter, sans-serif';
+        ctx.fillText('EST. 1970 · RESIDENCE', 128, 224);
+      }
+
+      const tex = new THREE.CanvasTexture(c);
+      return this._configureTexture(tex, { mipmaps: false });
+    });
+  }
 }
+

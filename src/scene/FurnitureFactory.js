@@ -17,6 +17,8 @@ export class FurnitureFactory {
       oakLight: tag(new THREE.MeshStandardMaterial({ map: texFactory.woodTexture('#8c6b4f', '#6b4e35'), roughness: 0.46, metalness: 0.04 })),
       leatherDark: tag(new THREE.MeshStandardMaterial({ color: 0x1a1d24, roughness: 0.36, metalness: 0.12 })),
       leatherNavy: tag(new THREE.MeshStandardMaterial({ color: 0x0d2142, roughness: 0.4, metalness: 0.1 })),
+      fabricGrey: tag(new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.72, metalness: 0.04 })),
+      curtainGrey: tag(new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.85, metalness: 0.02 })),
       fabricCream: tag(new THREE.MeshStandardMaterial({ color: 0xe8e2d5, roughness: 0.85, metalness: 0.02 })),
       chrome: tag(new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.2, metalness: 0.88 })),
       aluminum: tag(new THREE.MeshStandardMaterial({ color: 0x262f3d, roughness: 0.32, metalness: 0.78 })),
@@ -124,6 +126,15 @@ export class FurnitureFactory {
     return this._getMat(`framed_jersey_${num}`, () => new THREE.MeshStandardMaterial({
       map: this.tex.framedJerseyTexture(num),
       roughness: 0.35
+    }));
+  }
+
+  _getFramedArtMat(variant) {
+    return this._getMat(`framed_art_${variant}`, () => new THREE.MeshStandardMaterial({
+      map: typeof this.tex.psgArtworkTexture === 'function'
+        ? this.tex.psgArtworkTexture(variant)
+        : this.tex.framedJerseyTexture('10'),
+      roughness: 0.34
     }));
   }
 
@@ -682,9 +693,11 @@ export class FurnitureFactory {
     });
   }
 
-  createSofa(width = 2.4) {
-    return this._buildCachedPrototype(`sofa_${this._k(width)}`, (g) => {
-      const base = new THREE.Mesh(this._boxGeo(width, 0.24, 0.88), this.mats.leatherNavy);
+  createSofa(width = 2.4, variant = 'navy') {
+    const safeVar = variant === 'grey' ? 'grey' : 'navy';
+    return this._buildCachedPrototype(`sofa_${this._k(width)}_${safeVar}`, (g) => {
+      const mat = safeVar === 'grey' ? this.mats.fabricGrey : this.mats.leatherNavy;
+      const base = new THREE.Mesh(this._boxGeo(width, 0.24, 0.88), mat);
       base.position.y = 0.20;
       base.receiveShadow = true;
       g.add(base);
@@ -702,17 +715,17 @@ export class FurnitureFactory {
       const backGeo = this._boxGeo(cw - 0.03, 0.46, 0.18);
       for (let i = 0; i < nCush; i++) {
         const cx = -((width - 0.32) / 2) + cw * (i + 0.5);
-        const cush = new THREE.Mesh(cushGeo, this.mats.leatherNavy);
+        const cush = new THREE.Mesh(cushGeo, mat);
         cush.position.set(cx, 0.39, 0.04);
         g.add(cush);
-        const back = new THREE.Mesh(backGeo, this.mats.leatherNavy);
+        const back = new THREE.Mesh(backGeo, mat);
         back.position.set(cx, 0.64, -0.32);
         g.add(back);
       }
 
       const armGeo = this._boxGeo(0.16, 0.44, 0.88);
       [-width / 2 + 0.08, width / 2 - 0.08].forEach((x) => {
-        const arm = new THREE.Mesh(armGeo, this.mats.leatherNavy);
+        const arm = new THREE.Mesh(armGeo, mat);
         arm.position.set(x, 0.48, 0);
         g.add(arm);
       });
@@ -909,6 +922,19 @@ export class FurnitureFactory {
       this._getFramedJerseyMat(num)
     );
     art.position.z = 0.038;
+    g.add(art);
+    return g;
+  }
+
+  createFramedArtwork(w = 1.4, h = 1.15, variant = 'parc') {
+    const g = new THREE.Group();
+    const box = new THREE.Mesh(this._boxGeo(w + 0.10, h + 0.10, 0.06), this.mats.darkWood);
+    g.add(box);
+    const art = new THREE.Mesh(
+      this._planeGeo(w, h),
+      this._getFramedArtMat(variant)
+    );
+    art.position.z = 0.034;
     g.add(art);
     return g;
   }

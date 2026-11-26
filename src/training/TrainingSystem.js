@@ -32,6 +32,27 @@ export const DRILL_CATALOG = {
   summary:    { label: 'Tổng kết buổi tập', desc: 'Ban huấn luyện đánh giá chỉ số từng cầu thủ và gửi báo cáo cho Chủ tịch.' }
 };
 
+export const TRAINING_PITCH = {
+  cx: 192.0,
+  cz: -86.0,
+  minX: 156.0,
+  maxX: 228.0,
+  minZ: -108.0,
+  maxZ: -64.0,
+  westGoalX: 155.0,
+  eastGoalX: 229.0
+};
+
+export const REHAB_PITCH = {
+  cx: 192.0,
+  cz: -131.0
+};
+
+export const MEDICAL_RECOVERY_SPOT = {
+  cx: 168.0,
+  cz: -38.0
+};
+
 function markSharedAsset(obj) {
   if (!obj) return obj;
   if (!obj.userData) obj.userData = {};
@@ -46,13 +67,21 @@ export class TrainingSystem {
     this.balls = {};
     this.ballTimers = { pass: 0, shoot: 0, scrimmage: 0 };
     this.shootPhase = 0; // 0 = chuyền kiến tạo, 1 = sút vào khung thành, 2 = reset
-    this.shootState = { startX: -21.5, startZ: -144, targetX: -35.0, targetZ: -152, t: 0, scored: false };
+    this.shootState = {
+      startX: TRAINING_PITCH.cx - 21.5,
+      startZ: TRAINING_PITCH.cz + 8.0,
+      targetX: TRAINING_PITCH.westGoalX + 1.0,
+      targetZ: TRAINING_PITCH.cz,
+      t: 0,
+      scored: false
+    };
     this.passState = { idx: 0, t: 0 };
     this.scrimmageState = { carrierIdx: 0, targetIdx: 1, t: 0, shotMode: false };
     // Zero-GC scratch buffers & đồng hồ mô phỏng nội bộ (không phụ thuộc wall-clock performance.now())
     this._playerNpcs = [];
     this._gks = [];
     this._outfield = [];
+    this._injuredNpcs = [];
     this._simTime = 0;
     this._wasZoneActive = true;
     this.reset();
@@ -97,29 +126,30 @@ export class TrainingSystem {
     ];
   }
 
-  // Xây dựng đạo cụ huấn luyện 3D trực tiếp trên mặt cỏ SVĐ Parc des Princes (tâm 0, -152)
+  // Xây dựng đạo cụ huấn luyện 3D trực tiếp trên mặt cỏ PSG TRAINING PITCH (tâm 192, -86)
   build3DTrainingEquipment(campusScene) {
     if (!campusScene || !campusScene.root || typeof THREE === 'undefined') return;
     if (this.sceneGroup) campusScene.root.remove(this.sceneGroup);
 
+    const { cx, cz } = TRAINING_PITCH;
     const g = new THREE.Group();
     const coneMat = markSharedAsset(new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.4 }));
     const yellowConeMat = markSharedAsset(new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.4 }));
     const coneGeo = markSharedAsset(new THREE.ConeGeometry(0.16, 0.34, 8));
 
-    // 1. Cọc chạy đổi hướng khu Thể lực (góc Đông Nam mặt sân Parc des Princes)
+    // 1. Cọc chạy đổi hướng khu Thể lực (góc Đông Nam sân tập PSG TRAINING PITCH)
     for (let i = 0; i < 6; i++) {
       const c = new THREE.Mesh(coneGeo, coneMat);
-      c.position.set(12 + i * 2.2, 0.24, -138.5 + (i % 2 === 0 ? 0 : 1.8));
+      c.position.set(cx + 12 + i * 2.2, 0.24, cz + 13.5 + (i % 2 === 0 ? 0 : 1.8));
       g.add(c);
     }
 
-    // 2. Tam giác / vòng tròn Rondo khu Chuyền bóng (vòng tròn trung tâm Parc des Princes)
-    const rondoPts = [[-6, -146], [6, -146], [0, -152], [-6, -158], [6, -158]];
+    // 2. Tam giác / vòng tròn Rondo khu Chuyền bóng (vòng tròn trung tâm sân tập)
+    const rondoPts = [[-6, 6], [6, 6], [0, 0], [-6, -6], [6, -6]];
     for (let i = 0; i < rondoPts.length; i++) {
-      const [x, z] = rondoPts[i];
+      const [ox, oz] = rondoPts[i];
       const c = new THREE.Mesh(coneGeo, yellowConeMat);
-      c.position.set(x, 0.24, z);
+      c.position.set(cx + ox, 0.24, cz + oz);
       g.add(c);
     }
 
@@ -128,33 +158,33 @@ export class TrainingSystem {
     const dummyGeo = markSharedAsset(new THREE.BoxGeometry(0.45, 1.78, 0.14));
     for (let i = 0; i < 4; i++) {
       const dummy = new THREE.Mesh(dummyGeo, wallMat);
-      dummy.position.set(22.5, 0.96, -154.0 + i * 0.65);
+      dummy.position.set(cx + 22.5, 0.96, cz - 2.0 + i * 0.65);
       dummy.rotation.y = Math.PI / 2;
       dummy.castShadow = true;
       g.add(dummy);
     }
 
-    // 4. Bảng chiến thuật đứng ngoài đường biên Nam Parc des Princes (cạnh HLV trưởng)
+    // 4. Bảng chiến thuật đứng ngoài đường biên Nam sân tập (cạnh Ban huấn luyện)
     const boardStand = new THREE.Mesh(
       markSharedAsset(new THREE.BoxGeometry(1.5, 1.05, 0.08)),
       markSharedAsset(new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4 }))
     );
-    boardStand.position.set(3.8, 1.35, -129.5);
+    boardStand.position.set(cx + 3.8, 1.35, cz + 25.0);
     const boardFace = new THREE.Mesh(
       markSharedAsset(new THREE.PlaneGeometry(1.38, 0.92)),
       markSharedAsset(new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.6 }))
     );
-    boardFace.position.set(3.8, 1.35, -129.55);
+    boardFace.position.set(cx + 3.8, 1.35, cz + 24.95);
     boardFace.rotation.y = Math.PI;
     g.add(boardStand, boardFace);
 
-    // 5. Ba quả bóng 3D thực tế trên mặt cỏ SVĐ Parc des Princes (dùng chung 1 SphereGeometry + 1 Material)
+    // 5. Ba quả bóng 3D thực tế trên sân tập chính (dùng chung 1 SphereGeometry + 1 Material)
     const ballGeo = markSharedAsset(new THREE.SphereGeometry(0.15, 12, 10));
     const ballMat = markSharedAsset(new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.35 }));
     const makeBall = () => {
       const ball = new THREE.Mesh(ballGeo, ballMat);
       ball.castShadow = true;
-      ball.position.set(0, 0.22, -152);
+      ball.position.set(cx, 0.22, cz);
       g.add(ball);
       return ball;
     };
@@ -163,9 +193,9 @@ export class TrainingSystem {
       shooting: makeBall(),
       scrimmage: makeBall()
     };
-    this.balls.passing.position.set(0, 0.22, -152);
-    this.balls.shooting.position.set(-18, 0.22, -152);
-    this.balls.scrimmage.position.set(0, 0.22, -152);
+    this.balls.passing.position.set(cx, 0.22, cz);
+    this.balls.shooting.position.set(cx - 18, 0.22, cz);
+    this.balls.scrimmage.position.set(cx, 0.22, cz);
 
     campusScene.root.add(g);
     this.sceneGroup = g;
@@ -216,8 +246,14 @@ export class TrainingSystem {
     if (focusKey === 'Phục hồi') this.intensity = 'Hồi phục';
   }
 
+  _isOnTrainingPitch(pos) {
+    if (!pos) return false;
+    return pos.x >= TRAINING_PITCH.minX - 6 && pos.x <= TRAINING_PITCH.maxX + 6 &&
+           pos.z >= TRAINING_PITCH.minZ - 6 && pos.z <= TRAINING_PITCH.maxZ + 6;
+  }
+
   _assignPitchTarget(n, tx, tz, npcSystem, allowAStar) {
-    if (allowAStar && n.mesh && n.mesh.position.z >= -126) {
+    if (allowAStar && n.mesh && !this._isOnTrainingPitch(n.mesh.position)) {
       npcSystem.setNpcDestination(n, tx, tz);
       return;
     }
@@ -232,8 +268,8 @@ export class TrainingSystem {
     n.target.set(tx, 0.14, tz);
   }
 
-  // Điều phối toàn bộ cầu thủ & bóng 3D thực hiện bài tập thật theo đúng giờ của GameTimeSystem!
-  // zoneActive mặc định = true để tương thích ngược 100% với lời gọi 4 tham số (TRAINING-1).
+  // Điều phối toàn bộ cầu thủ & bóng 3D thực hiện bài tập thật tại PSG TRAINING PITCH theo giờ GameTimeSystem!
+  // Cầu thủ chấn thương (injuryDays > 0) bị loại khỏi bài tập cường độ cao và đưa sang Trung tâm Y tế / Phục hồi.
   update3DTraining(dt, clockHour, allNpcs, npcSystem, zoneActive = true) {
     this._simTime += dt;
     const slot = this.getActiveSlot(clockHour);
@@ -253,9 +289,11 @@ export class TrainingSystem {
     const playerNpcs = this._playerNpcs;
     const gks = this._gks;
     const outfield = this._outfield;
+    const injuredNpcs = this._injuredNpcs;
     playerNpcs.length = 0;
     gks.length = 0;
     outfield.length = 0;
+    injuredNpcs.length = 0;
 
     const summoned = npcSystem ? npcSystem.summonedPlayerNpc : null;
     for (let i = 0; i < allNpcs.length; i++) {
@@ -264,8 +302,32 @@ export class TrainingSystem {
       const m = n.mode;
       if (m === 'going_president' || m === 'sit_president' || m === 'event_travel' || m === 'event_hold') continue;
       playerNpcs.push(n);
-      if (n.position === 'GK') gks.push(n);
-      else outfield.push(n);
+
+      const pObj = this.state?.getPlayerById?.(n.playerId);
+      const isInjured = Boolean(pObj && (pObj.injuryDays || 0) > 0);
+      if (isInjured) {
+        injuredNpcs.push(n);
+      } else if (n.position === 'GK') {
+        gks.push(n);
+      } else {
+        outfield.push(n);
+      }
+    }
+
+    // Cầu thủ chấn thương luôn chuyển sang chế độ hồi phục tại Trung tâm Y tế (tuyệt đối không tham gia tập nặng!)
+    for (let ii = 0; ii < injuredNpcs.length; ii++) {
+      const inj = injuredNpcs[ii];
+      inj.mode = 'medical_rehab';
+      inj.scrimmageTeam = null;
+      inj.drillAnim = 'idle';
+      if (inj.bibMesh) inj.bibMesh.visible = false;
+      inj.task = 'Đang điều trị & phục hồi chấn thương tại Trung tâm Y tế PSG (Miễn tập nặng)';
+      const rx = MEDICAL_RECOVERY_SPOT.cx + 4.5 + (ii % 2) * 3.0;
+      const rz = MEDICAL_RECOVERY_SPOT.cz - 4.0 + Math.floor(ii / 2) * 3.2;
+      if (drillChanged || zoneJustActivated || !inj.finalDest || Math.hypot(inj.finalDest.x - rx, inj.finalDest.z - rz) > 0.5) {
+        if (npcSystem?.setNpcDestination) npcSystem.setNpcDestination(inj, rx, rz);
+        else inj.target.set(rx, 0.14, rz);
+      }
     }
 
     if (!drill || drill === 'gather' || drill === 'summary') {
@@ -294,40 +356,43 @@ export class TrainingSystem {
     const simT = this._simTime;
     const refreshMeta = drillChanged || zoneJustActivated;
     const half = Math.ceil(outfield.length / 2);
+    const { cx: pcx, cz: pcz, westGoalX } = TRAINING_PITCH;
 
-    // 1. Thủ môn luôn tập phản xạ / cản phá cùng HLV Thủ môn tại khung thành Tây SVĐ Parc des Princes (-33.6, -152)
+    // 1. Thủ môn luôn tập phản xạ / cản phá cùng HLV Thủ môn tại khung thành Tây PSG TRAINING PITCH
     for (let gi = 0; gi < gks.length; gi++) {
       const gk = gks[gi];
       gk.mode = 'drill';
       if (refreshMeta || !gk.task) {
-        gk.task = 'Đang tập phản xạ, đổ người cản phá & phát bóng tại khung thành Parc des Princes';
+        gk.task = 'Đang tập phản xạ, đổ người cản phá & phát bóng tại PSG TRAINING PITCH';
       }
-      const gx = -33.6 + gi * 1.4;
-      const gz = zoneActive ? (-152.0 + Math.sin(simT * 2.0 + gi) * 1.8) : -152.0;
+      const gx = westGoalX + 2.4 + gi * 1.4;
+      const gz = zoneActive ? (pcz + Math.sin(simT * 2.0 + gi) * 1.8) : pcz;
       if (!zoneActive) {
         this._assignPitchTarget(gk, gx, gz, npcSystem, false);
         gk._lod3Dirty = true;
       } else if (drillChanged && Math.hypot(gk.mesh.position.x - gx, gk.mesh.position.z - gz) > 3.5) {
         this._assignPitchTarget(gk, gx, gz, npcSystem, true);
-      } else if (gk.mesh.position.z < -126 || !gk.path || gk.path.length === 0) {
+      } else if (this._isOnTrainingPitch(gk.mesh.position) || !gk.path || gk.path.length === 0) {
         gk.target.set(gx, 0.14, gz);
       }
       gk.drillAnim = (zoneActive && drill === 'shooting' && this.shootPhase === 1 && this.shootState.t > 0.65) ? 'dive_gk' : 'idle';
     }
 
-    // 2. Cầu thủ trên mặt cỏ SVĐ Parc des Princes (x ∈ [-34, 34], z ∈ [-174, -130]) thực hiện đúng từng bài tập 3D
+    // 2. Cầu thủ trên mặt cỏ PSG TRAINING PITCH thực hiện đúng từng bài tập 3D
     if (drill === 'warmup' || drill === 'recovery') {
       const taskText = drill === 'warmup'
-        ? 'Đang khởi động giãn cơ tại SVĐ Parc des Princes'
-        : 'Đang tập phục hồi thể lực nhẹ tại SVĐ Parc des Princes';
+        ? 'Đang khởi động giãn cơ tại PSG TRAINING PITCH'
+        : 'Đang tập phục hồi thể lực nhẹ tại Sân tập phụ PSG';
+      const baseCx = drill === 'recovery' ? REHAB_PITCH.cx : pcx;
+      const baseCz = drill === 'recovery' ? REHAB_PITCH.cz : pcz;
       for (let i = 0; i < outfield.length; i++) {
         const n = outfield[i];
         n.mode = 'drill';
         n.scrimmageTeam = null;
         if (n.bibMesh) n.bibMesh.visible = false;
         if (refreshMeta || !n.task) n.task = taskText;
-        const tx = -12 + (i % 6) * 4.4;
-        const tz = -140 - Math.floor(i / 6) * 4.0;
+        const tx = baseCx - 12 + (i % 6) * 4.4;
+        const tz = baseCz + 10 - Math.floor(i / 6) * 4.0;
         if (drillChanged || !zoneActive) {
           this._assignPitchTarget(n, tx, tz, npcSystem, zoneActive);
           if (!zoneActive) n._lod3Dirty = true;
@@ -339,8 +404,7 @@ export class TrainingSystem {
         }
       }
     } else if (drill === 'fitness') {
-      // Chạy nước rút & đổi hướng qua các cọc thể lực trên sân Parc des Princes
-      const taskText = 'Đang chạy nước rút & đổi hướng qua cọc tại SVĐ Parc des Princes';
+      const taskText = 'Đang chạy nước rút & đổi hướng qua cọc tại PSG TRAINING PITCH';
       for (let i = 0; i < outfield.length; i++) {
         const n = outfield[i];
         n.mode = 'drill';
@@ -348,9 +412,9 @@ export class TrainingSystem {
         n.scrimmageTeam = null;
         if (n.bibMesh) n.bibMesh.visible = false;
         if (refreshMeta || !n.task) n.task = taskText;
-        const laneZ = -138.0 - (i % 7) * 4.2;
+        const laneZ = pcz + 14.0 - (i % 7) * 4.2;
         const phase = Math.sin(simT * 1.4 + i * 0.8);
-        const tx = phase >= 0 ? 26.0 : -8.0;
+        const tx = phase >= 0 ? (pcx + 26.0) : (pcx - 8.0);
         if (!zoneActive) {
           this._assignPitchTarget(n, tx, laneZ, npcSystem, false);
           n._lod3Dirty = true;
@@ -364,10 +428,9 @@ export class TrainingSystem {
         n.drillAnim = 'run';
       }
     } else if (drill === 'passing') {
-      // Tập chuyền bóng tam giác / Rondo tại vòng tròn trung tâm SVĐ Parc des Princes (0, -152)
       const ringCount = Math.max(3, outfield.length);
-      const cx = 0.0, cz = -152.0, rad = 9.0;
-      const taskText = 'Đang tập chuyền bóng một chạm & Rondo tại vòng tròn trung tâm Parc des Princes';
+      const rad = 9.0;
+      const taskText = 'Đang tập chuyền bóng một chạm & Rondo tại vòng tròn trung tâm PSG TRAINING PITCH';
       for (let i = 0; i < outfield.length; i++) {
         const n = outfield[i];
         n.mode = 'drill';
@@ -376,14 +439,14 @@ export class TrainingSystem {
         if (n.bibMesh) n.bibMesh.visible = false;
         if (refreshMeta || !n.task) n.task = taskText;
         const ang = (i / ringCount) * Math.PI * 2;
-        const tx = cx + Math.cos(ang) * rad;
-        const tz = cz + Math.sin(ang) * rad;
+        const tx = pcx + Math.cos(ang) * rad;
+        const tz = pcz + Math.sin(ang) * rad;
         if (!zoneActive) {
           this._assignPitchTarget(n, tx, tz, npcSystem, false);
           n._lod3Dirty = true;
         } else if (drillChanged) {
           this._assignPitchTarget(n, tx, tz, npcSystem, true);
-        } else if (n.mesh.position.z < -126 || !n.path || n.path.length === 0) {
+        } else if (this._isOnTrainingPitch(n.mesh.position) || !n.path || n.path.length === 0) {
           n.target.set(tx, 0.14, tz);
         }
         n.drillAnim = (i === this.passState.idx % ringCount && this.passState.t < 0.25) ? 'pass' : 'train';
@@ -406,8 +469,7 @@ export class TrainingSystem {
         }
       }
     } else if (drill === 'shooting') {
-      // Tập sút bóng: đồng đội chuyền -> cầu thủ dứt điểm -> bóng bay về khung thành Tây Parc des Princes (-35.0, -152)
-      const taskText = 'Đang tập dứt điểm cầu môn Tây tại SVĐ Parc des Princes';
+      const taskText = 'Đang tập dứt điểm cầu môn Tây tại PSG TRAINING PITCH';
       for (let i = 0; i < outfield.length; i++) {
         const n = outfield[i];
         n.mode = 'drill';
@@ -415,14 +477,14 @@ export class TrainingSystem {
         n.scrimmageTeam = null;
         if (n.bibMesh) n.bibMesh.visible = false;
         if (refreshMeta || !n.task) n.task = taskText;
-        const tx = i === 0 ? -18.0 : i === 1 ? -21.5 : (-10 + (i % 5) * 3.8);
-        const tz = i === 0 ? -152.0 : i === 1 ? -144.0 : (-145 - Math.floor(i / 5) * 4.5);
+        const tx = i === 0 ? (pcx - 18.0) : i === 1 ? (pcx - 21.5) : (pcx - 10 + (i % 5) * 3.8);
+        const tz = i === 0 ? pcz : i === 1 ? (pcz + 8.0) : (pcz + 7 - Math.floor(i / 5) * 4.5);
         if (!zoneActive) {
           this._assignPitchTarget(n, tx, tz, npcSystem, false);
           n._lod3Dirty = true;
         } else if (drillChanged) {
           this._assignPitchTarget(n, tx, tz, npcSystem, true);
-        } else if (n.mesh.position.z < -126 || !n.path || n.path.length === 0) {
+        } else if (this._isOnTrainingPitch(n.mesh.position) || !n.path || n.path.length === 0) {
           n.target.set(tx, 0.14, tz);
         }
         n.drillAnim = i === 0 && this.shootPhase === 1 && this.shootState.t < 0.35 ? 'kick' : (i === 1 && this.shootPhase === 0 ? 'pass' : 'idle');
@@ -433,26 +495,27 @@ export class TrainingSystem {
           this.shootState.t = 0;
           this.shootPhase = (this.shootPhase + 1) % 2;
           if (this.shootPhase === 1) {
-            this.shootState.targetZ = -152 + (Math.random() - 0.5) * 5.6;
+            this.shootState.targetZ = pcz + (Math.random() - 0.5) * 5.6;
           }
         }
         const f = this.shootState.t;
         if (this.shootPhase === 0) {
-          this.balls.shooting.position.set(-21.5 + 3.5 * f, 0.22, -144.0 - 8.0 * f);
+          this.balls.shooting.position.set(pcx - 21.5 + 3.5 * f, 0.22, pcz + 8.0 - 8.0 * f);
         } else {
-          this.balls.shooting.position.set(-18.0 + (-35.0 - (-18.0)) * f, 0.22 + Math.sin(f * Math.PI) * 1.55, -152 + (this.shootState.targetZ - (-152)) * f);
+          const sx = pcx - 18.0;
+          const gx = westGoalX + 1.0;
+          this.balls.shooting.position.set(sx + (gx - sx) * f, 0.22 + Math.sin(f * Math.PI) * 1.55, pcz + (this.shootState.targetZ - pcz) * f);
         }
       }
     } else if (drill === 'tactics' || drill === 'defending' || drill === 'set_pieces') {
-      // Tập chiến thuật ĐỒNG BỘ 100% từ Global Squad Formation System trên toàn mặt cỏ Parc des Princes!
       const formName = this.state?.formationSystem?.formation || '4-3-3';
       const slots = FORMATION_PRESETS[formName] || FORMATION_PRESETS['4-3-3'];
       const drift = zoneActive ? Math.sin(simT * 0.9) * 5.2 : 0;
       const taskText = drill === 'tactics'
-        ? `Đang tập di chuyển chiến thuật sơ đồ ${formName} tại SVĐ Parc des Princes`
+        ? `Đang tập di chuyển chiến thuật sơ đồ ${formName} tại PSG TRAINING PITCH`
         : drill === 'defending'
-          ? 'Đang tập kèm người, bọc lót & giữ cự ly hàng phòng ngự tại Parc des Princes'
-          : 'Đang tập phối hợp đá phạt & phạt góc tại SVĐ Parc des Princes';
+          ? 'Đang tập kèm người, bọc lót & giữ cự ly hàng phòng ngự tại PSG TRAINING PITCH'
+          : 'Đang tập phối hợp đá phạt & phạt góc tại PSG TRAINING PITCH';
       for (let i = 0; i < outfield.length; i++) {
         const n = outfield[i];
         n.mode = 'drill';
@@ -461,22 +524,21 @@ export class TrainingSystem {
         if (n.bibMesh) n.bibMesh.visible = false;
         if (refreshMeta || !n.task) n.task = taskText;
         const sl = slots[(i + 1) % slots.length];
-        const pitchX = ((100 - sl.y) / 100) * 52 - 26 + drift;
-        const pitchZ = -170 + (sl.x / 100) * 36;
+        const pitchX = pcx + ((100 - sl.y) / 100) * 52 - 26 + drift;
+        const pitchZ = (pcz - 18) + (sl.x / 100) * 36;
         if (!zoneActive) {
           this._assignPitchTarget(n, pitchX, pitchZ, npcSystem, false);
           n._lod3Dirty = true;
         } else if (drillChanged) {
           this._assignPitchTarget(n, pitchX, pitchZ, npcSystem, true);
-        } else if (n.mesh.position.z < -126 || !n.path || n.path.length === 0) {
+        } else if (this._isOnTrainingPitch(n.mesh.position) || !n.path || n.path.length === 0) {
           n.target.set(pitchX, 0.14, pitchZ);
         }
         n.drillAnim = 'train';
       }
     } else if (drill === 'scrimmage') {
-      // ĐẤU TẬP ĐỐI KHÁNG 3D trên mặt cỏ SVĐ Parc des Princes: 2 đội phân màu áo rõ rệt (PSG Xanh vs Áo tập Vàng)!
-      const bx = this.balls.scrimmage ? this.balls.scrimmage.position.x : 0;
-      const bz = this.balls.scrimmage ? this.balls.scrimmage.position.z : -152;
+      const bx = this.balls.scrimmage ? this.balls.scrimmage.position.x : pcx;
+      const bz = this.balls.scrimmage ? this.balls.scrimmage.position.z : pcz;
       const carrierSlot = this.scrimmageState.carrierIdx % Math.max(1, outfield.length);
       for (let i = 0; i < outfield.length; i++) {
         const n = outfield[i];
@@ -487,14 +549,14 @@ export class TrainingSystem {
         if (n.bibMesh) n.bibMesh.visible = isTeamB;
         if (refreshMeta || !n.task) {
           n.task = isTeamB
-            ? 'Đang đấu tập đối kháng (Đội Áo Vàng) tại SVĐ Parc des Princes'
-            : 'Đang đấu tập đối kháng (Đội Hình Chính PSG) tại SVĐ Parc des Princes';
+            ? 'Đang đấu tập đối kháng (Đội Áo Vàng) tại PSG TRAINING PITCH'
+            : 'Đang đấu tập đối kháng (Đội Hình Chính PSG) tại PSG TRAINING PITCH';
         }
 
         if (!zoneActive) {
-          const baseX = isTeamB ? 10 : -10;
-          const tx = Math.max(-28, Math.min(28, baseX + ((i % 4) - 1.5) * 4.5));
-          const tz = Math.max(-170, Math.min(-134, -152 + (Math.floor(i / 4) - 1.5) * 6.0));
+          const baseX = pcx + (isTeamB ? 10 : -10);
+          const tx = Math.max(pcx - 28, Math.min(pcx + 28, baseX + ((i % 4) - 1.5) * 4.5));
+          const tz = Math.max(pcz - 18, Math.min(pcz + 18, pcz + (Math.floor(i / 4) - 1.5) * 6.0));
           this._assignPitchTarget(n, tx, tz, npcSystem, false);
           n._lod3Dirty = true;
           n.drillAnim = 'run';
@@ -504,9 +566,9 @@ export class TrainingSystem {
         n.timer -= dt;
         if (n.timer <= 0 || drillChanged || zoneJustActivated) {
           n.timer = 2.0 + Math.random() * 2.5;
-          const baseX = isTeamB ? 10 : -10;
-          const tx = Math.max(-28, Math.min(28, baseX * 0.4 + bx * 0.6 + (Math.random() - 0.5) * 16));
-          const tz = Math.max(-170, Math.min(-134, bz * 0.5 + (-152) * 0.5 + (Math.random() - 0.5) * 16));
+          const baseX = pcx + (isTeamB ? 10 : -10);
+          const tx = Math.max(pcx - 28, Math.min(pcx + 28, baseX * 0.4 + bx * 0.6 + (Math.random() - 0.5) * 16));
+          const tz = Math.max(pcz - 18, Math.min(pcz + 18, bz * 0.5 + pcz * 0.5 + (Math.random() - 0.5) * 16));
           this._assignPitchTarget(n, tx, tz, npcSystem, false);
         }
         n.drillAnim = (i === carrierSlot) ? 'pass' : 'run';
