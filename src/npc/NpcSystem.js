@@ -404,6 +404,18 @@ export class NpcSystem {
       _chairCacheY: 0.14
     };
 
+    Object.defineProperties(npc, {
+      npcId: { get() { return this.id; }, enumerable: true },
+      characterId: { get() { return this.playerId || this.staffId || this.id; }, enumerable: true },
+      currentPosition: { get() { return this.mesh ? this.mesh.position : null; }, enumerable: true },
+      currentDestination: { get() { return this.finalDest; }, enumerable: true },
+      currentActivity: { get() { return this.activityLabel || this.task; }, enumerable: true },
+      navigationState: { get() { return this.state; }, enumerable: true },
+      movementSpeed: { get() { return this.speed; }, enumerable: true },
+      currentPath: { get() { return this.path; }, enumerable: true },
+      targetInteractionPoint: { get() { return this.activePointId; }, enumerable: true }
+    });
+
     // Đai phân đội mỏng ở gấu áo (luôn giữ mặt lưng thoáng 100% để tên & số áo hiển thị rõ nét!)
     if (p.isPlayer && mesh.userData?.rig?.torso) {
       const assets = this._getSharedAssets();
@@ -695,6 +707,22 @@ export class NpcSystem {
       pathOptions = { ...options, forbidHqInterior: true };
     }
 
+    // Nếu NPC vừa đứng dậy từ giường/ghế/máy tập bị khóa vị trí, đưa ra standPosition an toàn trước khi tìm đường
+    if (npc._slotLocked && npc.mesh) {
+      const prevPt = npc.activePointId ? this.activitySystem?.getPoint?.(npc.activePointId) : null;
+      if (prevPt?.standPosition && Math.hypot(npc.mesh.position.x - prevPt.standPosition.x, npc.mesh.position.z - prevPt.standPosition.z) < 2.2) {
+        npc.mesh.position.set(prevPt.standPosition.x, 0.14, prevPt.standPosition.z);
+        npc.lastPosX = prevPt.standPosition.x;
+        npc.lastPosZ = prevPt.standPosition.z;
+      } else if (this.campus) {
+        const safeOut = this.campus.resolveCollision(npc.mesh.position.x, npc.mesh.position.z, npc.collisionRadius || 0.34);
+        npc.mesh.position.x = safeOut.x;
+        npc.mesh.position.y = 0.14;
+        npc.mesh.position.z = safeOut.z;
+      }
+      npc._slotLocked = false;
+    }
+
     // Kiểm tra đi qua cửa phòng riêng tại Player Residence (cầu thủ phải xếp hàng, lại gần mở cửa rồi mới bước vào/ra)
     const resSys = this.trainingSystem?.state?.playerResidenceSystem;
     if (npc.isPlayer && !pathOptions._bypassDoorCheck && npc.mesh && resSys) {
@@ -841,14 +869,45 @@ export class NpcSystem {
     }
   }
 
-  dispatchNpcForTask(npcId, resultKey) {
+  dispatchNpcForTask(npcId, resultKey, payload = null) {
     const npc = this.getById(npcId);
     if (!npc) return null;
-    const dest = PathfindingSystem.getTaskTargetRoom(resultKey);
+    const dest = PathfindingSystem.getTaskTargetRoom(resultKey, payload);
     npc.mode = 'task_travel';
+    npc.state = 'WALKING';
     npc.taskWorkTimer = 14;
+    if (dest.label) npc.activityLabel = `Thực hiện nhiệm vụ tại ${dest.label}`;
     this.setNpcDestination(npc, dest.x, dest.z);
     return dest;
+  }
+
+  triggerMedicalInjuryResponse(playerId = null) {
+    const medIds = ['npc_med', 'npc_med_doc', 'npc_med_physio', 'npc_rehab_coach'];
+    for (let i = 0; i < medIds.length; i++) {
+      const m = this.getById(medIds[i]);
+      if (!m) continue;
+      if (m.mode === 'going_president' || m.mode === 'sit_president' || m.mode === 'going_meeting' || m.mode === 'meeting') continue;
+      m.timer = 0;
+      m._staffSlotKey = null;
+      m._lod3Dirty = true;
+      if (m.id === 'npc_med') {
+        m.state = 'MEDICAL_CHECK';
+        m._staffActivityAnim = 'clipboard';
+        m.activityLabel = 'Tiếp nhận & thăm khám ca chấn thương tại Trung tâm Y tế';
+        this.setNpcDestination(m, 168.0, -37.2, EMPTY_PATH_OPTS);
+      }
+    }
+    if (playerId) {
+      const pn = this.npcs.find((x) => x.isPlayer && x.playerId === playerId);
+      if (pn && pn.mode !== 'going_president' && pn.mode !== 'sit_president') {
+        pn.mode = 'medical_rehab';
+        pn.state = 'MEDICAL_CHECK';
+        pn._curActivityKey = 'medical_injury';
+        pn._decisionCooldown = 0;
+        pn._lod3Dirty = true;
+        this.setNpcDestination(pn, 167.2, -37.8, EMPTY_PATH_OPTS);
+      }
+    }
   }
 
   summonBoardMeeting() {
@@ -1167,6 +1226,16 @@ export class NpcSystem {
 
   // Bước di chuyển lõi phân tầng theo LOD (LOD 0: full steering + whiskers + avoidance; LOD 1: spatial avoidance, whiskers chỉ khi kẹt; LOD 2: waypoint trực tiếp không raycast)
   moveNpcTowardTarget(n, dt, playerPos, lod = 0) {
+    if (dt > 0.10) {
+      const halves = Math.min(4, Math.ceil(dt / 0.08));
+      const sub = dt / halves;
+      let moved = false;
+      for (let s = 0; s < halves; s++) {
+        if (!this.moveNpcTowardTarget(n, sub, playerPos, lod)) return moved;
+        moved = true;
+      }
+      return moved;
+    }
     const dx = n.target.x - n.mesh.position.x;
     const dz = n.target.z - n.mesh.position.z;
     const distSq = dx * dx + dz * dz;
@@ -1185,9 +1254,9 @@ export class NpcSystem {
     const dirZ = dz / dist;
 
     let vx, vz, waiting = false, avoidReason = 'NONE';
-    if (lod <= 1) {
+    if (lod <= 2) {
       this._avoidOpts.useSpatialGrid = true;
-      this._avoidOpts.skipWhiskers = (lod === 1 && n.stuckTimer <= 0.35) || (n.mode === 'door_walk' && dist < 1.25);
+      this._avoidOpts.skipWhiskers = (lod === 2 && n.stuckTimer <= 0.25) || (lod === 1 && n.stuckTimer <= 0.35) || (n.mode === 'door_walk' && dist < 1.25);
       this._avoidOpts.respectClosedDoors = !(n.mode === 'door_walk' && dist < 1.25);
       const av = this.pathfinder.computeAvoidanceVelocity(n, dirX, dirZ, n.speed, this.npcs, playerPos, this._avoidOpts);
       vx = av.vx;
@@ -1195,7 +1264,6 @@ export class NpcSystem {
       waiting = av.waiting;
       avoidReason = av.avoidanceReason || (waiting ? 'WAITING' : 'NONE');
     } else {
-      // LOD 2 (xa): di chuyển thẳng theo waypoint, KHÔNG raycast avoidance
       vx = dirX * n.speed;
       vz = dirZ * n.speed;
     }
@@ -1222,7 +1290,7 @@ export class NpcSystem {
     const curInHq = PathfindingSystem.isHqInteriorPoint(n.mesh.position.x, n.mesh.position.z);
     let nextX = rawX;
     let nextZ = rawZ;
-    if (lod <= 1 && this.campus) {
+    if (lod <= 2 && this.campus) {
       const res = this.campus.resolveCollision(rawX, rawZ, n.collisionRadius || 0.34);
       nextX = res.x;
       nextZ = res.z;
@@ -1252,8 +1320,8 @@ export class NpcSystem {
       const targetYaw = Math.atan2((nextX - n.lastPosX) || vx, (nextZ - n.lastPosZ) || vz);
       n.mesh.rotation.y = lerpAngle(n.mesh.rotation.y, targetYaw, dt * 10);
       n.stuckTimer = Math.max(0, n.stuckTimer - dt * 1.5);
-      if (movedDist > 0.03) n.recoveryAttempts = 0;
-    } else if (lod <= 1) {
+      if (movedDist > 0.03 && n.stuckTimer <= 0) n.recoveryAttempts = 0;
+    } else if (lod <= 2) {
       n.stuckTimer += dt;
     }
     n.lastPosX = nextX;
@@ -1261,8 +1329,8 @@ export class NpcSystem {
 
     if (n.replanCooldown > 0) n.replanCooldown -= dt;
 
-    // Chống kẹt đa tầng (STUCK_RECOVERY): A* toàn tuyến -> lách ngang -> đổi điểm dự phòng an toàn
-    if (lod <= 1 && n.stuckTimer > 0.85 && n.replanCooldown <= 0) {
+    // Chống kẹt đa tầng (STUCK_RECOVERY) cho TẤT CẢ NPC: A* toàn tuyến -> lách ngang có kiểm tra LOS -> đổi điểm dự phòng an toàn
+    if (lod <= 2 && n.stuckTimer > 0.85 && n.replanCooldown <= 0) {
       n.stuckTimer = 0;
       n.replanCooldown = 1.4;
       n.recoveryAttempts = (n.recoveryAttempts || 0) + 1;
@@ -1273,22 +1341,28 @@ export class NpcSystem {
         n.mode = 'work_pc';
         this.setNpcDestination(n, n.home.x, n.home.z);
       } else if (n.recoveryAttempts >= 3 && n.isPlayer) {
-        // Fallback an toàn khi bị bít hoàn toàn 2 lần
         n.recoveryAttempts = 0;
         this.activitySystem?.releaseNpc?.(n.id);
         n.activePointId = null;
         n.queueKey = null;
         const alt = RESIDENCE_LOUNGE_SPOTS[Math.abs(n._decisionSeed || 0) % RESIDENCE_LOUNGE_SPOTS.length];
         this.setNpcDestination(n, alt.x, alt.z, EMPTY_PATH_OPTS);
+      } else if (n.recoveryAttempts >= 3 && !n.isPlayer) {
+        n.recoveryAttempts = 0;
+        n._staffSlotKey = null;
+        const fallbackX = n.home?.x ?? 0;
+        const fallbackZ = n.home?.z ?? 7;
+        this.setNpcDestination(n, fallbackX, fallbackZ, EMPTY_PATH_OPTS);
       } else if (n.finalDest) {
         if (n.recoveryAttempts === 2 && this.campus) {
-          // Thử dịch nhẹ sang cạnh thông thoáng gần nhất trước khi lập lộ trình lại
+          // Thử dịch nhẹ sang cạnh thông thoáng gần nhất (kiểm tra cả điểm đích lẫn tia LOS để KHÔNG nhảy xuyên tường mỏng)
           const perpX = -dirZ;
           const perpZ = dirX;
           for (const sign of [1, -1]) {
             const cx = nextX + perpX * 0.65 * sign;
             const cz = nextZ + perpZ * 0.65 * sign;
-            if (!this.pathfinder.isPointBlocked(cx, cz, 0.34, true)) {
+            if (!this.pathfinder.isPointBlocked(cx, cz, 0.34, true) &&
+                this.pathfinder.hasLineOfSight(nextX, nextZ, cx, cz, 0.26, true)) {
               n.mesh.position.x = cx;
               n.mesh.position.z = cz;
               break;
@@ -1431,12 +1505,12 @@ export class NpcSystem {
         if (lod === 1) {
           n._accDt = (n._accDt || 0) + stepBaseDt;
           if (!scheduleEdge && ((frameCounter + sub + idx) % stride1) !== 0) continue;
-          stepDt = Math.min(0.06, n._accDt);
+          stepDt = Math.min(0.14, n._accDt);
           n._accDt = 0;
         } else if (lod === 2) {
           n._accDt = (n._accDt || 0) + stepBaseDt;
           if (!scheduleEdge && ((frameCounter + sub + idx) % stride2) !== 0) continue;
-          stepDt = Math.min(0.10, n._accDt);
+          stepDt = Math.min(0.32, n._accDt);
           n._accDt = 0;
         } else {
           n._accDt = 0;
@@ -1560,11 +1634,14 @@ export class NpcSystem {
             n.timer -= stepDt;
             if (n.timer <= 0) {
               n.timer = 2.4 + Math.random() * 3.0;
-              n.target.set(
-                Math.max(162, Math.min(222, n.home.x + (Math.random() - 0.5) * 16)),
-                0.14,
-                Math.max(-106, Math.min(-66, n.home.z + (Math.random() - 0.5) * 12))
-              );
+              let tx = Math.max(162, Math.min(222, n.home.x + (Math.random() - 0.5) * 16));
+              let tz = Math.max(-106, Math.min(-66, n.home.z + (Math.random() - 0.5) * 12));
+              if (this.pathfinder?.isPointBlocked?.(tx, tz, 0.36, true) && this.campus?.resolveCollision) {
+                const safePt = this.campus.resolveCollision(tx, tz, 0.42);
+                tx = safePt.x;
+                tz = safePt.z;
+              }
+              n.target.set(tx, 0.14, tz);
             }
             if (animateStationary) this.animSystem.updateRig(n.mesh, 'train', animDt, 1.0, lod);
           }
@@ -2590,6 +2667,18 @@ export class NpcSystem {
         }
       }
 
+      // Di chuyển bản lưu cũ của Bộ phận Y tế từ HQ (x∈[5..21], z∈[12.5..22.5]) sang Trung tâm Y tế PSG (168, -38)
+      const isMedicalTeam = n.id === 'npc_med' || n.id === 'npc_med_doc' || n.id === 'npc_med_physio' || n.id === 'npc_rehab_coach';
+      const inLegacyHqMedRoom = sx >= 5 && sx <= 21 && sz >= 12.5 && sz <= 22.5;
+      if (isMedicalTeam && inLegacyHqMedRoom && saved.mode !== 'going_meeting' && saved.mode !== 'meeting' && saved.mode !== 'going_president' && saved.mode !== 'sit_president') {
+        sx = n.home?.x ?? 174.5;
+        sz = n.home?.z ?? -35.5;
+        sy = 0.14;
+        saved.destX = sx;
+        saved.destZ = sz;
+        saved.activePointId = null;
+      }
+
       if (this.campus && !saved.activePointId) {
         const resolved = this.campus.resolveCollision(sx, sz, 0.34);
         sx = resolved.x;
@@ -2618,8 +2707,12 @@ export class NpcSystem {
       n._waitingDoorResume = null;
       n._slotLocked = !!(n.activePointId && this.activitySystem?.getPoint(n.activePointId));
 
-      const dx = typeof saved.destX === 'number' ? saved.destX : sx;
-      const dz = typeof saved.destZ === 'number' ? saved.destZ : sz;
+      let dx = typeof saved.destX === 'number' ? saved.destX : sx;
+      let dz = typeof saved.destZ === 'number' ? saved.destZ : sz;
+      if (isMedicalTeam && dx >= 5 && dx <= 21 && dz >= 12.5 && dz <= 22.5 && n.mode !== 'going_meeting' && n.mode !== 'meeting' && n.mode !== 'going_president') {
+        dx = n.home?.x ?? 174.5;
+        dz = n.home?.z ?? -35.5;
+      }
       if (Math.hypot(dx - sx, dz - sz) > 0.6) {
         this.setNpcDestination(n, dx, dz, { _bypassDoorCheck: true });
       } else {

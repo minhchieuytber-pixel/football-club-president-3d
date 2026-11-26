@@ -393,6 +393,27 @@ export class GameState {
     this.dayName = this.timeSystem.dayName;
   }
 
+  // Điều phối thế giới sống khi có cầu thủ chấn thương (chống trùng lặp theo sourceKey)
+  notifyPlayerInjuredLivingWorld(player, days, injuryType = 'Căng cơ vận động', sourceKey = null) {
+    if (!player) return false;
+    const key = sourceKey || `inj_${player.id}_w${this.week}`;
+    if (this.timeSystem?.firedEventKeys?.has(key)) return false;
+    this.timeSystem?.firedEventKeys?.add(key);
+
+    const medHead = this.staffDb?.active?.find((s) => s.roleKey === 'head_medical')?.name || 'BS. Christophe Baudot';
+    const evtText = `${player.name} bị ${injuryType} (nghỉ ${days} ngày). Trung tâm Y tế PSG đã tiếp nhận điều trị & phục hồi.`;
+    this.pushPhoneMsg(`${medHead} (Trung tâm Y tế)`, `🏥 Báo cáo chấn thương: ${player.name} (${days}n)`, evtText, true);
+    this.eventBus?.emit('PLAYER_INJURED', {
+      playerId: player.id,
+      playerName: player.name,
+      days,
+      injuryType
+    }, key);
+    this._npcSystemRef?.triggerMedicalInjuryResponse?.(player.id);
+    this.documentSystem?.syncFromClubState?.();
+    return true;
+  }
+
   // Sự kiện tự động khi bước sang ngày mới theo đồng hồ GameTimeSystem (không trùng lặp)
   handleNewGameDay(evt) {
     const daysPassed = Math.max(1, evt.daysPassed || 1);
@@ -758,13 +779,7 @@ export class GameState {
         target.career?.injuryHistory?.unshift({ date: this.timeSystem.getDateString(), type: 'Căng cơ gân kheo', days: 14 });
         const medHead = this.staffDb.active.find((s) => s.roleKey === 'head_medical')?.name || 'Trưởng Y Tế';
         const evtText = `${target.name} bị căng cơ trong buổi tập! Trung tâm Y tế đã lập báo cáo (nghỉ 14 ngày).`;
-        this.pushPhoneMsg(`${medHead} (Y Tế)`, `Báo cáo chấn thương: ${target.name}`, evtText, true);
-        this.eventBus?.emit('PLAYER_INJURED', {
-          playerId: target.id,
-          playerName: target.name,
-          days: 14,
-          injuryType: 'Căng cơ gân kheo'
-        }, `inj_${target.id}_w${this.week}`);
+        this.notifyPlayerInjuredLivingWorld(target, 14, 'Căng cơ gân kheo', `inj_${target.id}_w${this.week}`);
         this.incomingCall = {
           caller: `${medHead} · Trưởng Bộ Phận Y Tế`,
           summary: `${target.name} chấn thương cơ (14 ngày). Chủ tịch có duyệt phác đồ hồi phục nhanh (€0.6M → 7 ngày) không?`,
@@ -972,7 +987,31 @@ export class GameState {
     if (Array.isArray(snap.academy)) {
       this.academy = snap.academy.map((y, idx) => enrichPlayerProfile(y, idx, true));
     }
-    if (snap.staffDb) this.staffDb = snap.staffDb;
+    if (snap.staffDb) {
+      this.staffDb = snap.staffDb;
+      if (Array.isArray(this.staffDb.active)) {
+        this.staffDb.active.forEach((st) => {
+          const meta = STAFF_ROLE_META[st.roleKey];
+          if (st.roleKey === 'head_medical' && meta) {
+            if (!st.home || st.home.x < 100) st.home = { ...meta.home };
+            if (st.workCoord && st.workCoord.x < 100) st.workCoord = { ...meta.home };
+            if (!st.pitchSpot && meta.pitchSpot) st.pitchSpot = { ...meta.pitchSpot };
+          }
+        });
+      }
+    }
+    if (Array.isArray(this.npcs)) {
+      const freshById = new Map(createInitialNpcProfiles().map((p) => [p.id, p]));
+      this.npcs.forEach((n) => {
+        if (n.id === 'npc_med' || n.id === 'npc_med_doc' || n.id === 'npc_med_physio' || n.id === 'npc_rehab_coach') {
+          const fresh = freshById.get(n.id);
+          if (fresh && (!n.home || n.home.x < 100)) {
+            n.home = { ...fresh.home };
+            n.task = fresh.task;
+          }
+        }
+      });
+    }
     if (snap.timeState) {
       this.timeSystem.importState(snap.timeState);
       this.clockHour = this.timeSystem.clockHour;

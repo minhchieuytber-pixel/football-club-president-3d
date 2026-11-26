@@ -158,11 +158,13 @@ export class TrainingSystem {
     const dummyGeo = markSharedAsset(new THREE.BoxGeometry(0.45, 1.78, 0.14));
     for (let i = 0; i < 4; i++) {
       const dummy = new THREE.Mesh(dummyGeo, wallMat);
-      dummy.position.set(cx + 22.5, 0.96, cz - 2.0 + i * 0.65);
+      const dz = cz - 2.0 + i * 0.65;
+      dummy.position.set(cx + 22.5, 0.96, dz);
       dummy.rotation.y = Math.PI / 2;
       dummy.castShadow = true;
       g.add(dummy);
     }
+    campusScene.addCollider?.(cx + 22.5, cz - 1.025, 0.7, 2.5);
 
     // 4. Bảng chiến thuật đứng ngoài đường biên Nam sân tập (cạnh Ban huấn luyện)
     const boardStand = new THREE.Mesh(
@@ -177,6 +179,7 @@ export class TrainingSystem {
     boardFace.position.set(cx + 3.8, 1.35, cz + 24.95);
     boardFace.rotation.y = Math.PI;
     g.add(boardStand, boardFace);
+    campusScene.addCollider?.(cx + 3.8, cz + 25.0, 1.7, 0.55);
 
     // 5. Ba quả bóng 3D thực tế trên sân tập chính (dùng chung 1 SphereGeometry + 1 Material)
     const ballGeo = markSharedAsset(new THREE.SphereGeometry(0.15, 12, 10));
@@ -777,12 +780,17 @@ export class TrainingSystem {
 
     if (dev.injuriesTriggered.length > 0) {
       const inj = dev.injuriesTriggered[0];
-      this.state.pushPhoneMsg(
-        'Trung Tâm Y Tế & BHL',
-        `🏥 Chấn thương tập luyện: ${inj.name} (${inj.days} ngày)`,
-        `${inj.name} bị ${inj.type}. Phòng Y tế và HLV phục hồi đã tiếp nhận điều trị.`,
-        true
-      );
+      const pObj = this.state?.getPlayerById?.(inj.playerId);
+      if (this.state?.notifyPlayerInjuredLivingWorld && pObj) {
+        this.state.notifyPlayerInjuredLivingWorld(pObj, inj.days, inj.type, `tr_inj_${inj.playerId}_${key}`);
+      } else {
+        this.state.pushPhoneMsg(
+          'Trung Tâm Y Tế & BHL',
+          `🏥 Chấn thương tập luyện: ${inj.name} (${inj.days} ngày)`,
+          `${inj.name} bị ${inj.type}. Phòng Y tế và HLV phục hồi đã tiếp nhận điều trị.`,
+          true
+        );
+      }
     }
 
     return report;

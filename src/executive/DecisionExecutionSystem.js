@@ -885,7 +885,10 @@ export class DecisionExecutionSystem {
       npc.memory.unshift(`${this._dateStr()}: Tiếp nhận hồ sơ [${task.documentCode}] từ Chủ tịch.`);
     }
     if (typeof this.state?._onDispatchNpcTask === 'function' && task.ownerNpcId) {
-      this.state._onDispatchNpcTask(task.ownerNpcId, task.sourceType);
+      this.state._onDispatchNpcTask(task.ownerNpcId, task.sourceType, {
+        facilityId: task.extraPayload?.facilityId || null,
+        taskId: task.id
+      });
     }
   }
 

@@ -235,6 +235,7 @@ export class UIManager {
       deskDocMenu,
       pauseBtn: document.getElementById('btn-time-pause'),
       speedBtns: Array.from(document.querySelectorAll('[data-speed]')),
+      topBar: document.querySelector('#campus-hud .top-bar'),
       teamStatus: document.getElementById('hud-team-status'),
       teamStatusBadge: document.getElementById('hud-team-status-badge'),
       teamStatusWindow: document.getElementById('hud-team-status-window'),
@@ -600,6 +601,17 @@ export class UIManager {
     }
 
     this.refreshTimeSpeedButtons();
+
+    if (els.teamStatus && els.topBar && typeof els.topBar.getBoundingClientRect === 'function') {
+      const rect = els.topBar.getBoundingClientRect();
+      if (rect && rect.bottom > 0) {
+        const desiredTop = Math.round(rect.bottom + 8);
+        if (c.teamStatusTop !== desiredTop) {
+          c.teamStatusTop = desiredTop;
+          els.teamStatus.style.top = `${desiredTop}px`;
+        }
+      }
+    }
 
     if (els.teamStatus && s.trainingSystem?.getSquadScheduleStatus) {
       const st = s.trainingSystem.getSquadScheduleStatus(s.clockHour, s.matchdaySystem);
@@ -3771,8 +3783,17 @@ export class UIManager {
           <button class="btn-xs btn-danger" id="sv-reset-new">🔄 Chơi lại từ đầu</button>
         </div>
       </div>
-      <div class="section-label">💾 Lưu / Tải Game Thủ Công (3 Ô lưu)</div>
+      <div class="section-label">💾 Lưu / Tải Game Thủ Công (3 Ô lưu) & Sao lưu tệp JSON</div>
       <div class="grid-3">${['slot_1', 'slot_2', 'slot_3'].map((id, i) => `<div class="card-item"><strong>Ô lưu ${i + 1}</strong><div class="muted" id="meta-${id}">Đang kiểm tra...</div><div class="btn-row" style="margin-top:6px;"><button class="btn-xs btn-primary sv-save" data-slot="${id}">💾 Lưu</button><button class="btn-xs btn-secondary sv-load" data-slot="${id}">📂 Tải</button></div></div>`).join('')}</div>
+      <div class="card-item" style="margin-top:8px;">
+        <div class="card-head"><strong>📦 Sao lưu & Di chuyển thiết bị (JSON)</strong><span class="tag">Schema v2</span></div>
+        <div class="muted">Xuất toàn bộ dữ liệu CLB, đồng hồ, NPC & trung tâm y tế ra file .json hoặc nạp lại từ máy.</div>
+        <div class="btn-row" style="margin-top:6px;">
+          <button class="btn-xs btn-primary" id="sv-export-json">📤 Xuất file JSON</button>
+          <button class="btn-xs btn-secondary" id="sv-import-json-btn">📥 Nhập file JSON</button>
+          <input type="file" id="sv-import-json-file" accept=".json,application/json" style="display:none;" />
+        </div>
+      </div>
       <div class="section-label">🏛️ Biên bản Họp Ban Lãnh Đạo (${this.state.meetingMinutes.length})</div>
       <div class="scroll-list" style="max-height:110px;">${this.state.meetingMinutes.map((m) => `<div class="card-item"><div class="card-head"><strong>${m.topic}</strong><span class="muted">${m.date}</span></div><p>${m.decision}</p></div>`).join('')}</div>`;
   }
@@ -4817,6 +4838,54 @@ export class UIManager {
       if (!rec) { this.toast('Ô trống.', 'warn'); return; }
       this.cb.importSnapshot(rec.data); this.cb.autoSaveNow?.(true); this.audio.playSuccess(); this.toast('Đã tải game!', 'success'); this.closeModal(true);
     }));
+    document.getElementById('sv-export-json')?.addEventListener('click', () => {
+      try {
+        const snap = this.cb.exportSnapshot?.();
+        if (!snap || typeof this.saveManager.exportSaveJson !== 'function') {
+          this.toast('Không thể xuất dữ liệu game.', 'error');
+          return;
+        }
+        const jsonStr = this.saveManager.exportSaveJson(snap, 'manual_export');
+        const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `psg_president_m${this.state.season}_w${this.state.week}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        this.audio.playSuccess();
+        this.toast('📤 Đã xuất tệp sao lưu JSON thành công!', 'success');
+      } catch (err) {
+        this.toast(`Lỗi xuất JSON: ${err?.message || err}`, 'error');
+      }
+    });
+    const fileInput = document.getElementById('sv-import-json-file');
+    document.getElementById('sv-import-json-btn')?.addEventListener('click', () => {
+      fileInput?.click();
+    });
+    fileInput?.addEventListener('change', async (e) => {
+      const file = e.target?.files?.[0];
+      if (!file) return;
+      try {
+        const rawText = await file.text();
+        const res = this.saveManager.parseImportedSaveJson?.(rawText);
+        if (!res?.ok) {
+          this.toast(res?.error || 'Tệp JSON không hợp lệ.', 'error');
+          return;
+        }
+        this.cb.importSnapshot?.(res.data);
+        await this.cb.autoSaveNow?.(true);
+        this.audio.playSuccess();
+        this.toast(`📥 Đã khôi phục bản lưu: ${res.summary}`, 'success');
+        this.closeModal(true);
+      } catch (err) {
+        this.toast(`Lỗi nhập JSON: ${err?.message || err}`, 'error');
+      } finally {
+        e.target.value = '';
+      }
+    });
   }
 
   // ==================== TRUNG TÂM MATCHDAY DUY NHẤT ====================

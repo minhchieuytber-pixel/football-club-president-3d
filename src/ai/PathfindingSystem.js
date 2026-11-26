@@ -14,7 +14,7 @@ export class PathfindingSystem {
     this.gridStep = 0.5; // Độ phân giải lưới 0.5m x 0.5m bao phủ chính xác cửa phòng (1.4m), lối đi phòng cá nhân (0.85m) & toàn khuôn viên
     this.minX = -65;
     this.maxX = 240;
-    this.minZ = -150;
+    this.minZ = -185;
     this.maxZ = 54;
     this.cols = Math.ceil((this.maxX - this.minX) / this.gridStep);
     this.rows = Math.ceil((this.maxZ - this.minZ) / this.gridStep);
@@ -714,7 +714,7 @@ export class PathfindingSystem {
     if (this.hasLineOfSight(startX, startZ, endX, endZ, 0.32, false)) {
       return [{ x: endX, z: endZ }];
     }
-    // Ngoài vùng nướng lưới tĩnh (ví dụ mặt cỏ mở SVĐ Parc des Princes z < -62) -> đi thẳng tới đích
+    // Ngoài vùng nướng lưới tĩnh -> đi thẳng tới đích
     if (startZ < this.minZ - 0.5 && endZ < this.minZ - 0.5) {
       return [{ x: endX, z: endZ }];
     }
@@ -1163,7 +1163,7 @@ export class PathfindingSystem {
 
     for (let i = 0; i < allNpcs.length; i++) {
       const a = allNpcs[i];
-      if (!a || !a.mesh || !a.mesh.visible || a._lod >= 2) continue;
+      if (!a || !a.mesh || !a.mesh.visible) continue;
       // Không đẩy NPC đang nằm giường / ngồi cố định vào tường hoặc ra khỏi ghế
       const aLocked = !!(a._slotLocked || a.mode === 'meeting' || a.mode === 'sit_president' || a.mode === 'event_hold');
       if (aLocked) continue;
@@ -1222,8 +1222,21 @@ export class PathfindingSystem {
     }
   }
 
-  // Trả về tọa độ phòng đích tương ứng với loại nhiệm vụ Chủ tịch giao
-  static getTaskTargetRoom(resultKey) {
+  // Trả về tọa độ phòng/khu vực đích tương ứng với loại nhiệm vụ Chủ tịch giao
+  static getTaskTargetRoom(resultKey, payload = null) {
+    if (resultKey === 'facility_upgrade' && payload?.facilityId) {
+      const facMap = {
+        medical_lab: { x: 168.0, z: -34.0, label: 'Trung tâm Y tế PSG' },
+        training_pitch: { x: 192.0, z: -62.0, label: 'Sân tập PSG Training Pitch' },
+        gym_rehab: { x: 200.0, z: -35.0, label: 'Trung tâm Thể lực & Gym PSG' },
+        residence: { x: 184.0, z: -2.0, label: 'PSG Player Residence' },
+        youth_academy: { x: -12.8, z: 16.0, label: 'Học Viện Bóng Đá PSG' },
+        parc_vip: { x: 0.0, z: -136.0, label: 'SVĐ Parc des Princes' },
+        stadium_vip: { x: 0.0, z: -136.0, label: 'SVĐ Parc des Princes' },
+        media_studio: { x: 45.0, z: 11.0, label: 'Phòng Họp Báo & PSG TV' }
+      };
+      if (facMap[payload.facilityId]) return facMap[payload.facilityId];
+    }
     const map = {
       scout_strikers: { x: -13.0, z: 6.0, label: 'Phòng Tuyển Trạch' },
       scout_midfielders: { x: -13.0, z: 6.0, label: 'Phòng Tuyển Trạch' },
@@ -1244,7 +1257,8 @@ export class PathfindingSystem {
       season_plan: { x: -10.0, z: -8.0, label: 'Phòng Họp Ban Giám Đốc' },
       media_pr: { x: -27.0, z: 6.0, label: 'Phòng HLV Trưởng' },
       legal_review: { x: 13.0, z: 6.0, label: 'Phòng Tài Chính & Pháp Chế' },
-      fac_maint: { x: 0.0, z: -136.0, label: 'SVĐ Parc des Princes' }
+      fac_maint: { x: 0.0, z: -136.0, label: 'SVĐ Parc des Princes' },
+      facility_upgrade: { x: 168.0, z: -24.5, label: 'Khu Cơ Sở Vật Chất PSG' }
     };
     return map[resultKey] || { x: -10.0, z: -8.0, label: 'Phòng Họp Ban Giám Đốc' };
   }

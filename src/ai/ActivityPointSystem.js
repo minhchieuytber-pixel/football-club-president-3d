@@ -853,6 +853,10 @@ export class ActivityPointSystem {
     return { pointStates, queueStates };
   }
 
+  resetAll() {
+    this.importState(null);
+  }
+
   importState(snap) {
     this._npcPointIndex.clear();
     this.queues.clear();

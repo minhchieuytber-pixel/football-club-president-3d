@@ -50,7 +50,12 @@ class FootballPresidentGame3D {
     this.state = new GameState();
     this._restoredAutoSave = this.saveManager.loadAutoSync();
     if (this._restoredAutoSave?.data) {
-      this.state.importFullState(this._restoredAutoSave.data);
+      try {
+        this.state.importFullState(this._restoredAutoSave.data);
+      } catch (err) {
+        console.warn('[PSG3D] Bản tự động lưu cũ không tương thích, khởi tạo lại trạng thái mới:', err);
+        this._restoredAutoSave = null;
+      }
     }
     this._suppressExitAutoSave = false;
     this._lastAutoSaveAt = 0;
@@ -216,7 +221,7 @@ class FootballPresidentGame3D {
       dismissPlayer: () => this.npcSystem.dismissSummonedPlayer(),
       dismissOfficeVisitor: (npcId) => this.npcSystem.dismissOfficeVisitor?.(npcId),
       refreshDeskDocs: () => this.campus?.deskDocuments?.syncFromDocumentSystem?.(this.state.documentSystem),
-      dispatchNpcTask: (npcId, rKey) => this.npcSystem.dispatchNpcForTask(npcId, rKey),
+      dispatchNpcTask: (npcId, rKey, payload) => this.npcSystem.dispatchNpcForTask(npcId, rKey, payload),
       setEventCamera: (angleKey) => {
         const nextAngle = angleKey || null;
         if (nextAngle && !this._preEventPlayerState) {
@@ -290,7 +295,7 @@ class FootballPresidentGame3D {
 
     this._toastInfoCb = (msg) => this.ui.toast(msg, 'info');
     this.state._onNewDayToast = this._toastInfoCb;
-    this.state._onDispatchNpcTask = (npcId, rKey) => this.npcSystem.dispatchNpcForTask(npcId, rKey);
+    this.state._onDispatchNpcTask = (npcId, rKey, payload) => this.npcSystem.dispatchNpcForTask(npcId, rKey, payload);
     this.campus?.deskDocuments?.syncFromDocumentSystem?.(this.state.documentSystem);
 
     // Tự động đóng băng đồng hồ & reset deltaTime an toàn khi ẩn tab / khóa màn hình iPhone / quay lại app!
@@ -352,8 +357,12 @@ class FootballPresidentGame3D {
       // Nếu LocalStorage trống, kiểm tra thêm bản sao lưu trong IndexedDB
       this.saveManager.loadAuto().then((idbRec) => {
         if (idbRec?.data && !this._suppressExitAutoSave && this.state.week === 1 && this.state.dayNum === 1) {
-          this._applySnapshot(idbRec.data);
-          this.ui.toast(`🔄 Tiếp tục phần chơi trước: ${idbRec.summary}`, 'success');
+          try {
+            this._applySnapshot(idbRec.data);
+            this.ui.toast(`🔄 Tiếp tục phần chơi trước: ${idbRec.summary}`, 'success');
+          } catch (err) {
+            console.warn('[PSG3D] Không thể khôi phục bản lưu IndexedDB cũ:', err);
+          }
         }
       }).catch(() => {});
       this.ui.toast('Chào mừng Chủ tịch Phạm Minh Chiêu! Đồng hồ chuẩn 15 phút = 1 ngày game · Tiến trình tự động lưu khi thoát.', 'success');

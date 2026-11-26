@@ -138,6 +138,8 @@ const { NpcSystem } = await import('../src/npc/NpcSystem.js');
 const { ActivityPointSystem } = await import('../src/ai/ActivityPointSystem.js');
 const { createInitialNpcProfiles } = await import('../src/departments/DepartmentData.js');
 const { UIManager } = await import('../src/ui/UIManager.js');
+const { ParcDesPrincesZone } = await import('../src/scene/ParcDesPrincesZone.js');
+const { SaveManager } = await import('../src/save/SaveManager.js');
 await import('../src/training/TrainingSystem.js');
 
 function test(name, fn) {
@@ -156,7 +158,9 @@ const tex = new TextureFactory();
 const furn = new FurnitureFactory(tex);
 const veh = new VehicleSystem(scene);
 const campus = new PsgCampusScene(scene, tex, furn, veh);
+const stadiumZone = new ParcDesPrincesZone(campus, tex, furn, veh);
 const trainingComplex = new TrainingComplexScene(campus, tex, furn, veh, state.playerResidenceSystem);
+state.trainingSystem.build3DTrainingEquipment(campus);
 const charFactory = new CharacterFactory();
 const animSystem = new AnimationSystem();
 const activitySystem = state.activityPointSystem;
@@ -173,6 +177,7 @@ npcSystem.syncSquadPlayers(
 );
 state.registerNpcSystem?.(npcSystem);
 const trainingSystem = state.trainingSystem;
+assert.ok(stadiumZone, 'ParcDesPrincesZone phải được khởi tạo');
 
 test('TIME-SCALE: 1 ngày trong game = 15 phút ngoài đời (x96), Pause đóng băng, x2/x4 đồng bộ', () => {
   assert.equal(GAME_TIME_SCALE, 96, 'GAME_TIME_SCALE phải bằng 96 (86400 / 900)');
@@ -358,3 +363,129 @@ test('HUD-TEAM-STATUS-BOX: Ô chữ nhật bé góc trên phải đồng bộ 24
   assert.equal(elementsById.get('hud-team-status-window').textContent, '13:00–13:45',
     'HUD team status window phải hiển thị đúng khung giờ 13:00–13:45');
 });
+
+test('NAV-METADATA-LOD2-STUCK-COLLIDERS: Chuẩn hóa metadata NPC, LOD 2 tránh tường/tách giãn, STUCK_RECOVERY & collider cây/đạo cụ', () => {
+  const medNpc = npcSystem.getById('npc_med');
+  const docNpc = npcSystem.getById('npc_med_doc');
+  const facNpc = npcSystem.getById('npc_fac');
+  assert.ok(medNpc && docNpc && facNpc);
+
+  // 1. Standardized metadata getters
+  ['npcId', 'characterId', 'currentPosition', 'currentDestination', 'currentActivity', 'navigationState', 'movementSpeed', 'currentPath', 'targetInteractionPoint'].forEach((prop) => {
+    assert.ok(prop in medNpc, `NPC thiếu trường điều hướng chuẩn: ${prop}`);
+  });
+  assert.equal(medNpc.npcId, 'npc_med');
+  assert.equal(typeof medNpc.currentPosition.x, 'number');
+
+  // 2. LOD 2 (~55m away) still obeys collision & resolveNpcSeparation
+  medNpc.mesh.visible = true;
+  docNpc.mesh.visible = true;
+  medNpc._lod = 2;
+  docNpc._lod = 2;
+  medNpc.mesh.position.set(174.5, 0.14, -34.5);
+  medNpc.mode = 'stand_duty';
+  medNpc.timer = 999;
+  medNpc.finalDest = { x: 174.5, z: -32.2 };
+  medNpc.target.set(174.5, 0.14, -32.2);
+  docNpc.mesh.position.set(174.55, 0.14, -34.55); // overlapping start
+  const farFocus55m = new THREE.Vector3(120.0, 0.14, -34.5);
+  for (let i = 0; i < 8; i++) {
+    npcSystem.update(0.1, farFocus55m, 10.5, null, 'Luis Enrique');
+  }
+  assert.ok(!npcSystem.pathfinder.isPointBlocked(medNpc.mesh.position.x, medNpc.mesh.position.z, 0.30, true),
+    'NPC ở LOD 2 không được đi xuyên qua bàn/tường Trung tâm Y tế');
+  const sepDx = medNpc.mesh.position.x - docNpc.mesh.position.x;
+  const sepDz = medNpc.mesh.position.z - docNpc.mesh.position.z;
+  assert.ok(Math.hypot(sepDx, sepDz) > 0.45,
+    `Hai NPC ở LOD 2 phải tách giãn nhau (dist=${Math.hypot(sepDx, sepDz).toFixed(2)})`);
+
+  // 3. Non-player staff STUCK_RECOVERY falls back to home after >= 3 attempts
+  facNpc.mesh.visible = true;
+  facNpc._lod = 1;
+  facNpc.mode = 'stand_duty';
+  facNpc.timer = 999;
+  facNpc.mesh.position.set(-21.55, 0.14, 24.55);
+  // Warm up 1 tick at nearby focus so LOD is stably 0/1 (no LOD 3 -> 1 restore)
+  npcSystem.update(0.016, new THREE.Vector3(-20.0, 0.14, 23.0), 10.5, null, 'Luis Enrique');
+  facNpc.mode = 'stand_duty';
+  facNpc.timer = 999;
+  facNpc.stuckTimer = 0.95;
+  facNpc.replanCooldown = 0;
+  facNpc.recoveryAttempts = 2;
+  facNpc.waitTimer = 0;
+  facNpc.mesh.position.set(-21.55, 0.14, 24.55);
+  facNpc.lastPosX = -21.55;
+  facNpc.lastPosZ = 24.55;
+  facNpc.target.set(-23.5, 0.14, 26.5);
+  facNpc.finalDest = { x: -23.5, z: 26.5 };
+  npcSystem.moveNpcTowardTarget(facNpc, 0.05, new THREE.Vector3(-20.0, 0.14, 23.0), 1);
+  assert.equal(facNpc.recoveryAttempts, 0, 'Nhân sự kẹt >= 3 lần phải reset recoveryAttempts và quay về điểm home an toàn');
+  assert.ok(Math.hypot(facNpc.finalDest.x - facNpc.home.x, facNpc.finalDest.z - facNpc.home.z) < 2.5,
+    'Nhân sự kẹt >= 3 lần phải chuyển đích về home');
+
+  // 4. Parc des Princes A* grid minZ = -185 & tree colliders & training pitch dummy/board colliders
+  assert.ok(npcSystem.pathfinder.minZ <= -185, 'A* grid phải bao phủ sâu tới Parc des Princes (minZ <= -185)');
+  assert.ok(npcSystem.pathfinder.isPointBlocked(14, -66, 0.34, true), 'Cây đại lộ Parc des Princes phải có collider chặn NPC');
+  assert.ok(npcSystem.pathfinder.isPointBlocked(192 + 22.5, -86 - 1.0, 0.34, true), 'Hàng rào người nộm đá phạt trên sân tập phải có collider');
+  assert.ok(npcSystem.pathfinder.isPointBlocked(192 + 3.8, -86 + 25.0, 0.34, true), 'Bảng chiến thuật sân tập phải có collider');
+});
+
+test('LIVING-WORLD-TASK-INJURY-SAVE-MIGRATION: Điều phối facility_upgrade, chấn thương y tế chống trùng lặp, di dời save cũ & JSON export/import', () => {
+  // 1. facility_upgrade dispatch routes npc_fac to medical_lab (168, -34)
+  const facNpc = npcSystem.getById('npc_fac');
+  assert.ok(facNpc);
+  npcSystem.dispatchNpcForTask('npc_fac', 'facility_upgrade', { facilityId: 'medical_lab' });
+  assert.ok(Math.hypot(facNpc.finalDest.x - 168, facNpc.finalDest.z - (-34)) < 2.5,
+    `npc_fac nhận nhiệm vụ nâng cấp medical_lab phải đi đến (168, -34), nhận (${facNpc.finalDest.x}, ${facNpc.finalDest.z})`);
+
+  // 2. Injury living-world coordination + deduplication
+  const p = state.getPsgSquad()[0];
+  assert.ok(p);
+  const prevInjured = p.injured;
+  const prevDays = p.injuryDays;
+  const prevMsgLen = state.phoneInbox.length;
+  const r1 = state.notifyPlayerInjuredLivingWorld(p, 7, 'Căng cơ thử nghiệm', 'test_inj_dedup_1');
+  const r2 = state.notifyPlayerInjuredLivingWorld(p, 7, 'Căng cơ thử nghiệm', 'test_inj_dedup_1');
+  assert.equal(r1, true, 'Thông báo chấn thương lần đầu phải kích hoạt thành công');
+  assert.equal(r2, false, 'Cùng sourceKey chấn thương không được gửi báo cáo trùng lặp');
+  assert.equal(state.phoneInbox.length, prevMsgLen + 1, 'Chỉ được tạo đúng 1 báo cáo y tế gửi Chủ tịch');
+  const medNpc = npcSystem.getById('npc_med');
+  assert.equal(medNpc.state, 'MEDICAL_CHECK', 'Trưởng bộ phận y tế phải lập tức chuyển sang trạng thái MEDICAL_CHECK để tiếp nhận ca chấn thương');
+  assert.ok(Math.hypot(medNpc.finalDest.x - 168.0, medNpc.finalDest.z - (-37.2)) < 2.5, 'Trưởng bộ phận y tế phải di chuyển tới khu tiếp nhận Trung tâm Y tế');
+  const pNpc = npcSystem.npcs.find((n) => n.playerId === p.id);
+  assert.equal(pNpc.state, 'MEDICAL_CHECK', 'Cầu thủ chấn thương phải chuyển sang MEDICAL_CHECK tại Trung tâm Y tế');
+  p.injured = prevInjured;
+  p.injuryDays = prevDays;
+
+  // 3. Legacy save migration moves npc_med from old HQ (13.2, 16.0) to Medical Center (174.5, -35.5)
+  const snap = state.exportFullState({ x: 0, y: 0.14, z: 7 });
+  const oldMedRuntime = snap.npcRuntimeState.npcs.find((x) => x.id === 'npc_med');
+  oldMedRuntime.x = 13.2;
+  oldMedRuntime.z = 16.0;
+  oldMedRuntime.finalDest = { x: 13.2, z: 16.0 };
+  const oldHeadStaff = snap.staffDb.active.find((s) => s.roleKey === 'head_medical');
+  if (oldHeadStaff) {
+    oldHeadStaff.home = { x: 13.2, z: 16.0 };
+    oldHeadStaff.workCoord = { x: 13.2, z: 16.0 };
+    oldHeadStaff.roomName = 'Phòng D — Y tế & Phục hồi';
+  }
+  delete snap.activityPointState;
+  state.importFullState(snap);
+  npcSystem.importRuntimeState(snap.npcRuntimeState, 10.5);
+  const migratedMed = npcSystem.getById('npc_med');
+  assert.ok(migratedMed.mesh.position.x > 160 && migratedMed.mesh.position.z < -25,
+    `Save cũ có npc_med ở HQ phải tự di chuyển về Trung tâm Y tế mới, nhận (${migratedMed.mesh.position.x}, ${migratedMed.mesh.position.z})`);
+  const migratedStaff = state.staffDb.active.find((s) => s.roleKey === 'head_medical');
+  assert.ok(migratedStaff.home.x > 160 && migratedStaff.workCoord.x > 160, 'staffDb head_medical từ save cũ phải được cập nhật home/workCoord sang Trung tâm Y tế');
+
+  // 4. SaveManager JSON Export / Import round-trip
+  const sm = new SaveManager();
+  const jsonStr = sm.exportSaveJson(snap, 'manual_export');
+  const parsed = sm.parseImportedSaveJson(jsonStr);
+  assert.equal(parsed.ok, true, 'parseImportedSaveJson phải đọc được JSON vừa xuất');
+  assert.equal(parsed.data.season, snap.season);
+  assert.equal(parsed.data.timeState.epochSeconds, snap.timeState.epochSeconds);
+  const badParsed = sm.parseImportedSaveJson('{"invalid":true}');
+  assert.equal(badParsed.ok, false, 'File JSON sai cấu trúc phải bị từ chối an toàn');
+});
+

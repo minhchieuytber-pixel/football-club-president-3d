@@ -1239,6 +1239,7 @@ export class MatchdaySystem {
           pl.health.injuryDays = inj.days;
           pl.health.injuryType = inj.type;
         }
+        state.notifyPlayerInjuredLivingWorld?.(pl, inj.days, inj.type, `md_inj_${res.matchId}_${pl.id}`);
       }
     });
 

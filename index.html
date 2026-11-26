@@ -45,7 +45,6 @@
       .top-bar { flex-wrap: wrap; gap: 4px; padding-bottom: 4px; }
       .club-pill { font-size: 10.5px; padding: 4px 8px; }
       .metric-chip { font-size: 10px; padding: 4px 7px; }
-      .team-status-box { top: max(76px, calc(env(safe-area-inset-top) + 68px)); width: 176px; padding: 5px 8px; }
       .modal-box, .modal-box.wide, .modal-box.macos-shell {
         width: 97vw; max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 14px);
       }
@@ -116,7 +115,7 @@
     /* Ô chữ nhật bé góc trên bên phải hiển thị trạng thái lịch trình đội bóng */
     .team-status-box {
       position: fixed;
-      top: max(46px, calc(env(safe-area-inset-top) + 40px));
+      top: max(56px, calc(env(safe-area-inset-top) + 48px));
       right: max(14px, env(safe-area-inset-right));
       z-index: 19;
       width: 198px;
@@ -722,6 +721,7 @@
     /* iPhone Portrait (375-430px) polish: đặt sau base rules để đảm bảo độ ưu tiên cascade */
     @media (orientation: portrait), (max-width: 520px) {
       .top-bar { flex-wrap: wrap; gap: 4px; padding-bottom: 4px; }
+      .team-status-box { top: max(124px, calc(env(safe-area-inset-top) + 114px)); width: 176px; padding: 5px 8px; }
       .toast-box {
         top: max(98px, calc(env(safe-area-inset-top) + 90px));
         font-size: 11.5px;

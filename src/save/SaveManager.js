@@ -144,6 +144,26 @@ export class SaveManager {
     return slots;
   }
 
+  exportSaveJson(stateSnapshot, slotId = 'manual_export') {
+    const payload = this._buildPayload(slotId, stateSnapshot, true);
+    payload.schemaVersion = 2;
+    return JSON.stringify(payload, null, 2);
+  }
+
+  parseImportedSaveJson(rawText) {
+    if (!rawText || typeof rawText !== 'string') return { ok: false, error: 'Tệp lưu trống.' };
+    try {
+      const parsed = JSON.parse(rawText);
+      const data = (parsed && parsed.data && typeof parsed.data === 'object') ? parsed.data : parsed;
+      if (!data || !Array.isArray(data.players) || !data.finance || !data.season) {
+        return { ok: false, error: 'Định dạng JSON không phải file save hợp lệ của PSG President Simulator 3D.' };
+      }
+      return { ok: true, data, summary: parsed?.summary || `Mùa ${data.season} · T${data.week || 1}` };
+    } catch (err) {
+      return { ok: false, error: `Lỗi đọc JSON: ${err?.message || err}` };
+    }
+  }
+
   saveSettings(settings) {
     try {
       const current = this.loadSettings();

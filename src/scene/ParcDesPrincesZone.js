@@ -216,6 +216,7 @@ export class ParcDesPrincesZone {
       trunks.setMatrixAt(i, dummy.matrix);
       dummy.position.set(x, 3.7, z); dummy.scale.set(1.12, 1.05, 1.12); dummy.updateMatrix();
       crowns.setMatrixAt(i, dummy.matrix);
+      this.campus.addCollider(x, z, 0.85, 0.85);
     });
     this.connectorGroup.add(trunks, crowns);
 
