@@ -205,6 +205,74 @@ export class TrainingSystem {
     return this.schedule.find((s) => clockHour >= s.start && clockHour < s.end) || null;
   }
 
+  _formatClockWindow(startH, endH) {
+    const fmt = (val) => {
+      const h = Math.floor(((val % 24) + 24) % 24);
+      const m = Math.round((val - Math.floor(val)) * 60) % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+    return `${fmt(startH)}–${fmt(endH)}`;
+  }
+
+  getSquadScheduleStatus(clockHour = 9.5, matchdaySystem = null) {
+    if (matchdaySystem?.isActive || matchdaySystem?.liveSession && !matchdaySystem.liveSession.finished) {
+      return {
+        icon: '🏟️',
+        badge: 'MATCHDAY',
+        title: 'Đội một đang thi đấu Matchday',
+        windowText: 'Trực tiếp'
+      };
+    }
+
+    const h = ((Number(clockHour) || 0) % 24 + 24) % 24;
+    if (h >= 8.75 && h < 9.25) {
+      return { icon: '👕', badge: 'THAY ĐỒ', title: 'Chuẩn bị tập buổi sáng', windowText: '08:45–09:25' };
+    }
+    if (h >= 9.25 && h < 12.15) {
+      const slot = this.getActiveSlot(h);
+      const title = slot?.title || DRILL_CATALOG[this.currentDrillKey]?.label || 'Tập luyện đội một PSG';
+      const win = slot ? this._formatClockWindow(slot.start, slot.end) : '09:25–12:15';
+      return { icon: '⚽', badge: 'TẬP SÁNG', title, windowText: win };
+    }
+    if (h >= 12.15 && h < 13.0) {
+      return { icon: '💧', badge: 'HẠ NHIỆT', title: 'Thay đồ & phục hồi sau tập', windowText: '12:15–13:00' };
+    }
+    if (h >= 13.0 && h < 13.75) {
+      return { icon: '🍽️', badge: 'ĂN TRƯA', title: 'Dùng bữa trưa dinh dưỡng', windowText: '13:00–13:45' };
+    }
+    if (h >= 13.75 && h < 14.25) {
+      return { icon: '🛋️', badge: 'NGHỈ TRƯA', title: 'Nghỉ ngơi giữa ngày', windowText: '13:45–14:25' };
+    }
+    if (h >= 14.25 && h < 15.0) {
+      return { icon: '👕', badge: 'THAY ĐỒ', title: 'Chuẩn bị tập buổi chiều', windowText: '14:25–15:00' };
+    }
+    if (h >= 15.0 && h < 16.5) {
+      const slot = this.getActiveSlot(h);
+      const title = slot?.title || 'Tập chiến thuật buổi chiều';
+      const win = slot ? this._formatClockWindow(slot.start, slot.end) : '15:00–16:30';
+      return { icon: '⚽', badge: 'TẬP CHIỀU', title, windowText: win };
+    }
+    if (h >= 16.5 && h < 17.65) {
+      return { icon: '💪', badge: 'TỰ DO · GYM', title: 'Gym, trị liệu & phục hồi', windowText: '16:30–17:40' };
+    }
+    if (h >= 17.65 && h < 19.35) {
+      return { icon: '🍽️', badge: 'ĂN TỐI', title: 'Dùng bữa tối Residence', windowText: '17:40–19:20' };
+    }
+    if (h >= 19.35 && h < 21.25) {
+      return { icon: '📺', badge: 'TỰ DO', title: 'Thư giãn Lounge & phòng riêng', windowText: '19:20–21:15' };
+    }
+    if (h >= 21.25 && h < 22.5) {
+      return { icon: '🛏️', badge: 'VỀ PHÒNG', title: 'Nghỉ ngơi tại phòng cá nhân', windowText: '21:15–22:30' };
+    }
+    if (h >= 6.5 && h < 7.35) {
+      return { icon: '☀️', badge: 'THỨC DẬY', title: 'Vệ sinh & khởi đầu ngày mới', windowText: '06:30–07:20' };
+    }
+    if (h >= 7.35 && h < 8.75) {
+      return { icon: '🥐', badge: 'ĂN SÁNG', title: 'Ăn sáng dinh dưỡng đội một', windowText: '07:20–08:45' };
+    }
+    return { icon: '🌙', badge: 'NGỦ ĐÊM', title: 'Giờ ngủ nghỉ toàn đội', windowText: '22:30–06:30' };
+  }
+
   setIntensity(level) {
     if (!['Hồi phục', 'Nhẹ', 'Trung bình', 'Cao'].includes(level)) return false;
     this.intensity = level;
@@ -315,18 +383,49 @@ export class TrainingSystem {
     }
 
     // Cầu thủ chấn thương luôn chuyển sang chế độ hồi phục tại Trung tâm Y tế (tuyệt đối không tham gia tập nặng!)
+    const actSys = npcSystem?.activitySystem || null;
     for (let ii = 0; ii < injuredNpcs.length; ii++) {
       const inj = injuredNpcs[ii];
       inj.mode = 'medical_rehab';
+      inj.state = 'MEDICAL_CHECK';
+      inj.activityType = 'medical';
       inj.scrimmageTeam = null;
-      inj.drillAnim = 'idle';
       if (inj.bibMesh) inj.bibMesh.visible = false;
       inj.task = 'Đang điều trị & phục hồi chấn thương tại Trung tâm Y tế PSG (Miễn tập nặng)';
-      const rx = MEDICAL_RECOVERY_SPOT.cx + 4.5 + (ii % 2) * 3.0;
-      const rz = MEDICAL_RECOVERY_SPOT.cz - 4.0 + Math.floor(ii / 2) * 3.2;
-      if (drillChanged || zoneJustActivated || !inj.finalDest || Math.hypot(inj.finalDest.x - rx, inj.finalDest.z - rz) > 0.5) {
-        if (npcSystem?.setNpcDestination) npcSystem.setNpcDestination(inj, rx, rz);
-        else inj.target.set(rx, 0.14, rz);
+
+      let rx = MEDICAL_RECOVERY_SPOT.cx + 4.5 + (ii % 2) * 3.0;
+      let rz = MEDICAL_RECOVERY_SPOT.cz - 4.0 + Math.floor(ii / 2) * 3.2;
+      let targetAnim = 'idle';
+      if (actSys) {
+        const pt = actSys.claimAvailablePoint(inj.id, {
+          area: 'medical',
+          interactionTypes: ['medical_exam', 'physio', 'recovery_bed', 'cryo', 'ice_tub', 'biometrics'],
+          preferNearX: MEDICAL_RECOVERY_SPOT.cx,
+          preferNearZ: MEDICAL_RECOVERY_SPOT.cz
+        });
+        if (pt) {
+          rx = pt.standPosition.x;
+          rz = pt.standPosition.z;
+          inj.activePointId = pt.activityPointId;
+          targetAnim = pt.animation || 'idle';
+        }
+      }
+      const nearTarget = Math.hypot(inj.mesh.position.x - rx, inj.mesh.position.z - rz) < 0.75;
+      if (nearTarget && actSys && inj.activePointId) {
+        actSys.occupyPoint(inj.activePointId, inj.id);
+        const pt = actSys.getPoint(inj.activePointId);
+        if (pt) {
+          inj.state = pt.interactionType === 'recovery_bed' || pt.interactionType === 'physio' ? 'RECOVERY' : 'MEDICAL_CHECK';
+          inj._slotLocked = true;
+          inj.drillAnim = targetAnim;
+        }
+      } else {
+        inj._slotLocked = false;
+        inj.drillAnim = 'idle';
+        if (drillChanged || zoneJustActivated || !inj.finalDest || Math.hypot(inj.finalDest.x - rx, inj.finalDest.z - rz) > 0.5) {
+          if (npcSystem?.setNpcDestination) npcSystem.setNpcDestination(inj, rx, rz);
+          else inj.target.set(rx, 0.14, rz);
+        }
       }
     }
 

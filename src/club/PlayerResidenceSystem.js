@@ -180,11 +180,14 @@ function hashString(str) {
 function createRoomRecord(bp) {
   const room = {
     ...bp,
+    roomId: `room_${String(bp.roomNumber).padStart(2, '0')}`,
     status: 'AVAILABLE',
     occupantId: null,
     occupantName: null,
     shirtNumber: null,
     position: null,
+    assignedAt: null,
+    currentOccupant: null,
     curtainState: 'open',
     privacyPreference: null,
     lastCurtainAction: null,
@@ -205,6 +208,26 @@ function createRoomRecord(bp) {
   };
 
   Object.defineProperties(room, {
+    playerId: {
+      enumerable: false,
+      get() { return this.occupantId; },
+      set(v) { this.occupantId = v || null; }
+    },
+    playerName: {
+      enumerable: false,
+      get() { return this.occupantName; },
+      set(v) { this.occupantName = v || null; }
+    },
+    roomStatus: {
+      enumerable: false,
+      get() { return this.status; },
+      set(v) { this.status = v || 'AVAILABLE'; }
+    },
+    doorState: {
+      enumerable: false,
+      get() { return this.doorOpen ? 'open' : 'closed'; },
+      set(v) { this.doorOpen = (v === true || v === 'open'); }
+    },
     CurtainState: {
       enumerable: false,
       get() { return this.curtainState; }
@@ -223,7 +246,7 @@ function createRoomRecord(bp) {
     },
     CurrentOccupant: {
       enumerable: false,
-      get() { return this.occupantId; }
+      get() { return this.currentOccupant || this.occupantId; }
     },
     RoomOccupancyState: {
       enumerable: false,
@@ -356,6 +379,8 @@ export class PlayerResidenceSystem {
         r.occupantName = null;
         r.shirtNumber = null;
         r.position = null;
+        r.assignedAt = null;
+        r.currentOccupant = null;
         r.privacyPreference = null;
         r.curtainState = 'open';
         r.lastCurtainAction = null;
@@ -392,6 +417,7 @@ export class PlayerResidenceSystem {
           r.shirtNumber = nextNum;
           r.position = p.position;
           r.privacyPreference = nextPref;
+          if (!r.assignedAt) r.assignedAt = this._getDayStamp();
           changed = true;
         }
       }
@@ -411,6 +437,8 @@ export class PlayerResidenceSystem {
         freeRoom.occupantName = p.name;
         freeRoom.shirtNumber = p.shirtNumber || null;
         freeRoom.position = p.position;
+        freeRoom.assignedAt = this._getDayStamp();
+        freeRoom.currentOccupant = null;
         freeRoom.privacyPreference = pref;
         freeRoom.curtainAutomationEnabled = true;
         freeRoom.manualOverride = false;
@@ -669,6 +697,27 @@ export class PlayerResidenceSystem {
     };
   }
 
+  setRoomOccupantPresence(roomNumber, playerId = null) {
+    const room = this.getRoomByNumber(roomNumber);
+    if (!room) return false;
+    room.currentOccupant = playerId || null;
+    return true;
+  }
+
+  getRoomInteriorSpots(room) {
+    if (!room) return null;
+    const sSign = room.side === 'north' ? 1 : -1;
+    const toZ = (lz) => room.doorZ - sSign * lz;
+    return {
+      aisleEntry: { x: room.cx + 0.52, z: toZ(1.1) },
+      bed: { x: room.cx - 0.88, z: toZ(4.60), standX: room.cx + 0.52, standZ: toZ(4.60), elevatedY: 0.44 },
+      sofa: { x: room.cx - 1.44, z: toZ(7.75), standX: room.cx + 0.45, standZ: toZ(7.75), elevatedY: 0.24 },
+      desk: { x: room.cx + 1.05, z: toZ(9.95), standX: room.cx + 0.48, standZ: toZ(9.95), elevatedY: 0.14 },
+      wardrobe: { x: room.cx + 0.72, z: toZ(1.52), standX: room.cx + 0.58, standZ: toZ(1.52), elevatedY: 0.14 },
+      window: this.getWindowStandSpot(room)
+    };
+  }
+
   getWindowStandSpot(room) {
     if (!room) return null;
     if (room.side === 'north') {
@@ -828,7 +877,9 @@ export class PlayerResidenceSystem {
         doorOpen: !!r.doorOpen,
         tvOn: !!r.tvOn,
         lightOn: r.lightOn !== false,
-        wardrobeOpen: !!r.wardrobeOpen
+        wardrobeOpen: !!r.wardrobeOpen,
+        assignedAt: r.assignedAt ?? null,
+        currentOccupant: r.currentOccupant ?? null
       })),
       playerPreferences: { ...this.playerPreferences },
       overflowPlayers: this.overflowPlayers.slice(),
@@ -872,6 +923,8 @@ export class PlayerResidenceSystem {
         r.tvOn = !!saved.tvOn;
         r.lightOn = saved.lightOn !== false;
         r.wardrobeOpen = !!saved.wardrobeOpen;
+        r.assignedAt = saved.assignedAt ?? null;
+        r.currentOccupant = saved.currentOccupant ?? null;
 
         if (saved.occupantId) {
           r.occupantId = saved.occupantId;

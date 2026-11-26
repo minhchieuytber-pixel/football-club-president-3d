@@ -114,6 +114,7 @@ class FootballPresidentGame3D {
 
     this.npcSystem = new NpcSystem(this.campusSceneObj, this.charFactory, this.animSystem, this.campus);
     this.npcSystem.attachTrainingSystem(this.state.trainingSystem);
+    this.npcSystem.attachActivitySystem(this.state.activityPointSystem);
     this.npcSystem.spawnFromProfiles(this.state.npcs, this.state.clockHour);
     this.npcSystem.syncStaffNpcs(this.state.staffDb.active, this.state.clockHour);
     this.npcSystem.syncSquadPlayers(
@@ -122,6 +123,7 @@ class FootballPresidentGame3D {
       this.state.activeKit,
       this.state.formationSystem?.captainId || null
     );
+    this.state.registerNpcSystem?.(this.npcSystem);
     this.state.signingEventSystem.attach3D(this.mediaRooms, this.npcSystem);
 
     this.eventCameraAngle = null; // Góc máy truyền hình 3D khi đang diễn ra Lễ Ký Kết / Họp Báo / PSG TV LIVE
@@ -397,9 +399,19 @@ class FootballPresidentGame3D {
       }
       this.ui.applyDockVisualState?.();
     }
+    this.npcSystem.attachActivitySystem(this.state.activityPointSystem);
     this.npcSystem.spawnFromProfiles(this.state.npcs, this.state.clockHour);
     this.npcSystem.syncStaffNpcs(this.state.staffDb.active, this.state.clockHour);
-    this.npcSystem.syncSquadPlayers(this.state.getPsgSquad(), this.state.clockHour);
+    this.npcSystem.syncSquadPlayers(
+      this.state.getPsgSquad(),
+      this.state.clockHour,
+      this.state.activeKit,
+      this.state.formationSystem?.captainId || null
+    );
+    if (snap.npcRuntimeState) {
+      this.npcSystem.importRuntimeState(snap.npcRuntimeState, this.state.clockHour);
+      this.state.pendingNpcRuntimeState = null;
+    }
     this.dressingRoom.refreshDynamicElements();
     this.trainingComplex?.refreshNameplates?.();
     this.trainingComplex?.syncCurtainsFromState?.(true);
@@ -927,16 +939,21 @@ class FootballPresidentGame3D {
       this.autoSaveNow(true);
     }
 
-    const simDt = this.state.timeSystem.isPaused() ? 0 : dt;
-    this.campus.updateDoors(dt, this.playerMesh.position, this.npcSystem.npcs);
+    const paused = this.state.timeSystem.isPaused();
+    const speedMult = paused ? 0 : (this.state.timeSystem.speedMultiplier || 1);
+    const simDt = paused ? 0 : dt * speedMult;
+    this.campus.updateDoors(dt, this.playerMesh.position, paused ? null : this.npcSystem.npcs);
     this.campus.deskDocuments?.syncFromDocumentSystem?.(this.state.documentSystem);
-    this.campus.deskDocuments?.update?.(dt);
-    this.trainingComplex?.update?.(dt);
-    this.state.signingEventSystem.update(dt);
+    if (simDt > 0) {
+      this.campus.deskDocuments?.update?.(simDt);
+      this.trainingComplex?.update?.(simDt);
+      this.state.signingEventSystem.update(simDt);
+    }
     if (!modalOpen) {
       this.campus.updatePresidentTvVisual?.(this.state.televisionSystem, dt, performance.now() * 0.001, this.playerMesh.position);
       const execSys = this.state.executionSystem;
       if (
+        !paused &&
         execSys?.officeVisitQueue?.length > 0 &&
         !this.eventCameraAngle &&
         !this.stadiumCctvKey &&

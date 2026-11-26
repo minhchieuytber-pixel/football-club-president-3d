@@ -754,8 +754,8 @@ export class ResidenceInteriorFactory {
         ctrl.doorObj.pivot.rotation.y = angle;
         ctrl.doorObj.targetAngle = ctrl.doorTarget * maxDoorAngle;
         ctrl.doorObj.open = ctrl.doorTarget > 0.5;
-        // Mở collider ngay khi cửa hé > 38% (tránh kẹt người chơi & NPC khi đi qua)
-        ctrl.doorObj.collider.active = ctrl.doorProgress < 0.38 && ctrl.doorTarget < 0.5;
+        // Chỉ tắt collider khi cửa đã xoay mở >= 62% (ngăn NPC bước xuyên cánh cửa đang đóng/hé)
+        ctrl.doorObj.collider.active = ctrl.doorProgress < 0.62;
       }
 
       if (updateWard) {

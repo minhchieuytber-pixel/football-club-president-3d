@@ -625,15 +625,56 @@ export class TrainingComplexScene {
     this.campus.addCollider(168, -42.5, 1.7, 0.85);
     this.campus.tagInteractable(diagDesk, 'tc_med_biometrics', 'Đo Sinh trắc học & Thể lực Cầu thủ', '📊', 'open_medical');
 
-    // 5. Phòng Bác Sĩ & Chuyên Gia Phục Hồi (Đông Nam — khớp vị trí chair cho npc_med & rehab_coach!)
+    // 5. Văn Phòng Trưởng Bộ Phận Y Tế & Chuyên Gia Phục Hồi (Đông Nam — khớp vị trí chair cho npc_med & rehab_coach!)
+    const medHeadSign = new THREE.Mesh(
+      this._planeGeo(4.8, 0.52),
+      this._getSignMat('VĂN PHÒNG TRƯỞNG BỘ PHẬN Y TẾ · HEAD OF MEDICAL', '#0f172a', '#fde68a', '#22c55e')
+    );
+    medHeadSign.position.set(174.5, 2.95, -28.25);
+    medHeadSign.rotation.y = Math.PI;
+    this.medicalGymGroup.add(medHeadSign);
+
     const docDesk = this.furn.createExecutiveDesk(2.2, 1.0, false);
     docDesk.position.set(174.5, 0.14, -33.2);
+    docDesk.rotation.y = Math.PI;
     const docChair = this.furn.createSwivelChair(true);
     docChair.position.set(174.5, 0.14, -35.5);
+    docChair.rotation.y = Math.PI;
     this.medicalGymGroup.add(docDesk, docChair);
     this.campus.addCollider(174.5, -33.2, 2.2, 1.0);
     this.campus.registerChairPosition(174.5, -35.5, 0.14);
-    this.campus.tagInteractable(docDesk, 'tc_med_doctor_desk', 'Hồ sơ Bệnh án & Trung tâm Y tế PSG', '🩺', 'open_medical');
+    this.campus.tagInteractable(docDesk, 'tc_med_doctor_desk', 'Văn phòng Trưởng Bộ phận Y tế PSG', '🩺', 'open_medical');
+
+    // Khu vực tiếp nhận báo cáo Y tế
+    const reportsDesk = this.furn.createStaffDesk('TIẾP NHẬN BÁO CÁO Y TẾ');
+    reportsDesk.position.set(170.5, 0.14, -31.8);
+    reportsDesk.rotation.y = Math.PI;
+    this.medicalGymGroup.add(reportsDesk);
+    this.campus.addCollider(170.5, -31.8, 1.65, 0.82);
+    this.campus.tagInteractable(reportsDesk, 'tc_med_reports', 'Khu vực Tiếp nhận Báo cáo & Hồ sơ Y tế', '📋', 'open_medical');
+
+    // Tủ hồ sơ y tế (tường Đông)
+    [-31.6, -33.5].forEach((czCab, idx) => {
+      const cab = this.furn.createFilingCabinet(1.5, 2.0, 0.44);
+      cab.position.set(180.4, 0.14, czCab);
+      cab.rotation.y = -Math.PI / 2;
+      this.medicalGymGroup.add(cab);
+      this.campus.addCollider(180.4, czCab, 0.48, 1.52);
+      this.campus.tagInteractable(cab, `tc_med_records_${idx}`, 'Tủ Hồ sơ Y tế & Bệnh án Cầu thủ PSG', '📁', 'open_medical');
+    });
+
+    // Màn hình theo dõi sức khỏe & Bảng lịch khám phục hồi
+    const vitalsMonitor = this.furn.createWallScreen(2.8, 1.45, 'PLAYER VITALS & INJURY MONITOR');
+    vitalsMonitor.position.set(180.7, 2.25, -36.5);
+    vitalsMonitor.rotation.y = -Math.PI / 2;
+    this.medicalGymGroup.add(vitalsMonitor);
+    this.campus.tagInteractable(vitalsMonitor, 'tc_med_monitor', 'Màn hình Theo dõi Sức khỏe & Nhịp sinh học', '💓', 'open_medical');
+
+    const scheduleBoard = this.furn.createWallScreen(2.5, 1.32, 'LỊCH KHÁM & PHỤC HỒI HÔM NAY');
+    scheduleBoard.position.set(174.5, 2.02, -28.25);
+    scheduleBoard.rotation.y = Math.PI;
+    this.medicalGymGroup.add(scheduleBoard);
+    this.campus.tagInteractable(scheduleBoard, 'tc_med_schedule_board', 'Bảng Lịch Khám & Phục Hồi Y Tế', '📅', 'open_medical');
 
     // Bàn & ghế Chuyên gia phục hồi (rehab_coach tại 162.5, -36.5)
     const rehabDesk = this.furn.createStaffDesk('REHAB & RECOVERY');

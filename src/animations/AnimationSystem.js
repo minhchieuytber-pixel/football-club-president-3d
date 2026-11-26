@@ -5,7 +5,7 @@
 const TWO_PI_HUNDRED = Math.PI * 200;
 
 const FAST_STATES = new Set(['kick', 'pass', 'tackle', 'dive_gk']);
-const LOCOMOTION_STATES = new Set(['walk', 'run', 'train', 'turn']);
+const LOCOMOTION_STATES = new Set(['walk', 'run', 'train', 'turn', 'gym_treadmill', 'gym_bike']);
 
 function damp(current, target, f) {
   return current + (target - current) * f;
@@ -16,6 +16,7 @@ export class AnimationSystem {
     // Reusable target pose struct (zero per-frame GC allocations)
     this._target = {
       pelvisY: 0.92,
+      pelvisRotX: 0,
       pelvisRotZ: 0,
       pelvisRotY: 0,
       torsoRotX: 0,
@@ -38,6 +39,7 @@ export class AnimationSystem {
   _resetTarget(basePelvisY) {
     const p = this._target;
     p.pelvisY = basePelvisY;
+    p.pelvisRotX = 0;
     p.pelvisRotZ = 0;
     p.pelvisRotY = 0;
     p.torsoRotX = 0;
@@ -112,15 +114,18 @@ export class AnimationSystem {
 
     const clampedSpeed = Math.max(0.15, Math.min(2.0, Number.isFinite(speedFactor) ? speedFactor : 1.0));
     const rate =
-      state === 'run' ? 11.4
+      state === 'run' || state === 'gym_treadmill' ? 11.4
       : state === 'walk' ? 7.2
-      : state === 'train' ? 9.6
+      : state === 'train' || state === 'gym_bike' ? 9.6
       : state === 'turn' ? 6.0
       : state === 'celebrate' ? 6.4
-      : state === 'stretch' ? 4.2
+      : state === 'stretch' || state === 'gym_weights' ? 4.2
+      : state === 'eat' ? 3.8
       : 3.2;
 
-    const phaseMult = (state === 'walk' || state === 'run' || state === 'train') ? clampedSpeed : Math.max(0.5, clampedSpeed);
+    const phaseMult = (state === 'walk' || state === 'run' || state === 'train' || state === 'gym_treadmill' || state === 'gym_bike')
+      ? clampedSpeed
+      : Math.max(0.5, clampedSpeed);
     rig.animPhase = (rig.animPhase || 0) + effDt * rate * phaseMult;
     if (rig.animPhase > TWO_PI_HUNDRED) {
       rig.animPhase -= TWO_PI_HUNDRED;
@@ -348,18 +353,25 @@ export class AnimationSystem {
       p.rElbX = -0.18;
       p.lShX = -0.5;
       p.lElbX = -0.8;
-    } else if (state === 'sit' || state === 'work_pc') {
+    } else if (state === 'sit' || state === 'work_pc' || state === 'watch_tv' || state === 'use_desk') {
+      const isDesk = state === 'work_pc' || state === 'use_desk';
       p.pelvisY = 0.56;
-      p.torsoRotX = state === 'work_pc' ? 0.08 : 0.02;
+      p.torsoRotX = isDesk ? 0.08 : (state === 'watch_tv' ? -0.06 : 0.02);
       p.lHipX = -1.48;
       p.rHipX = -1.48;
       p.lKneeX = 1.48;
       p.rKneeX = 1.48;
-      if (state === 'work_pc') {
+      if (isDesk) {
         p.lShX = -0.75 + Math.sin(t * 2.2) * 0.06;
         p.rShX = -0.75 + Math.cos(t * 2.4) * 0.06;
         p.lElbX = -0.82;
         p.rElbX = -0.82;
+      } else if (state === 'watch_tv') {
+        p.lShX = -0.35;
+        p.rShX = -0.45;
+        p.lElbX = -0.85;
+        p.rElbX = -0.85;
+        p.headRotX = -0.05;
       } else {
         p.lShX = -0.45;
         p.rShX = -0.45;
@@ -367,6 +379,77 @@ export class AnimationSystem {
         p.rElbX = -0.7;
       }
       p.headRotY = Math.sin(t * 0.45) * 0.14;
+    } else if (state === 'sleep' || state === 'lie_rest') {
+      // Nằm ngủ / nằm nghỉ phục hồi trên giường
+      const breath = Math.sin(t * 0.9) * 0.02;
+      p.pelvisY = 0.42;
+      p.pelvisRotX = -1.42;
+      p.torsoRotX = breath;
+      p.headRotX = 0.12;
+      p.headRotY = state === 'sleep' ? 0.08 : Math.sin(t * 0.4) * 0.16;
+      p.lHipX = 0.04;
+      p.rHipX = -0.04;
+      p.lKneeX = 0.08;
+      p.rKneeX = 0.10;
+      p.lShX = -0.12;
+      p.rShX = -0.14;
+      p.lElbX = -0.35;
+      p.rElbX = -0.35;
+    } else if (state === 'eat') {
+      // Ăn uống / bổ sung dinh dưỡng
+      const lift = Math.max(0, Math.sin(t * 2.1));
+      p.pelvisY = basePelvisY;
+      p.torsoRotX = 0.05;
+      p.rShX = -0.55 - lift * 0.48;
+      p.rElbX = -0.95 - lift * 0.38;
+      p.lShX = -0.25;
+      p.lElbX = -0.55;
+      p.headRotX = 0.10 - lift * 0.06;
+      p.headRotY = Math.sin(t * 0.7) * 0.12;
+    } else if (state === 'gym_treadmill') {
+      // Chạy bộ trên máy chạy bộ
+      const sinT = Math.sin(t);
+      const cosT = Math.cos(t);
+      const swing = sinT * 0.62;
+      p.pelvisY = basePelvisY - (1 - Math.cos(swing)) * 0.36;
+      p.torsoRotX = 0.12;
+      p.lHipX = swing;
+      p.rHipX = -swing;
+      p.lKneeX = Math.max(0, -cosT * 0.68);
+      p.rKneeX = Math.max(0, cosT * 0.68);
+      p.lShX = -sinT * 0.50;
+      p.rShX = sinT * 0.50;
+      p.lElbX = -0.65;
+      p.rElbX = -0.65;
+    } else if (state === 'gym_bike') {
+      // Đạp xe thể lực tại chỗ
+      const sinT = Math.sin(t);
+      const cosT = Math.cos(t);
+      p.pelvisY = 0.60;
+      p.torsoRotX = 0.24;
+      p.lHipX = -1.05 + sinT * 0.42;
+      p.rHipX = -1.05 - sinT * 0.42;
+      p.lKneeX = 1.05 - cosT * 0.35;
+      p.rKneeX = 1.05 + cosT * 0.35;
+      p.lShX = -0.82;
+      p.rShX = -0.82;
+      p.lElbX = -0.45;
+      p.rElbX = -0.45;
+    } else if (state === 'gym_weights') {
+      // Tập tạ / squat tăng sức mạnh
+      const rep = (Math.sin(t * 1.4) + 1) * 0.5;
+      p.pelvisY = basePelvisY - rep * 0.26;
+      p.torsoRotX = 0.16 * rep;
+      p.lHipX = -0.58 * rep;
+      p.rHipX = -0.58 * rep;
+      p.lKneeX = 0.92 * rep;
+      p.rKneeX = 0.92 * rep;
+      p.lShX = -1.05 - rep * 0.55;
+      p.rShX = -1.05 - rep * 0.55;
+      p.lShZ = -0.18;
+      p.rShZ = 0.18;
+      p.lElbX = -0.85;
+      p.rElbX = -0.85;
     } else if (state === 'talk') {
       p.torsoRotX = 0.02;
       p.torsoRotY = Math.sin(t * 0.7) * 0.06;
@@ -389,19 +472,20 @@ export class AnimationSystem {
       p.lElbX = -0.46;
       p.headRotX = -0.08;
       p.headRotY = sweep * 0.14;
-    } else if (state === 'open_door') {
-      // Đưa tay phải ra nắm tay nắm cửa, xoay nhẹ vai đẩy/kéo mở cửa phòng
-      const push = Math.sin(t * 4.2);
+    } else if (state === 'open_door' || state === 'close_door') {
+      // Đưa tay phải ra nắm tay nắm cửa, xoay nhẹ vai đẩy/kéo mở hoặc đóng cửa phòng
+      const dir = state === 'close_door' ? -1 : 1;
+      const push = Math.sin(t * 4.2) * dir;
       p.pelvisY = basePelvisY;
       p.torsoRotX = 0.06;
-      p.torsoRotY = -0.10 + push * 0.08;
+      p.torsoRotY = (-0.10 + push * 0.08) * dir;
       p.rShX = -1.08 + push * 0.18;
       p.rShZ = 0.08;
       p.rElbX = -0.45 - push * 0.12;
       p.lShX = -0.10;
       p.lElbX = -0.22;
       p.headRotX = 0.04;
-      p.headRotY = -0.06;
+      p.headRotY = -0.06 * dir;
     } else {
       // idle / stand: giữ chân chạm sàn tuyệt đối (nhịp thở nhẹ trên thân trên, không ấn giày xuyên sàn)
       p.pelvisY = basePelvisY;
@@ -419,7 +503,7 @@ export class AnimationSystem {
     const blendNorm = blendDur > 0 ? rig._blendTime / blendDur : 1;
     const smoothP = blendNorm * blendNorm * (3 - 2 * blendNorm);
 
-    const isLocomotion = state === 'walk' || state === 'run' || state === 'train';
+    const isLocomotion = state === 'walk' || state === 'run' || state === 'train' || state === 'gym_treadmill' || state === 'gym_bike';
     const isFast = FAST_STATES.has(state);
     const baseLambda = isFast ? 15 : isLocomotion ? 12 : 10;
     const limbLambda = isLocomotion ? (10 + 14 * smoothP) : isFast ? (13 + 7 * smoothP) : (8 + 5 * smoothP);
@@ -429,6 +513,7 @@ export class AnimationSystem {
 
     // Áp dụng pose mượt cho toàn bộ khớp (không có bất kỳ phép gán cứng gây snap nào!)
     rig.pelvis.position.y = damp(rig.pelvis.position.y, p.pelvisY, bodyF);
+    rig.pelvis.rotation.x = damp(rig.pelvis.rotation.x || 0, p.pelvisRotX, bodyF);
     rig.pelvis.rotation.z = damp(rig.pelvis.rotation.z || 0, p.pelvisRotZ, bodyF);
     rig.pelvis.rotation.y = damp(rig.pelvis.rotation.y || 0, p.pelvisRotY, bodyF);
 

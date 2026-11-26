@@ -36,12 +36,26 @@ import { GlobalClubAISystem } from '../ai/GlobalClubAISystem.js';
 import { ExecutiveDocumentSystem } from '../executive/ExecutiveDocumentSystem.js';
 import { DecisionExecutionSystem } from '../executive/DecisionExecutionSystem.js';
 import { PlayerResidenceSystem } from './PlayerResidenceSystem.js';
+import { ActivityPointSystem } from '../ai/ActivityPointSystem.js';
 
 export class GameState {
   constructor() {
     this._squadListeners = [];
     this._staffListeners = [];
+    this._npcSystemRef = null;
+    this.pendingNpcRuntimeState = null;
     this.reset();
+  }
+
+  registerNpcSystem(npcSystem) {
+    this._npcSystemRef = npcSystem || null;
+    if (this._npcSystemRef && this.activityPointSystem) {
+      this._npcSystemRef.attachActivitySystem?.(this.activityPointSystem);
+    }
+    if (this._npcSystemRef && this.pendingNpcRuntimeState) {
+      this._npcSystemRef.importRuntimeState?.(this.pendingNpcRuntimeState, this.clockHour);
+      this.pendingNpcRuntimeState = null;
+    }
   }
 
   onSquadChange(fn) {
@@ -254,6 +268,11 @@ export class GameState {
     this.documentSystem = new ExecutiveDocumentSystem(this);
     this.executionSystem = new DecisionExecutionSystem(this);
     this.playerResidenceSystem = new PlayerResidenceSystem(this);
+    this.activityPointSystem = new ActivityPointSystem();
+    this.pendingNpcRuntimeState = null;
+    if (this._npcSystemRef) {
+      this._npcSystemRef.attachActivitySystem?.(this.activityPointSystem);
+    }
     this.formationSystem.onChange(() => {
       this.playerResidenceSystem?.syncWithSquad({ silentAlert: true, silentLog: true });
     });
@@ -923,6 +942,8 @@ export class GameState {
       documentState: this.documentSystem?.exportState?.() || null,
       executionState: this.executionSystem?.exportState?.() || null,
       residenceState: this.playerResidenceSystem?.exportState?.() || null,
+      activityPointState: this.activityPointSystem?.exportState?.() || null,
+      npcRuntimeState: this._npcSystemRef?.exportRuntimeState?.() || this.pendingNpcRuntimeState || null,
       uiPrefs: this.uiPrefs || null,
       playerPos
     };
@@ -989,6 +1010,11 @@ export class GameState {
     if (snap.executionState) this.executionSystem?.importState(snap.executionState);
     if (snap.residenceState) this.playerResidenceSystem?.importState(snap.residenceState);
     else this.playerResidenceSystem?.syncWithSquad({ silentAlert: true, silentLog: true });
+    if (this.activityPointSystem) {
+      if (snap.activityPointState) this.activityPointSystem.importState(snap.activityPointState);
+      else this.activityPointSystem.resetAll();
+    }
+    this.pendingNpcRuntimeState = snap.npcRuntimeState || null;
 
     if (snap.uiPrefs) this.uiPrefs = snap.uiPrefs;
 

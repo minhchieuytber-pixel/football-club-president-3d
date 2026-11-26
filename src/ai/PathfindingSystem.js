@@ -11,7 +11,7 @@ const GRID_DIRS = [
 export class PathfindingSystem {
   constructor(campusScene = null) {
     this.campus = campusScene;
-    this.gridStep = 1.0; // Độ phân giải lưới 1m x 1m bao phủ HQ + SVĐ + Khu Huấn Luyện PSG
+    this.gridStep = 0.5; // Độ phân giải lưới 0.5m x 0.5m bao phủ chính xác cửa phòng (1.4m), lối đi phòng cá nhân (0.85m) & toàn khuôn viên
     this.minX = -65;
     this.maxX = 240;
     this.minZ = -150;
@@ -180,6 +180,14 @@ export class PathfindingSystem {
       medic_door:     { x: 168.0, z: -28.0, doorId: 'door_tc_medical' },
       medic_in:       { x: 168.0, z: -34.0 },
       medic_recovery: { x: 172.0, z: -38.0 },
+      medic_office:   { x: 174.5, z: -35.5 },
+      medic_reports:  { x: 170.5, z: -33.2 },
+      medic_north_door: { x: 168.0, z: -48.0, doorId: 'door_tc_medical_north' },
+
+      // Điểm tuần tra an ninh (HQ <-> Training Center)
+      sec_gate_hq:    { x: -4.8,  z: 24.5 },
+      sec_plaza_nw:   { x: -30.0, z: -26.0 },
+      sec_plaza_ne:   { x: 30.0,  z: -26.0 },
 
       // Trung tâm Thể Lực & Gym (cx=200, cz=-38)
       fit_door:       { x: 200.0, z: -28.0, doorId: 'door_fitness' },
@@ -190,8 +198,16 @@ export class PathfindingSystem {
       res_atrium:     { x: 184.0, z: 2.0 },
       res_pass_w:     { x: 180.0, z: 7.2 },
       res_pass_e:     { x: 188.0, z: 7.2 },
-      res_cor_w:      { x: 162.0, z: 9.0 },
-      res_cor_e:      { x: 204.0, z: 9.0 },
+      res_cor_w0:     { x: 175.875, z: 9.0 },
+      res_cor_w1:     { x: 171.625, z: 9.0 },
+      res_cor_w:      { x: 163.125, z: 9.0 },
+      res_cor_w3:     { x: 154.625, z: 9.0 },
+      res_cor_w4:     { x: 146.125, z: 9.0 },
+      res_cor_e0:     { x: 192.125, z: 9.0 },
+      res_cor_e1:     { x: 196.375, z: 9.0 },
+      res_cor_e:      { x: 204.875, z: 9.0 },
+      res_cor_e3:     { x: 213.375, z: 9.0 },
+      res_cor_e4:     { x: 221.875, z: 9.0 },
       res_lounge:     { x: 184.0, z: 13.5 },
 
       // Đường nội bộ kết nối Khu Trụ sở -> Khu Hậu Cần / Bãi xe -> Khu SVĐ Parc des Princes
@@ -280,14 +296,24 @@ export class PathfindingSystem {
     link('tc_pitch_south', 'tc_pitch_mid'); link('tc_pitch_south', 'tc_pitch_gk'); link('tc_pitch_south', 'tc_pitch_shoot');
     link('tc_pitch_mid', 'tc_pitch_gk'); link('tc_pitch_mid', 'tc_pitch_shoot'); link('tc_pitch_mid', 'tc_pitch_rehab');
     link('tc_pitch_gk', 'tc_pitch_rehab'); link('tc_pitch_shoot', 'tc_pitch_rehab');
+    link('out_south', 'sec_gate_hq');
+    link('out_nw', 'sec_plaza_nw');
+    link('out_ne', 'sec_plaza_ne');
+    link('sec_plaza_ne', 'east_road_mid');
     link('dr_outside', 'dr_door'); link('dr_door', 'dr_in'); link('dr_in', 'dr_center'); link('dr_in', 'dr_south'); link('dr_center', 'dr_south');
     link('tc_plaza_c', 'medic_door'); link('medic_door', 'medic_in'); link('medic_in', 'medic_recovery');
+    link('medic_in', 'medic_reports'); link('medic_reports', 'medic_office'); link('medic_recovery', 'medic_office');
+    link('medic_in', 'medic_north_door'); link('medic_north_door', 'tc_pitch_walk');
     link('tc_plaza_e', 'fit_door'); link('fit_door', 'fit_in');
     link('tc_plaza_c', 'res_door'); link('tc_plaza_w', 'res_door'); link('tc_plaza_e', 'res_door');
     link('res_door', 'res_atrium');
     link('res_atrium', 'res_pass_w'); link('res_atrium', 'res_pass_e');
-    link('res_pass_w', 'res_cor_w'); link('res_pass_w', 'res_lounge');
-    link('res_pass_e', 'res_cor_e'); link('res_pass_e', 'res_lounge');
+    link('res_pass_w', 'res_cor_w0'); link('res_pass_w', 'res_lounge');
+    link('res_cor_w0', 'res_cor_w1'); link('res_cor_w1', 'res_cor_w'); link('res_cor_w', 'res_cor_w3'); link('res_cor_w3', 'res_cor_w4');
+    link('res_cor_w0', 'res_lounge');
+    link('res_pass_e', 'res_cor_e0'); link('res_pass_e', 'res_lounge');
+    link('res_cor_e0', 'res_cor_e1'); link('res_cor_e1', 'res_cor_e'); link('res_cor_e', 'res_cor_e3'); link('res_cor_e3', 'res_cor_e4');
+    link('res_cor_e0', 'res_lounge');
 
     // Kết nối đường nội bộ & đại lộ cảnh quan tới SVĐ Parc des Princes trong cùng khuôn viên PSG
     link('pitch_south', 'parkway_s'); link('parkway_s', 'parkway_mid');
@@ -382,13 +408,13 @@ export class PathfindingSystem {
     this._colliderHash = hash;
     this._overflowColliders = overflow;
 
-    // 3. Nướng lưới tĩnh 1m x 1m cho A* cục bộ tránh đồ nội thất (nhanh nhờ đánh dấu trực tiếp theo AABB từng collider)
+    // 3. Nướng lưới tĩnh 0.5m x 0.5m cho A* cục bộ tránh đồ nội thất (margin 0.28m giữ thông thoáng lối đi phòng cá nhân & cửa 1.4m)
     if (!this.staticGrid || this.staticGrid.length !== this.cols * this.rows) {
       this.staticGrid = new Uint8Array(this.cols * this.rows);
     } else {
       this.staticGrid.fill(0);
     }
-    const margin = 0.42;
+    const margin = 0.28;
     const invStep = 1 / this.gridStep;
     for (let i = 0; i < colliders.length; i++) {
       const col = colliders[i];
@@ -428,11 +454,9 @@ export class PathfindingSystem {
   _checkColliderListBlocked(list, x, z, rSq, respectClosedDoors) {
     for (let i = 0; i < list.length; i++) {
       const b = list[i];
-      if (!b.active) continue;
-      if (!respectClosedDoors) {
-        const door = this._doorByCollider.get(b);
-        if (door && !door.locked) continue;
-      }
+      const door = this._doorByCollider.get(b);
+      if (!b.active && !(door && door.locked)) continue;
+      if (!respectClosedDoors && door && !door.locked) continue;
       const cx = x < b.minX ? b.minX : (x > b.maxX ? b.maxX : x);
       const cz = z < b.minZ ? b.minZ : (z > b.maxZ ? b.maxZ : z);
       const dx = x - cx;
@@ -531,6 +555,8 @@ export class PathfindingSystem {
       if (x >= 128 && x <= 144 && z <= -66 && z >= -82) return 'tc_equip_door';
       // Trung tâm Y tế PSG (x ∈ [155, 181], z ∈ [-48, -28])
       if (x >= 154.5 && x <= 181.5 && z >= -48.5 && z <= -27.5) {
+        if (x > 172.8 && z > -37.2) return 'medic_office';
+        if (x > 169.5 && z > -34.8) return 'medic_reports';
         return x > 170 ? 'medic_recovery' : 'medic_in';
       }
       // Trung tâm Thể lực & Gym (x ∈ [185.5, 214.5], z ∈ [-48.5, -27.5])
@@ -539,8 +565,16 @@ export class PathfindingSystem {
       }
       // Tòa nhà Nghỉ Dưỡng Cầu Thủ (x ∈ [143.5, 224.5], z ∈ [-6.5, 24.5])
       if (x >= 143.5 && x <= 224.5 && z >= -6.5 && z <= 24.5) {
-        if (x < 177) return 'res_cor_w';
-        if (x > 191) return 'res_cor_e';
+        if (x < 150.5) return 'res_cor_w4';
+        if (x < 159.0) return 'res_cor_w3';
+        if (x < 167.5) return 'res_cor_w';
+        if (x < 173.8) return 'res_cor_w1';
+        if (x < 178.0) return 'res_cor_w0';
+        if (x > 217.5) return 'res_cor_e4';
+        if (x > 209.0) return 'res_cor_e3';
+        if (x > 200.5) return 'res_cor_e';
+        if (x > 194.2) return 'res_cor_e1';
+        if (x > 190.0) return 'res_cor_e0';
         return z > 12 ? 'res_lounge' : 'res_atrium';
       }
       // Sân tập phụ / Hồi phục
@@ -674,8 +708,8 @@ export class PathfindingSystem {
     return topKey;
   }
 
-  // A* cục bộ trên NavGrid 2D dùng mảng typed phẳng (Zero-GC) + Binary Min-Heap để đi vòng quanh bàn, ghế, tủ, sofa
-  findLocalGridPath(startX, startZ, endX, endZ, maxExpansions = 260) {
+  // A* cục bộ trên NavGrid 2D 0.5m dùng mảng typed phẳng (Zero-GC) + Binary Min-Heap để đi vòng quanh bàn, ghế, tủ, sofa & cửa phòng
+  findLocalGridPath(startX, startZ, endX, endZ, maxExpansions = 460) {
     if (!this.staticGrid) return [{ x: endX, z: endZ }];
     if (this.hasLineOfSight(startX, startZ, endX, endZ, 0.32, false)) {
       return [{ x: endX, z: endZ }];
@@ -858,11 +892,11 @@ export class PathfindingSystem {
 
         // Chèn A* cục bộ từ vị trí hiện tại → nút đầu, và từ nút cuối → đích cuối (tránh bàn ghế trong phòng!)
         const full = [];
-        const legStart = this.findLocalGridPath(startX, startZ, graphPath[0].x, graphPath[0].z, 120);
+        const legStart = this.findLocalGridPath(startX, startZ, graphPath[0].x, graphPath[0].z, 260);
         for (let i = 0; i < legStart.length; i++) full.push(legStart[i]);
         for (let i = 1; i < graphPath.length; i++) full.push(graphPath[i]);
         const lastNode = graphPath[graphPath.length - 1];
-        const legEnd = this.findLocalGridPath(lastNode.x, lastNode.z, safeEndX, safeEndZ, 120);
+        const legEnd = this.findLocalGridPath(lastNode.x, lastNode.z, safeEndX, safeEndZ, 260);
         for (let i = 0; i < legEnd.length; i++) full.push(legEnd[i]);
         return full;
       }
@@ -885,7 +919,7 @@ export class PathfindingSystem {
 
     // Nếu không có đường qua NavGraph (ví dụ cửa bị khóa), thử tìm đường vòng bằng NavGrid 2D
     if (options.skipLocalGrid) return [{ x: safeEndX, z: safeEndZ }];
-    return this.findLocalGridPath(startX, startZ, safeEndX, safeEndZ, 380);
+    return this.findLocalGridPath(startX, startZ, safeEndX, safeEndZ, 620);
   }
 
   // Xây dựng Spatial Hash động cho tất cả NPC hiển thị 1 lần/frame (ô 3m x 3m, Zero-GC tái sử dụng bucket)
@@ -920,8 +954,26 @@ export class PathfindingSystem {
     this._npcGridBuilt = true;
   }
 
-  // Steering + Local Avoidance: Raycast 5 tia tránh đồ nội thất + Spatial Hash né NPC khác O(1) + né người chơi + nhường lối hẹp
-  // Tương thích ngược 100%: khi không truyền options.out, trả về object mới { vx, vz, waiting } (đảm bảo AI-3 pass tuyệt đối!)
+  // Lookahead phát hiện tường, cửa đóng và nội thất phía trước trước khi va chạm
+  castObstacleLookahead(posX, posZ, dirX, dirZ, lookDist = 1.05, radius = 0.32, respectClosedDoors = true) {
+    if (!this.campus) return { hit: false, blocked: false, closeHit: false, dist: lookDist };
+    const closeDist = Math.min(0.48, lookDist * 0.5);
+    if (this.isPointBlocked(posX + dirX * closeDist, posZ + dirZ * closeDist, radius, respectClosedDoors)) {
+      return { hit: true, blocked: true, closeHit: true, dist: closeDist };
+    }
+    for (let d = 0.65; d < lookDist - 0.05; d += 0.25) {
+      if (this.isPointBlocked(posX + dirX * d, posZ + dirZ * d, radius, respectClosedDoors)) {
+        return { hit: true, blocked: true, closeHit: d <= 0.52, dist: d };
+      }
+    }
+    if (lookDist > 0.55 && this.isPointBlocked(posX + dirX * lookDist, posZ + dirZ * lookDist, radius, respectClosedDoors)) {
+      return { hit: true, blocked: true, closeHit: false, dist: lookDist };
+    }
+    return { hit: false, blocked: false, closeHit: false, dist: lookDist };
+  }
+
+  // RVO/ORCA Local Avoidance + Lookahead phanh/lách tường trước va chạm + nhường đường có thứ tự + né NPC đứng yên
+  // Tương thích ngược 100%: khi không truyền options.out, trả về object mới { vx, vz, waiting }
   computeAvoidanceVelocity(npc, desiredDirX, desiredDirZ, baseSpeed, allNpcs, playerPos, options = null) {
     const posX = npc.mesh.position.x;
     const posZ = npc.mesh.position.z;
@@ -929,140 +981,158 @@ export class PathfindingSystem {
     let steerZ = desiredDirZ;
     let speedMult = 1.0;
     let shouldWait = false;
+    let avoidanceReason = 'NONE';
     const skipWhiskers = !!(options && options.skipWhiskers);
+    const respectDoors = options?.respectClosedDoors !== false;
 
-    // 1. Raycast 5 tia (whiskers) phát hiện vật cản tĩnh & cửa đóng trước mặt (bỏ qua ở LOD 1 khi không bị kẹt)
+    // 1. Lookahead & Raycast đa tia phát hiện tường, đồ nội thất và cửa đóng TRƯỚC khi đâm vào
     if (this.campus && !skipWhiskers) {
-      const forwardBlocked = this.isPointBlocked(posX + desiredDirX * 0.72, posZ + desiredDirZ * 0.72, 0.32, true);
-      if (forwardBlocked) {
-        speedMult *= 0.65;
+      const ahead = this.castObstacleLookahead(posX, posZ, desiredDirX, desiredDirZ, 1.12, 0.33, respectDoors);
+      if (ahead.hit) {
+        speedMult *= ahead.closeHit ? 0.36 : 0.68;
+        avoidanceReason = 'BRAKING';
         const baseAngle = Math.atan2(desiredDirX, desiredDirZ);
-        const probeDist = 1.15;
+        const probeDist = ahead.closeHit ? 0.92 : 1.18;
         let foundSide = false;
         for (let i = 0; i < WHISKER_ANGLES.length; i++) {
           const ang = baseAngle + WHISKER_ANGLES[i];
           const tx = Math.sin(ang);
           const tz = Math.cos(ang);
-          if (!this.isPointBlocked(posX + tx * probeDist, posZ + tz * probeDist, 0.34, true)) {
-            steerX += tx * 1.45;
-            steerZ += tz * 1.45;
+          if (!this.isPointBlocked(posX + tx * probeDist, posZ + tz * probeDist, 0.33, respectDoors) &&
+              !this.isPointBlocked(posX + tx * 0.48, posZ + tz * 0.48, 0.31, respectDoors)) {
+            steerX = (ahead.closeHit ? 0.12 * desiredDirX : 0.35 * desiredDirX) + tx * 1.55;
+            steerZ = (ahead.closeHit ? 0.12 * desiredDirZ : 0.35 * desiredDirZ) + tz * 1.55;
             foundSide = true;
+            avoidanceReason = 'SIDESTEPPING';
             break;
           }
         }
         if (!foundSide) {
-          speedMult *= 0.35;
+          // Không có hướng rẽ an toàn ngay trước mặt -> phanh dừng tránh húc đầu vào tường
+          if (ahead.closeHit) {
+            shouldWait = true;
+            avoidanceReason = 'WAITING';
+          } else {
+            speedMult *= 0.28;
+            avoidanceReason = 'BRAKING';
+          }
         }
       }
     }
 
     // 2. Né người chơi (Chủ tịch Phạm Minh Chiêu)
-    if (playerPos) {
+    if (!shouldWait && playerPos) {
       const pdx = posX - playerPos.x;
       const pdz = posZ - playerPos.z;
       const pDistSq = pdx * pdx + pdz * pdz;
-      const safePlayerRadius = 1.15;
+      const safePlayerRadius = 1.25;
       if (pDistSq > 0.0001 && pDistSq < safePlayerRadius * safePlayerRadius) {
         const pDist = Math.sqrt(pDistSq);
         const push = (safePlayerRadius - pDist) / safePlayerRadius;
         const rx = pdx / pDist;
         const rz = pdz / pDist;
-        steerX += (rx * 1.35 + rz * 0.65) * push * 1.8;
-        steerZ += (rz * 1.35 - rx * 0.65) * push * 1.8;
+        steerX += (rx * 1.35 + rz * 0.65) * push * 1.85;
+        steerZ += (rz * 1.35 - rx * 0.65) * push * 1.85;
         speedMult *= Math.max(0.42, 1 - push * 0.55);
       }
     }
 
-    // 3. Né các NPC khác (Spatial Hash 3x3 ô 3m -> O(1) thay vì O(N²); Zero-GC không tạo closure)
-    const personalRadius = 0.92;
-    const maxAvoidRadius = personalRadius * 1.55;
+    // 3. RVO/ORCA Né cả NPC đang di chuyển (ngược chiều / cùng chiều) LẪN NPC đang đứng yên
+    const personalRadius = 0.98;
+    const maxAvoidRadius = personalRadius * 1.75;
     const maxAvoidSq = maxAvoidRadius * maxAvoidRadius;
     const invMaxAvoid = 1 / maxAvoidRadius;
     const npcIdStr = npc.id || '';
     const useSpatialGrid = !!(options && options.useSpatialGrid && this._npcGridBuilt);
+    const rightX = -desiredDirZ;
+    const rightZ = desiredDirX;
 
-    if (useSpatialGrid) {
-      const invCell = 1 / this._npcCellSize;
-      const baseCx = Math.floor(posX * invCell) + 512;
-      const baseCz = Math.floor(posZ * invCell) + 512;
-      const buckets = this._npcGridBuckets;
-      for (let dx = -1; dx <= 1; dx++) {
-        const cxShift = (baseCx + dx) << 10;
-        for (let dz = -1; dz <= 1; dz++) {
-          const bucket = buckets.get(cxShift | ((baseCz + dz) & 1023));
-          if (!bucket) continue;
-          for (let i = 0; i < bucket.length; i++) {
-            const other = bucket[i];
-            if (other === npc || !other.mesh || !other.mesh.visible) continue;
-            const odx = posX - other.mesh.position.x;
-            const odz = posZ - other.mesh.position.z;
-            const distSq = odx * odx + odz * odz;
-            if (distSq >= maxAvoidSq || distSq < 0.0001) continue;
-            const dist = Math.sqrt(distSq);
-            const nx = odx / dist;
-            const nz = odz / dist;
-            const weight = (maxAvoidRadius - dist) * invMaxAvoid;
-            const dotDir = desiredDirX * (other._velX || 0) + desiredDirZ * (other._velZ || 0);
-            if (dotDir < -0.15) {
-              const rightX = -desiredDirZ;
-              const rightZ = desiredDirX;
-              steerX += (nx * 0.8 + rightX * 1.25) * weight * 1.65;
-              steerZ += (nz * 0.8 + rightZ * 1.25) * weight * 1.65;
-              speedMult *= Math.max(0.5, 1 - weight * 0.4);
-              if (dist < 0.85 && this.campus && !skipWhiskers) {
-                const rightBlocked = this.isPointBlocked(posX + rightX * 0.75, posZ + rightZ * 0.75, 0.32, true);
-                const leftBlocked = this.isPointBlocked(posX - rightX * 0.75, posZ - rightZ * 0.75, 0.32, true);
-                if (rightBlocked && leftBlocked && npcIdStr > (other.id || '')) {
-                  shouldWait = true;
-                }
-              }
-            } else {
-              steerX += nx * weight * 1.4;
-              steerZ += nz * weight * 1.4;
-              if (dist < 0.75) speedMult *= 0.65;
+    const applyOtherAvoid = (other) => {
+      if (other === npc || !other.mesh || !other.mesh.visible) return;
+      const ox = other.mesh.position.x;
+      const oz = other.mesh.position.z;
+      const odx = posX - ox;
+      const odz = posZ - oz;
+      const distSq = odx * odx + odz * odz;
+      if (distSq >= maxAvoidSq || distSq < 0.00001) return;
+
+      const dist = Math.sqrt(distSq);
+      const nx = odx / dist;
+      const nz = odz / dist;
+      const weight = (maxAvoidRadius - dist) * invMaxAvoid;
+      const ovx = other._velX || 0;
+      const ovz = other._velZ || 0;
+      const oSpeedSq = ovx * ovx + ovz * ovz;
+      const dotDir = desiredDirX * ovx + desiredDirZ * ovz;
+      // Chiếu vector từ NPC -> other lên hướng đi hiện tại (positive = other đang ở phía trước)
+      const aheadDot = (-nx) * desiredDirX + (-nz) * desiredDirZ;
+
+      if (dotDir < -0.15) {
+        // Hai NPC đi ngược chiều: áp dụng quy tắc né sang phải (deterministic RVO passing)
+        steerX += (nx * 0.78 + rightX * 1.32) * weight * 1.75;
+        steerZ += (nz * 0.78 + rightZ * 1.32) * weight * 1.75;
+        speedMult *= Math.max(0.48, 1 - weight * 0.42);
+        if (avoidanceReason === 'NONE') avoidanceReason = 'SIDESTEPPING';
+        if (dist < 0.85 && this.campus && !skipWhiskers) {
+          const rightBlocked = this.isPointBlocked(posX + rightX * 0.72, posZ + rightZ * 0.72, 0.30, true);
+          const leftBlocked = this.isPointBlocked(posX - rightX * 0.72, posZ - rightZ * 0.72, 0.30, true);
+          if (rightBlocked && leftBlocked && npcIdStr > (other.id || '')) {
+            shouldWait = true;
+            avoidanceReason = 'YIELDING';
+          }
+        }
+      } else if (oSpeedSq < 0.04 && aheadDot > 0.35) {
+        // NPC khác đang ĐỨNG YÊN chắn phía trước -> chủ động rẽ vòng sang bên thoáng (tránh húc/chồng lên NPC đứng)
+        let sideSign = 1;
+        if (this.campus && !skipWhiskers && this.isPointBlocked(posX + rightX * 0.75, posZ + rightZ * 0.75, 0.30, true)) {
+          sideSign = -1;
+        } else {
+          // Chọn bên có khoảng trống tự nhiên nếu lệch tâm sang trái/phải
+          const latDot = (-nx) * rightX + (-nz) * rightZ;
+          if (latDot > 0.18) sideSign = -1;
+        }
+        steerX += (nx * 0.65 + rightX * sideSign * 1.45) * weight * 1.7;
+        steerZ += (nz * 0.65 + rightZ * sideSign * 1.45) * weight * 1.7;
+        if (avoidanceReason === 'NONE') avoidanceReason = 'SIDESTEPPING';
+        if (dist < 0.85) speedMult *= 0.62;
+      } else {
+        // Đi cùng chiều hoặc cắt ngang -> đẩy giãn ngang nhóm để không đi trùng 1 đường thẳng
+        steerX += nx * weight * 1.55;
+        steerZ += nz * weight * 1.55;
+        if (avoidanceReason === 'NONE') avoidanceReason = dist < 0.9 ? 'YIELDING' : 'BRAKING';
+        if (dist < 0.85) speedMult *= 0.68;
+      }
+    };
+
+    if (!shouldWait) {
+      if (useSpatialGrid) {
+        const invCell = 1 / this._npcCellSize;
+        const baseCx = Math.floor(posX * invCell) + 512;
+        const baseCz = Math.floor(posZ * invCell) + 512;
+        const buckets = this._npcGridBuckets;
+        for (let dx = -1; dx <= 1; dx++) {
+          const cxShift = (baseCx + dx) << 10;
+          for (let dz = -1; dz <= 1; dz++) {
+            const bucket = buckets.get(cxShift | ((baseCz + dz) & 1023));
+            if (!bucket) continue;
+            for (let i = 0; i < bucket.length; i++) {
+              applyOtherAvoid(bucket[i]);
             }
           }
         }
-      }
-    } else if (allNpcs) {
-      for (let i = 0; i < allNpcs.length; i++) {
-        const other = allNpcs[i];
-        if (other === npc || !other.mesh || !other.mesh.visible) continue;
-        const odx = posX - other.mesh.position.x;
-        const odz = posZ - other.mesh.position.z;
-        const distSq = odx * odx + odz * odz;
-        if (distSq >= maxAvoidSq || distSq < 0.0001) continue;
-        const dist = Math.sqrt(distSq);
-        const nx = odx / dist;
-        const nz = odz / dist;
-        const weight = (maxAvoidRadius - dist) * invMaxAvoid;
-        const dotDir = desiredDirX * (other._velX || 0) + desiredDirZ * (other._velZ || 0);
-        if (dotDir < -0.15) {
-          const rightX = -desiredDirZ;
-          const rightZ = desiredDirX;
-          steerX += (nx * 0.8 + rightX * 1.25) * weight * 1.65;
-          steerZ += (nz * 0.8 + rightZ * 1.25) * weight * 1.65;
-          speedMult *= Math.max(0.5, 1 - weight * 0.4);
-          if (dist < 0.85 && this.campus && !skipWhiskers) {
-            const rightBlocked = this.isPointBlocked(posX + rightX * 0.75, posZ + rightZ * 0.75, 0.32, true);
-            const leftBlocked = this.isPointBlocked(posX - rightX * 0.75, posZ - rightZ * 0.75, 0.32, true);
-            if (rightBlocked && leftBlocked && npcIdStr > (other.id || '')) {
-              shouldWait = true;
-            }
-          }
-        } else {
-          steerX += nx * weight * 1.4;
-          steerZ += nz * weight * 1.4;
-          if (dist < 0.75) speedMult *= 0.65;
+      } else if (allNpcs) {
+        for (let i = 0; i < allNpcs.length; i++) {
+          applyOtherAvoid(allNpcs[i]);
         }
       }
     }
 
-    const out = (options && options.out) ? options.out : { vx: 0, vz: 0, waiting: false };
+    const out = (options && options.out) ? options.out : { vx: 0, vz: 0, waiting: false, avoidanceReason: 'NONE' };
     if (shouldWait) {
       out.vx = 0;
       out.vz = 0;
       out.waiting = true;
+      out.avoidanceReason = avoidanceReason === 'NONE' ? 'WAITING' : avoidanceReason;
       return out;
     }
 
@@ -1071,13 +1141,85 @@ export class PathfindingSystem {
       out.vx = 0;
       out.vz = 0;
       out.waiting = false;
+      out.avoidanceReason = avoidanceReason;
       return out;
     }
-    const finalSpeed = baseSpeed * Math.max(0.32, Math.min(1.15, speedMult));
+    const finalSpeed = baseSpeed * Math.max(0.28, Math.min(1.15, speedMult));
     out.vx = (steerX / mag) * finalSpeed;
     out.vz = (steerZ / mag) * finalSpeed;
     out.waiting = false;
+    out.avoidanceReason = avoidanceReason;
     return out;
+  }
+
+  // Tách giãn vật lý sau bước di chuyển (Zero-GC dùng Spatial Hash): đảm bảo KHÔNG BAO GIỜ 2 NPC đứng chồng lên nhau kể cả khi đứng yên
+  resolveNpcSeparation(allNpcs, minSeparation = 0.72) {
+    if (!allNpcs || allNpcs.length < 2) return;
+    this.rebuildNpcSpatialGrid(allNpcs);
+
+    const minSepSq = minSeparation * minSeparation;
+    const invCell = 1 / this._npcCellSize;
+    const buckets = this._npcGridBuckets;
+
+    for (let i = 0; i < allNpcs.length; i++) {
+      const a = allNpcs[i];
+      if (!a || !a.mesh || !a.mesh.visible || a._lod >= 2) continue;
+      // Không đẩy NPC đang nằm giường / ngồi cố định vào tường hoặc ra khỏi ghế
+      const aLocked = !!(a._slotLocked || a.mode === 'meeting' || a.mode === 'sit_president' || a.mode === 'event_hold');
+      if (aLocked) continue;
+
+      const ax = a.mesh.position.x;
+      const az = a.mesh.position.z;
+      const baseCx = Math.floor(ax * invCell) + 512;
+      const baseCz = Math.floor(az * invCell) + 512;
+      let pushX = 0;
+      let pushZ = 0;
+
+      for (let dx = -1; dx <= 1; dx++) {
+        const cxShift = (baseCx + dx) << 10;
+        for (let dz = -1; dz <= 1; dz++) {
+          const bucket = buckets.get(cxShift | ((baseCz + dz) & 1023));
+          if (!bucket) continue;
+          for (let j = 0; j < bucket.length; j++) {
+            const b = bucket[j];
+            if (!b || b === a || !b.mesh || !b.mesh.visible) continue;
+            const ddx = ax - b.mesh.position.x;
+            const ddz = az - b.mesh.position.z;
+            const dSq = ddx * ddx + ddz * ddz;
+            if (dSq >= minSepSq) continue;
+
+            let nx, nz, d;
+            if (dSq < 0.0001) {
+              const ang = ((i * 1.618) % 1) * Math.PI * 2;
+              nx = Math.cos(ang);
+              nz = Math.sin(ang);
+              d = 0.01;
+            } else {
+              d = Math.sqrt(dSq);
+              nx = ddx / d;
+              nz = ddz / d;
+            }
+            const overlap = (minSeparation - d) * 0.55;
+            pushX += nx * overlap;
+            pushZ += nz * overlap;
+          }
+        }
+      }
+
+      if (pushX !== 0 || pushZ !== 0) {
+        const mag = Math.hypot(pushX, pushZ);
+        const clamped = Math.min(0.28, mag);
+        let candX = ax + (pushX / mag) * clamped;
+        let candZ = az + (pushZ / mag) * clamped;
+        if (this.campus) {
+          const resolved = this.campus.resolveCollision(candX, candZ, 0.34);
+          candX = resolved.x;
+          candZ = resolved.z;
+        }
+        a.mesh.position.x = candX;
+        a.mesh.position.z = candZ;
+      }
+    }
   }
 
   // Trả về tọa độ phòng đích tương ứng với loại nhiệm vụ Chủ tịch giao

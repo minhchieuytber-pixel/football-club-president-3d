@@ -72,6 +72,8 @@ export class UIManager {
     this.macMinimized = false;
     this.macMaximized = false;
     this.academyFilter = 'U19';
+    this.playerActivityFilter = 'all';
+    this.playerActivitySearch = '';
     this.transferSubTab = 'buy';
     this.transferFilters = { search: '', club: '', nat: '', pos: 'ALL', minOvr: '', minPot: '', maxAge: '', maxVal: '', maxWage: '', maxContract: '' };
     this.transferPage = 1;
@@ -232,7 +234,11 @@ export class UIManager {
       hintPill: document.getElementById('interact-hint'),
       deskDocMenu,
       pauseBtn: document.getElementById('btn-time-pause'),
-      speedBtns: Array.from(document.querySelectorAll('[data-speed]'))
+      speedBtns: Array.from(document.querySelectorAll('[data-speed]')),
+      teamStatus: document.getElementById('hud-team-status'),
+      teamStatusBadge: document.getElementById('hud-team-status-badge'),
+      teamStatusWindow: document.getElementById('hud-team-status-window'),
+      teamStatusTitle: document.getElementById('hud-team-status-title')
     };
     return this._hudEls;
   }
@@ -274,6 +280,7 @@ export class UIManager {
     on('btn-phone', () => this.openPhone());
     on('btn-next-week', () => this.handleAdvanceWeek());
     on('hud-match-alert', () => this.cb.startMatch());
+    on('hud-team-status', () => this.openComputer('training'));
     on('btn-mute', () => {
       const muted = this.audio.toggleMute();
       const b = document.getElementById('btn-mute');
@@ -593,6 +600,18 @@ export class UIManager {
     }
 
     this.refreshTimeSpeedButtons();
+
+    if (els.teamStatus && s.trainingSystem?.getSquadScheduleStatus) {
+      const st = s.trainingSystem.getSquadScheduleStatus(s.clockHour, s.matchdaySystem);
+      const badgeText = `${st.icon} ${st.badge}`;
+      const statusSig = `${badgeText}|${st.windowText}|${st.title}`;
+      if (c.teamStatusSig !== statusSig) {
+        c.teamStatusSig = statusSig;
+        if (els.teamStatusBadge) els.teamStatusBadge.textContent = badgeText;
+        if (els.teamStatusWindow) els.teamStatusWindow.textContent = st.windowText;
+        if (els.teamStatusTitle) els.teamStatusTitle.textContent = st.title;
+      }
+    }
 
     // Thông báo Matchday chưa xem hoặc trận đấu sắp tới trên thanh trạng thái
     if (els.matchPill) {
@@ -2524,6 +2543,7 @@ export class UIManager {
       { id: 'archive', icon: '🗄️', name: 'Văn thư lưu trữ', bg: 'linear-gradient(135deg,#475569,#0f172a)' },
       { id: 'strategy', icon: '🧭', name: 'Chiến lược CLB', bg: 'linear-gradient(135deg,#b45309,#78350f)' },
       { id: 'squad', icon: '⚽', name: 'Đội một PSG', bg: 'linear-gradient(135deg,#1d4ed8,#0f172a)' },
+      { id: 'player_activity', icon: '📡', name: 'Hoạt động cầu thủ', bg: 'linear-gradient(135deg,#0ea5e9,#1e3a8a)' },
       { id: 'academy', icon: '🎓', name: 'Đội trẻ', bg: 'linear-gradient(135deg,#16a34a,#14532d)' },
       { id: 'coach', icon: '👔', name: 'Ban huấn luyện', bg: 'linear-gradient(135deg,#0891b2,#164e63)' },
       { id: 'locker_room', icon: '🏥', name: `Phòng thay đồ${conflictsCnt > 0 ? ` (${conflictsCnt})` : ''}`, bg: 'linear-gradient(135deg,#0f766e,#115e59)' },
@@ -2552,6 +2572,7 @@ export class UIManager {
     else if (resolvedTab === 'archive') content = renderDocumentArchiveHTML(this.state, this.archiveFilters);
     else if (resolvedTab === 'strategy') content = renderStrategicPlanningHTML(this.state);
     else if (resolvedTab === 'squad') content = this.renderSquadTab();
+    else if (resolvedTab === 'player_activity') content = this.renderPlayerActivityTab();
     else if (resolvedTab === 'academy') content = this.renderAcademyTab();
     else if (resolvedTab === 'coach') content = renderStaffCoachTabHTML(this.state, this.staffSubTab, this.directiveDraft);
     else if (resolvedTab === 'locker_room') content = renderLockerRoomReportHTML(this.state, this.lockerRoomFilters);
@@ -2794,6 +2815,259 @@ export class UIManager {
         <td><button class="btn-xs sq-meet" data-pid="${p.id}">🗣️ Họp riêng</button></td>
       </tr>`).join('')}</tbody>
     </table></div>`;
+  }
+
+  _resolvePlayerActivityEntry(player, npc, resSys, clockHour) {
+    const room = resSys?.getRoomForPlayer?.(player.id) || null;
+    const roomLabel = room ? `${room.code}` : 'Chờ cấp phòng';
+    const injured = (player.injuryDays || 0) > 0;
+    const fitness = Math.round(player.health?.fitness ?? player.fitness ?? 86);
+    const fatigue = Math.round(player.health?.fatigue ?? player.fatigue ?? 14);
+
+    let npcState = npc?.state || null;
+    let activityType = npc?.activityType || null;
+    let activityLabel = npc?.activityLabel || npc?.task || null;
+    let nextActivity = npc?.nextActivity || null;
+    let areaLabel = 'Khu Nghỉ Dưỡng PSG';
+
+    if (!npcState) {
+      if (injured) {
+        npcState = 'MEDICAL_CHECK';
+        activityType = 'medical';
+        activityLabel = `Điều trị chấn thương (${player.injuryDays} ngày)`;
+        nextActivity = 'Kiểm tra phục hồi cùng bác sĩ PSG';
+      } else if (clockHour >= 9.25 && clockHour < 12.15) {
+        npcState = 'TRAINING';
+        activityType = 'training';
+        activityLabel = 'Tập luyện đội một trên sân PSG Training Pitch';
+        nextActivity = 'Nghỉ trưa & hồi phục thể lực (12:15)';
+      } else if (clockHour >= 8.7 && clockHour < 9.25) {
+        npcState = 'GOING_TO_LOCKER_ROOM';
+        activityType = 'locker_room';
+        activityLabel = 'Chuẩn bị chiến thuật tại Phòng Thay Đồ';
+        nextActivity = 'Ra sân tập chính (09:25)';
+      } else if ((clockHour >= 7.0 && clockHour < 8.7) || (clockHour >= 12.15 && clockHour < 13.75) || (clockHour >= 19.3 && clockHour < 20.8)) {
+        npcState = 'EATING';
+        activityType = 'eating';
+        activityLabel = 'Dùng bữa dinh dưỡng tại Residence Dining';
+        nextActivity = clockHour < 9 ? 'Vào Phòng Thay Đồ (08:45)' : clockHour < 15 ? 'Nghỉ trưa / Tập chiều' : 'Thư giãn tại phòng riêng';
+      } else if (clockHour >= 22.6 || clockHour < 6.5) {
+        npcState = room ? 'SLEEPING' : 'RESTING';
+        activityType = 'sleep';
+        activityLabel = room ? `Đang ngủ tại ${room.code}` : 'Nghỉ ngơi tại Khu Nghỉ Dưỡng';
+        nextActivity = 'Thức dậy & ăn sáng (06:30)';
+      } else {
+        npcState = room ? 'INSIDE_ROOM' : 'SOCIALIZING';
+        activityType = room ? 'residence_room' : 'social';
+        activityLabel = room ? `Sinh hoạt & nghỉ ngơi tại ${room.code}` : 'Sinh hoạt chung tại Sảnh Residence';
+        nextActivity = clockHour < 19.3 ? 'Ăn tối Residence (19:30)' : 'Nghỉ ngơi / Đi ngủ (22:45)';
+      }
+    }
+
+    if (!nextActivity) {
+      if (injured) nextActivity = 'Vật lý trị liệu & theo dõi y tế';
+      else if (clockHour < 8.75) nextActivity = 'Phòng Thay Đồ chuẩn bị tập (08:45)';
+      else if (clockHour < 12.15) nextActivity = 'Ăn trưa & phục hồi (12:15)';
+      else if (clockHour < 15.0) nextActivity = 'Buổi tập / Gym chiều (15:00)';
+      else if (clockHour < 19.3) nextActivity = 'Bữa tối dinh dưỡng (19:30)';
+      else if (clockHour < 22.75) nextActivity = `Về ${roomLabel} nghỉ ngơi (22:45)`;
+      else nextActivity = 'Thức dậy & ăn sáng (06:30)';
+    }
+
+    // Xác định khu vực thực tế từ vị trí 3D hoặc loại hoạt động
+    const pos = npc?.mesh?.position;
+    const atRoom = pos && resSys?.getRoomAtPosition ? resSys.getRoomAtPosition(pos.x, pos.z) : null;
+    if (atRoom) {
+      areaLabel = `${atRoom.code} (T1 · Cánh ${atRoom.wing})`;
+    } else if (pos) {
+      const px = pos.x;
+      const pz = pos.z;
+      if (px >= 165 && px <= 225 && pz >= -110 && pz <= -60) areaLabel = 'Sân tập PSG Training Pitch';
+      else if (px >= 120 && px <= 152 && pz >= -58 && pz <= -38) areaLabel = 'Phòng Thay Đồ & Y Tế';
+      else if (px >= 145 && px <= 165 && pz >= -58 && pz <= -38) areaLabel = 'Trung tâm Y tế & Phục hồi';
+      else if (px >= 160 && px <= 212 && pz >= -10 && pz <= 30) {
+        if (activityType === 'dining' || activityType === 'eating' || npcState === 'EATING') areaLabel = 'Phòng Ăn Residence';
+        else if (activityType === 'gym' || npcState === 'GOING_TO_GYM') areaLabel = 'Phòng Gym Residence';
+        else if (room && ['INSIDE_ROOM', 'SLEEPING', 'WATCHING_TV', 'OPENING_DOOR', 'ENTERING_ROOM'].includes(npcState)) areaLabel = `${room.code} (Player Residence)`;
+        else areaLabel = 'Khu Sinh Hoạt Chung Residence';
+      } else {
+        areaLabel = 'Khuôn viên PSG Training Center';
+      }
+    } else if (room && ['INSIDE_ROOM', 'SLEEPING', 'WATCHING_TV', 'GOING_TO_ROOM', 'WAITING_FOR_DOOR', 'OPENING_DOOR', 'ENTERING_ROOM'].includes(npcState)) {
+      areaLabel = `${room.code} (T1 · Cánh ${room.wing})`;
+    } else if (npcState === 'TRAINING') {
+      areaLabel = 'Sân tập PSG Training Pitch';
+    } else if (npcState === 'MEDICAL_CHECK') {
+      areaLabel = 'Trung tâm Y tế PSG';
+    } else if (npcState === 'EATING') {
+      areaLabel = 'Phòng Ăn Residence';
+    } else if (npcState === 'GOING_TO_GYM') {
+      areaLabel = 'Phòng Gym & Thể lực';
+    } else if (npcState === 'RECOVERY' || npcState === 'GOING_TO_LOCKER_ROOM') {
+      areaLabel = 'Phòng Thay Đồ & Phục hồi';
+    }
+
+    const categories = new Set();
+    if (
+      ['INSIDE_ROOM', 'GOING_TO_ROOM', 'WAITING_FOR_DOOR', 'OPENING_DOOR', 'ENTERING_ROOM', 'SLEEPING', 'WATCHING_TV'].includes(npcState) ||
+      ['residence_room', 'sleep', 'watch_tv', 'desk'].includes(activityType) ||
+      Boolean(atRoom)
+    ) {
+      categories.add('in_room');
+    }
+    if (npcState === 'TRAINING' || ['training', 'training_pitch', 'gym', 'going_to_gym'].includes(activityType) || npc?.mode === 'train' || npc?.mode === 'drill') {
+      categories.add('training');
+    }
+    if (npcState === 'EATING' || ['eating', 'dining', 'residence_dining'].includes(activityType)) {
+      categories.add('eating');
+    }
+    if (['RESTING', 'SLEEPING', 'WATCHING_TV', 'IDLE'].includes(npcState) || ['sleep', 'rest', 'watch_tv'].includes(activityType)) {
+      categories.add('resting');
+    }
+    if (['RECOVERY', 'GOING_TO_GYM', 'GOING_TO_LOCKER_ROOM'].includes(npcState) || ['recovery', 'rehab_pitch', 'gym', 'locker_room'].includes(activityType)) {
+      categories.add('recovery');
+    }
+    if (npcState === 'MEDICAL_CHECK' || ['medical', 'medical_rehab'].includes(activityType) || injured) {
+      categories.add('medical');
+    }
+    if (npcState === 'SOCIALIZING' || ['social', 'residence_lounge', 'lounge'].includes(activityType)) {
+      categories.add('social');
+    }
+    if (categories.size === 0) categories.add('resting');
+
+    return {
+      player,
+      npc,
+      room,
+      roomLabel,
+      npcState,
+      activityType,
+      activityLabel: activityLabel || 'Sinh hoạt theo lịch đội một',
+      nextActivity,
+      areaLabel,
+      fitness,
+      fatigue,
+      injured,
+      categories
+    };
+  }
+
+  renderPlayerActivityTab() {
+    const squad = this.state.getPsgSquad();
+    const resSys = this.state.playerResidenceSystem;
+    resSys?.syncWithSquad?.({ silentAlert: true, silentLog: true });
+    const npcSys = this.state._npcSystemRef || null;
+    const clockHour = this.state.clockHour ?? 9.5;
+    const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    const npcByPid = new Map();
+    if (npcSys?.npcs) {
+      for (const n of npcSys.npcs) {
+        if (n?.isPlayer && n.playerId) npcByPid.set(n.playerId, n);
+      }
+    }
+
+    const entries = squad.map((p) => this._resolvePlayerActivityEntry(p, npcByPid.get(p.id) || null, resSys, clockHour));
+
+    const filterDefs = [
+      { key: 'all', label: 'Tất cả' },
+      { key: 'in_room', label: 'Ở phòng' },
+      { key: 'training', label: 'Tập luyện' },
+      { key: 'eating', label: 'Ăn uống' },
+      { key: 'resting', label: 'Nghỉ ngơi' },
+      { key: 'recovery', label: 'Phục hồi' },
+      { key: 'medical', label: 'Trung tâm y tế' },
+      { key: 'social', label: 'Sinh hoạt chung' }
+    ];
+
+    const counts = {};
+    filterDefs.forEach((f) => {
+      counts[f.key] = f.key === 'all' ? entries.length : entries.filter((e) => e.categories.has(f.key)).length;
+    });
+
+    const activeFilter = filterDefs.some((f) => f.key === this.playerActivityFilter) ? this.playerActivityFilter : 'all';
+    const q = String(this.playerActivitySearch || '').trim().toLowerCase();
+    const filtered = entries.filter((e) => {
+      if (activeFilter !== 'all' && !e.categories.has(activeFilter)) return false;
+      if (q) {
+        const hay = `${e.player.name} ${e.roomLabel} ${e.npcState} ${e.activityLabel} ${e.areaLabel} #${e.player.shirtNumber || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    const stateTagColor = (st) => {
+      if (st === 'TRAINING') return 'ok';
+      if (st === 'MEDICAL_CHECK' || st === 'STUCK_RECOVERY') return 'bad';
+      if (st === 'SLEEPING' || st === 'RESTING' || st === 'INSIDE_ROOM' || st === 'WATCHING_TV') return 'warn';
+      return '';
+    };
+
+    const resSummary = resSys?.getSummary?.() || { occupied: 0, available: 30, overflowCount: 0 };
+
+    return `
+      <div class="kpi-grid" style="margin-bottom:8px;">
+        <div class="kpi-card"><span>Giờ CLB hiện tại</span><strong>${this.formatClock(clockHour)}</strong></div>
+        <div class="kpi-card"><span>Cầu thủ đang ở phòng</span><strong>${counts.in_room} / ${entries.length}</strong></div>
+        <div class="kpi-card"><span>Đang tập / Phục hồi</span><strong>${counts.training + counts.recovery} cầu thủ</strong></div>
+        <div class="kpi-card"><span>Phòng cá nhân</span><strong>${resSummary.occupied}/30 · Trống ${resSummary.available}</strong></div>
+      </div>
+
+      <div class="filter-bar" style="margin-bottom:8px;">
+        <input id="pa-search" class="input-ctrl" placeholder="Tìm tên cầu thủ, ROOM XX, trạng thái, khu vực..." value="${esc(this.playerActivitySearch || '')}" />
+        <button type="button" class="btn-xs btn-primary" id="pa-refresh">🔄 Cập nhật trực tiếp</button>
+        <button type="button" class="btn-xs btn-secondary" id="pa-open-residence">🏨 Quản lý 30 Phòng</button>
+      </div>
+
+      <div class="tab-strip" style="margin-bottom:8px;flex-wrap:wrap;gap:5px;">
+        ${filterDefs.map((f) => `
+          <button type="button" class="tab-btn ${activeFilter === f.key ? 'active' : ''}" data-pafilt="${f.key}">
+            ${esc(f.label)} (${counts[f.key] ?? 0})
+          </button>`).join('')}
+      </div>
+
+      <div class="scroll-list" style="max-height:48vh;">
+        ${filtered.length === 0 ? `
+          <div class="card-item"><p class="muted">Không có cầu thủ nào phù hợp với bộ lọc hiện tại.</p></div>` : filtered.map((e) => {
+          const p = e.player;
+          return `
+            <div class="card-item" data-pa-player="${esc(p.id)}" style="padding:9px 11px;">
+              <div class="card-head" style="gap:8px;flex-wrap:wrap;">
+                <div>
+                  <strong>${p.shirtNumber ? `#${p.shirtNumber} · ` : ''}${esc(p.name)}</strong>
+                  <span class="muted">(${esc(p.position)})</span>
+                  <span class="tag" style="margin-left:4px;">🚪 ${esc(e.roomLabel)}</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:5px;">
+                  <span class="tag ${stateTagColor(e.npcState)}">${esc(e.npcState)}</span>
+                  ${e.injured ? `<span class="tag bad">🏥 Chấn thương ${p.injuryDays}n</span>` : `<span class="tag ok">💚 Khỏe mạnh</span>`}
+                </div>
+              </div>
+
+              <div style="margin-top:5px;font-size:12.5px;">
+                <b>Hoạt động:</b> ${esc(e.activityLabel)}
+              </div>
+              <div class="muted" style="font-size:12px;margin-top:2px;">
+                📍 <b>Vị trí:</b> ${esc(e.areaLabel)} · ⏭️ <b>Tiếp theo:</b> ${esc(e.nextActivity)}
+              </div>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:center;margin-top:7px;">
+                <div>
+                  <div style="display:flex;justify-content:space-between;font-size:11px;"><span>⚡ Thể lực (Stamina)</span><b>${e.fitness}%</b></div>
+                  <div class="attr-bar-track"><div class="attr-bar-fill" style="width:${Math.max(0, Math.min(100, e.fitness))}%;background:${e.fitness >= 65 ? '#22c55e' : e.fitness >= 40 ? '#f59e0b' : '#ef4444'};"></div></div>
+                </div>
+                <div>
+                  <div style="display:flex;justify-content:space-between;font-size:11px;"><span>😮‍💨 Mệt mỏi (Fatigue)</span><b>${e.fatigue}%</b></div>
+                  <div class="attr-bar-track"><div class="attr-bar-fill" style="width:${Math.max(0, Math.min(100, e.fatigue))}%;background:${e.fatigue <= 35 ? '#38bdf8' : e.fatigue <= 65 ? '#f59e0b' : '#ef4444'};"></div></div>
+                </div>
+                <div style="display:flex;gap:5px;">
+                  ${e.room ? `<button type="button" class="btn-xs btn-secondary pa-inspect-room" data-room="${e.room.roomNumber}">🚪 Phòng</button>` : ''}
+                  <button type="button" class="btn-xs btn-primary open-profile-btn" data-pid="${esc(p.id)}">👤 Hồ sơ</button>
+                </div>
+              </div>
+            </div>`;
+        }).join('')}
+      </div>`;
   }
 
   renderAcademyTab() {
@@ -3584,6 +3858,32 @@ export class UIManager {
         this.navHistory.updateCurrentSnapshot({ selectedPlayerId: this.selectedPlayerId });
         this.openPlayerMeetingSelector(b.dataset.pid);
       }));
+    } else if (tab === 'player_activity') {
+      document.querySelectorAll('[data-pafilt]').forEach((b) => {
+        b.addEventListener('click', () => {
+          this.playerActivityFilter = b.dataset.pafilt || 'all';
+          this.audio.playClick();
+          this.openComputer('player_activity', stayOpts);
+        });
+      });
+      document.getElementById('pa-search')?.addEventListener('input', (e) => {
+        this.playerActivitySearch = e.target.value || '';
+        this.openComputer('player_activity', { skipHistory: true, preserveScroll: true, focusId: 'pa-search' });
+      });
+      document.getElementById('pa-refresh')?.addEventListener('click', () => {
+        this.audio.playClick();
+        this.openComputer('player_activity', stayOpts);
+      });
+      document.getElementById('pa-open-residence')?.addEventListener('click', () => {
+        this.audio.playClick();
+        this.openPlayerResidenceModal();
+      });
+      document.querySelectorAll('.pa-inspect-room').forEach((b) => {
+        b.addEventListener('click', () => {
+          this.audio.playClick();
+          this.openPlayerResidenceModal(Number(b.dataset.room));
+        });
+      });
     } else if (tab === 'training') {
       document.querySelectorAll('[data-trtab]').forEach((b) => b.addEventListener('click', () => { this.trainingSubTab = b.dataset.trtab; this.openComputer('training', { skipHistory: true }); }));
       document.getElementById('tr-go-pitch')?.addEventListener('click', () => { this.cb.teleport('training_pitch'); this.closeModal(true); this.toast('⚽ Đã di chuyển ra PSG TRAINING PITCH (Khu Huấn Luyện PSG) quan sát toàn đội tập luyện 3D!', 'info'); });
@@ -5312,9 +5612,9 @@ export class UIManager {
       <div class="card-item">
         <div class="card-head">
           <strong>👨‍⚕️ Phụ trách Trung Tâm Y Tế PSG</strong>
-          <span class="tag ok">Training Center · Độc lập chuyên môn</span>
+          <span class="tag ok">Cạnh Player Residence · Độc lập chuyên môn</span>
         </div>
-        <div class="muted">Trưởng bộ phận Y tế: <b>${headMed?.name || 'Bác sĩ CLB'}</b> · HLV Phục hồi: <b>${rehabCoach?.name || 'Chưa bổ nhiệm'}</b> · Cầu thủ chấn thương được tách khỏi giáo án nặng trên sân tập và theo dõi hồi phục theo từng ngày thi đấu thực tế.</div>
+        <div class="muted">Trưởng bộ phận Y tế: <b>${headMed?.name || 'BS. Christophe Baudot'}</b> · Bác sĩ điều trị: <b>BS. Julien Moreau</b> · Vật lý trị liệu: <b>Claire Fontaine</b> · HLV Phục hồi: <b>${rehabCoach?.name || 'Guillem Hernández'}</b> · Cầu thủ chấn thương được tách khỏi giáo án nặng trên sân tập và theo dõi hồi phục theo từng ngày thi đấu thực tế.</div>
       </div>
 
       <div class="section-label">🏥 6 Khu Chức Năng Trung Tâm Y Tế PSG</div>

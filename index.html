@@ -45,6 +45,7 @@
       .top-bar { flex-wrap: wrap; gap: 4px; padding-bottom: 4px; }
       .club-pill { font-size: 10.5px; padding: 4px 8px; }
       .metric-chip { font-size: 10px; padding: 4px 7px; }
+      .team-status-box { top: max(76px, calc(env(safe-area-inset-top) + 68px)); width: 176px; padding: 5px 8px; }
       .modal-box, .modal-box.wide, .modal-box.macos-shell {
         width: 97vw; max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 14px);
       }
@@ -111,6 +112,64 @@
     .speed-group { display: flex; align-items: center; gap: 3px; background: var(--bg-glass); border: 1px solid var(--border-glass); padding: 2px 5px; border-radius: 999px; backdrop-filter: blur(8px); }
     .spd-btn { background: transparent; color: #cbd5e1; border: none; border-radius: 999px; padding: 3px 6px; font-size: 10.5px; font-weight: 700; cursor: pointer; }
     .spd-btn.active { background: #1d4ed8; color: #fff; }
+
+    /* Ô chữ nhật bé góc trên bên phải hiển thị trạng thái lịch trình đội bóng */
+    .team-status-box {
+      position: fixed;
+      top: max(46px, calc(env(safe-area-inset-top) + 40px));
+      right: max(14px, env(safe-area-inset-right));
+      z-index: 19;
+      width: 198px;
+      padding: 6px 9px;
+      border-radius: 8px;
+      background: rgba(9, 17, 36, 0.84);
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      backdrop-filter: blur(8px);
+      color: #f8fafc;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.34);
+      font-variant-numeric: tabular-nums;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .team-status-box:hover {
+      border-color: rgba(56, 189, 248, 0.65);
+      background: rgba(12, 24, 48, 0.92);
+    }
+    .team-status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .team-status-badge {
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      color: #38bdf8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .team-status-window {
+      font-size: 9.5px;
+      font-weight: 600;
+      color: #94a3b8;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .team-status-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #e2e8f0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.25;
+    }
     .attr-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11.5px; }
     .attr-bar-label { width: 128px; color: #cbd5e1; flex-shrink: 0; }
     .attr-bar-track { flex: 1; height: 7px; border-radius: 99px; background: rgba(255,255,255,0.1); overflow: hidden; }
@@ -1039,6 +1098,15 @@
         <button class="icon-btn accent" id="btn-next-week" title="Qua tuần mới">⏭️</button>
       </div>
     </div>
+
+    <!-- Ô chữ nhật bé góc trên bên phải: Trạng thái lịch trình đội một PSG -->
+    <button type="button" id="hud-team-status" class="team-status-box" title="Lịch trình hiện tại của đội một PSG (Bấm để mở Quản lý Tập luyện)">
+      <div class="team-status-row">
+        <span class="team-status-badge" id="hud-team-status-badge">⚽ TẬP SÁNG</span>
+        <span class="team-status-window" id="hud-team-status-window">09:25–12:15</span>
+      </div>
+      <div class="team-status-title" id="hud-team-status-title">Tập luyện đội một PSG</div>
+    </button>
 
     <!-- Joystick cảm ứng góc dưới trái -->
     <div id="joy-zone" aria-label="Joystick di chuyển"><div id="joy-knob"></div></div>
