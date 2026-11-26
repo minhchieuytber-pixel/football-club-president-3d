@@ -51,6 +51,8 @@ export class PathfindingSystem {
     this._npcGridBuckets = new Map();
     this._activeNpcBuckets = [];
     this._npcGridBuilt = false;
+    this.crowdSystem = null;
+    this._navDiagnostics = [];
 
     // Mạng lưới nút giao thông chính xác đi qua hành lang, khung cửa gỗ và các khu vực sân tập 3D
     this.nodes = {
@@ -709,9 +711,11 @@ export class PathfindingSystem {
   }
 
   // A* cục bộ trên NavGrid 2D 0.5m dùng mảng typed phẳng (Zero-GC) + Binary Min-Heap để đi vòng quanh bàn, ghế, tủ, sofa & cửa phòng
-  findLocalGridPath(startX, startZ, endX, endZ, maxExpansions = 460) {
+  findLocalGridPath(startX, startZ, endX, endZ, maxExpansions = 460, options = {}) {
     if (!this.staticGrid) return [{ x: endX, z: endZ }];
-    if (this.hasLineOfSight(startX, startZ, endX, endZ, 0.32, false)) {
+    const hasCrowdPressure = !options.ignoreCrowd && this.crowdSystem &&
+      this.crowdSystem.getSegmentCrowdPenalty(startX, startZ, endX, endZ, options) > 1.5;
+    if (!options.alternateRouteAttempt && !hasCrowdPressure && this.hasLineOfSight(startX, startZ, endX, endZ, 0.32, false)) {
       return [{ x: endX, z: endZ }];
     }
     // Ngoài vùng nướng lưới tĩnh -> đi thẳng tới đích
@@ -786,7 +790,16 @@ export class PathfindingSystem {
         if (dc !== 0 && dr !== 0) {
           if (grid[cr * cols + nc] === 1 || grid[nr * cols + cc] === 1) continue;
         }
-        const tentG = curG + dir[2];
+        let stepCost = dir[2];
+        if (this.crowdSystem && !options.ignoreCrowd) {
+          const wx = this.minX + (nc + 0.5) * this.gridStep;
+          const wz = this.minZ + (nr + 0.5) * this.gridStep;
+          stepCost += this.crowdSystem.getPointCrowdPenalty(wx, wz, options) * 0.12;
+        }
+        if (options.avoidCellKey === nKey) {
+          stepCost += 12.0;
+        }
+        const tentG = curG + stepCost;
         if (openStamp[nKey] !== gen || tentG < gArr[nKey]) {
           cameFrom[nKey] = curKey;
           gArr[nKey] = tentG;
@@ -809,11 +822,11 @@ export class PathfindingSystem {
     }
     rawPts.reverse();
     rawPts.push({ x: endX, z: endZ });
-    return this.smoothPath(startX, startZ, rawPts);
+    return this.smoothPath(startX, startZ, rawPts, options);
   }
 
-  // Làm mượt lộ trình (String Pulling) loại bỏ điểm thừa nhưng tuyệt đối không cắt vào vật cản
-  smoothPath(startX, startZ, waypoints) {
+  // Làm mượt lộ trình (String Pulling) loại bỏ điểm thừa nhưng tuyệt đối không cắt vào vật cản hoặc cắt thẳng qua đám đông đặc
+  smoothPath(startX, startZ, waypoints, options = {}) {
     if (!waypoints || waypoints.length <= 1) return waypoints || [];
     const out = [];
     let anchorX = startX, anchorZ = startZ;
@@ -822,6 +835,10 @@ export class PathfindingSystem {
       let furthest = i;
       for (let j = waypoints.length - 1; j > i; j--) {
         if (this.hasLineOfSight(anchorX, anchorZ, waypoints[j].x, waypoints[j].z, 0.34, false)) {
+          if (this.crowdSystem && !options.ignoreCrowd) {
+            const segPen = this.crowdSystem.getSegmentCrowdPenalty(anchorX, anchorZ, waypoints[j].x, waypoints[j].z, options);
+            if (segPen > 1.2) continue;
+          }
           furthest = j;
           break;
         }
@@ -859,11 +876,21 @@ export class PathfindingSystem {
     // Nếu cùng 1 phòng / khu vực → dùng A* cục bộ tránh bàn ghế/tủ (bỏ qua nếu skipLocalGrid cho LOD 2 xa)
     if (startKey === endKey) {
       if (options.skipLocalGrid) return [{ x: safeEndX, z: safeEndZ }];
-      return this.findLocalGridPath(startX, startZ, safeEndX, safeEndZ);
+      return this.findLocalGridPath(startX, startZ, safeEndX, safeEndZ, 480, options);
     }
 
     const nodes = this.nodes;
     const h = (a, b) => Math.hypot(nodes[a].x - nodes[b].x, nodes[a].z - nodes[b].z);
+    const crowdPenalty = (a, b) => {
+      let extra = 0;
+      if (this.crowdSystem && !options.ignoreCrowd) {
+        extra += this.crowdSystem.getSegmentCrowdPenalty(nodes[a].x, nodes[a].z, nodes[b].x, nodes[b].z, options);
+      }
+      if (options.alternateRouteAttempt > 0 && options.avoidNodes && options.avoidNodes.has(b)) {
+        extra += 22.0;
+      }
+      return extra;
+    };
     const open = new Set([startKey]);
     const cameFrom = {};
     const gScore = { [startKey]: 0 };
@@ -880,7 +907,7 @@ export class PathfindingSystem {
         let cur = current;
         while (cur) {
           const nd = nodes[cur];
-          graphPath.push({ x: nd.x, z: nd.z, doorId: nd.doorId || null });
+          graphPath.push({ x: nd.x, z: nd.z, doorId: nd.doorId || null, nodeKey: cur });
           cur = cameFrom[cur];
         }
         graphPath.reverse();
@@ -892,11 +919,11 @@ export class PathfindingSystem {
 
         // Chèn A* cục bộ từ vị trí hiện tại → nút đầu, và từ nút cuối → đích cuối (tránh bàn ghế trong phòng!)
         const full = [];
-        const legStart = this.findLocalGridPath(startX, startZ, graphPath[0].x, graphPath[0].z, 260);
+        const legStart = this.findLocalGridPath(startX, startZ, graphPath[0].x, graphPath[0].z, 260, options);
         for (let i = 0; i < legStart.length; i++) full.push(legStart[i]);
         for (let i = 1; i < graphPath.length; i++) full.push(graphPath[i]);
         const lastNode = graphPath[graphPath.length - 1];
-        const legEnd = this.findLocalGridPath(lastNode.x, lastNode.z, safeEndX, safeEndZ, 260);
+        const legEnd = this.findLocalGridPath(lastNode.x, lastNode.z, safeEndX, safeEndZ, 260, options);
         for (let i = 0; i < legEnd.length; i++) full.push(legEnd[i]);
         return full;
       }
@@ -907,7 +934,7 @@ export class PathfindingSystem {
       for (let i = 0; i < nbs.length; i++) {
         const nb = nbs[i];
         if (this.isNodeBlocked(nb, blockedNodes)) continue;
-        const tentativeG = curG + h(current, nb);
+        const tentativeG = curG + h(current, nb) + crowdPenalty(current, nb);
         if (tentativeG < (gScore[nb] ?? Infinity)) {
           cameFrom[nb] = current;
           gScore[nb] = tentativeG;
@@ -919,7 +946,28 @@ export class PathfindingSystem {
 
     // Nếu không có đường qua NavGraph (ví dụ cửa bị khóa), thử tìm đường vòng bằng NavGrid 2D
     if (options.skipLocalGrid) return [{ x: safeEndX, z: safeEndZ }];
-    return this.findLocalGridPath(startX, startZ, safeEndX, safeEndZ, 620);
+    return this.findLocalGridPath(startX, startZ, safeEndX, safeEndZ, 620, options);
+  }
+
+  attachCrowdSystem(crowdSystem) {
+    this.crowdSystem = crowdSystem || null;
+  }
+
+  recordNavDiagnostic(entry) {
+    if (!entry) return;
+    this._navDiagnostics.push({
+      npcId: entry.npcId || null,
+      reason: entry.reason || 'stuck',
+      location: entry.location || 'campus_grounds',
+      x: Number((entry.x || 0).toFixed(2)),
+      z: Number((entry.z || 0).toFixed(2)),
+      time: Number((entry.time || 0).toFixed(2))
+    });
+    if (this._navDiagnostics.length > 40) this._navDiagnostics.shift();
+  }
+
+  getNavDiagnostics() {
+    return this._navDiagnostics;
   }
 
   // Xây dựng Spatial Hash động cho tất cả NPC hiển thị 1 lần/frame (ô 3m x 3m, Zero-GC tái sử dụng bucket)
@@ -1068,15 +1116,19 @@ export class PathfindingSystem {
       const aheadDot = (-nx) * desiredDirX + (-nz) * desiredDirZ;
 
       if (dotDir < -0.15) {
-        // Hai NPC đi ngược chiều: áp dụng quy tắc né sang phải (deterministic RVO passing)
-        steerX += (nx * 0.78 + rightX * 1.32) * weight * 1.75;
-        steerZ += (nz * 0.78 + rightZ * 1.32) * weight * 1.75;
-        speedMult *= Math.max(0.48, 1 - weight * 0.42);
+        // Hai NPC đi ngược chiều: áp dụng quy tắc né sang phải + nhường theo ưu tiên (deterministic RVO passing)
+        const myPrio = npc.priority ?? 50;
+        const otherPrio = other.priority ?? 50;
+        const yieldFactor = myPrio < otherPrio ? 1.38 : (myPrio > otherPrio ? 0.62 : 1.0);
+        steerX += (nx * 0.78 + rightX * 1.32) * weight * 1.75 * yieldFactor;
+        steerZ += (nz * 0.78 + rightZ * 1.32) * weight * 1.75 * yieldFactor;
+        speedMult *= Math.max(0.45, 1 - weight * (myPrio < otherPrio ? 0.52 : 0.34));
         if (avoidanceReason === 'NONE') avoidanceReason = 'SIDESTEPPING';
         if (dist < 0.85 && this.campus && !skipWhiskers) {
           const rightBlocked = this.isPointBlocked(posX + rightX * 0.72, posZ + rightZ * 0.72, 0.30, true);
           const leftBlocked = this.isPointBlocked(posX - rightX * 0.72, posZ - rightZ * 0.72, 0.30, true);
-          if (rightBlocked && leftBlocked && npcIdStr > (other.id || '')) {
+          const shouldYieldByPriority = myPrio < otherPrio || (myPrio === otherPrio && npcIdStr > (other.id || ''));
+          if (rightBlocked && leftBlocked && shouldYieldByPriority) {
             shouldWait = true;
             avoidanceReason = 'YIELDING';
           }

@@ -35,7 +35,13 @@ export const INTERACTION_ANIM_MAP = Object.freeze({
   medical_monitor: 'tablet',
   rehab_office_desk: 'work_pc',
   medical_staff_duty: 'clipboard',
-  security_post: 'observe'
+  security_post: 'observe',
+  office_work: 'work_pc',
+  meeting_seat: 'sit',
+  storage_check: 'clipboard',
+  academy_work: 'work_pc',
+  museum_post: 'observe',
+  stadium_duty: 'observe'
 });
 
 function createPoint(cfg) {
@@ -548,6 +554,49 @@ export class ActivityPointSystem {
         label: `Sân phục hồi #${i + 1}`
       }));
     }
+
+    // 7. Kho Dụng Cụ, Học Viện, Văn Phòng HQ, Phòng Họp, VIP & Sân Parc des Princes
+    [
+      { id: 'equip_rack_1', area: 'equipment_storage', x: 135.5, z: -72.0, dir: 0, type: 'storage_check', label: 'Kệ bóng & cọc tập' },
+      { id: 'equip_ball_cart', area: 'equipment_storage', x: 138.0, z: -74.5, dir: Math.PI / 2, type: 'storage_check', label: 'Xe đẩy dụng cụ tập' },
+      { id: 'equip_bibs_bench', area: 'equipment_storage', x: 133.5, z: -75.0, dir: Math.PI, type: 'storage_check', label: 'Tủ áo bib & thiết bị GPS' },
+
+      { id: 'acad_desk_head', area: 'hq_academy', x: -13.0, z: 18.0, dir: Math.PI, type: 'academy_work', label: 'Bàn Giám đốc Học viện' },
+      { id: 'acad_huddle_1', area: 'hq_academy', x: -10.8, z: 16.5, dir: -Math.PI / 2, type: 'talk', label: 'Bàn đánh giá U19/U21 #1' },
+      { id: 'acad_huddle_2', area: 'hq_academy', x: -15.2, z: 16.5, dir: Math.PI / 2, type: 'talk', label: 'Bàn đánh giá U19/U21 #2' },
+
+      { id: 'hq_vip_sofa_1', area: 'hq_vip', x: 1.5, z: -11.5, dir: 0, type: 'sit_sofa', elevatedY: 0.24, label: 'Sofa Khu VIP HQ #1' },
+      { id: 'hq_vip_sofa_2', area: 'hq_vip', x: 4.5, z: -11.5, dir: 0, type: 'socialize', label: 'Khu trà & trao đổi VIP HQ #2' },
+      { id: 'hq_lobby_wait_1', area: 'hq_lobby', x: -3.2, z: 16.5, dir: 0, type: 'sit_sofa', elevatedY: 0.24, label: 'Ghế chờ Sảnh Trụ sở #1' },
+      { id: 'hq_lobby_wait_2', area: 'hq_lobby', x: 3.2, z: 16.5, dir: 0, type: 'sit_sofa', elevatedY: 0.24, label: 'Ghế chờ Sảnh Trụ sở #2' },
+
+      { id: 'hq_sport_guest', area: 'hq_sporting', x: 29.7, z: -10.2, dir: Math.PI, type: 'talk', label: 'Bàn tiếp khách Giám đốc Thể thao' },
+      { id: 'hq_fin_guest', area: 'hq_finance', x: 13.0, z: 8.2, dir: 0, type: 'talk', label: 'Bàn rà soát Tài chính & Pháp lý' },
+      { id: 'hq_coach_tactics', area: 'hq_coaching', x: -27.0, z: 8.2, dir: 0, type: 'talk', label: 'Bảng chiến thuật Phòng BHL' },
+
+      { id: 'museum_stand_1', area: 'club_museum', x: 26.5, z: -42.5, dir: Math.PI / 2, type: 'museum_post', label: 'Khu trưng bày Cúp Ligue 1' },
+      { id: 'museum_stand_2', area: 'club_museum', x: 38.5, z: -44.0, dir: 0, type: 'museum_post', label: 'Tủ Cúp Lịch sử Bảo tàng PSG' },
+      { id: 'museum_stand_3', area: 'club_museum', x: 41.0, z: -48.2, dir: -Math.PI / 2, type: 'museum_post', label: 'Khu triển lãm Huyền thoại PSG' },
+
+      { id: 'parc_dugout_home_1', area: 'parc_dugouts', x: -11.0, z: -176.5, dir: 0, type: 'stadium_duty', label: 'Khu kỹ thuật chủ nhà Parc des Princes' },
+      { id: 'parc_service_desk_1', area: 'parc_service_hub', x: -32.0, z: -82.0, dir: 0, type: 'stadium_duty', label: 'Trạm vận hành & Megastore SVĐ' }
+    ].forEach((cfg) => {
+      this._register(createPoint(cfg));
+    });
+
+    for (let i = 0; i < 6; i++) {
+      this._register(createPoint({
+        id: `hq_board_seat_${i + 1}`,
+        area: 'hq_boardroom',
+        x: -13.5 + (i % 3) * 3.5,
+        z: i < 3 ? -14.2 : -10.8,
+        direction: i < 3 ? 0 : Math.PI,
+        interactionType: 'meeting_seat',
+        animation: 'sit',
+        elevatedY: 0.24,
+        label: `Ghế Phòng Họp Hội Đồng #${i + 1}`
+      }));
+    }
   }
 
   getPoint(pointId) {
@@ -648,6 +697,22 @@ export class ActivityPointSystem {
       this._npcPointIndex.delete(npcId);
     }
     this.removeFromAllQueues(npcId);
+  }
+
+  pruneStaleReservations(simTime = 0, maxAgeSec = 55) {
+    let pruned = 0;
+    for (const pt of this.points.values()) {
+      if (pt.reservedBy && (simTime - (pt.reservedAt || 0)) > maxAgeSec) {
+        if (this._npcPointIndex.get(pt.reservedBy) === pt.activityPointId) {
+          this._npcPointIndex.delete(pt.reservedBy);
+        }
+        pt.reservedBy = null;
+        pt.reservedAt = 0;
+        this._syncAvailability(pt);
+        pruned++;
+      }
+    }
+    return pruned;
   }
 
   releaseRoomPoints(roomNumber) {

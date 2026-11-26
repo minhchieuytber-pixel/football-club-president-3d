@@ -304,6 +304,17 @@ export class ClubRelationshipSystem {
     });
   }
 
+  getTeammateAffinity(playerId, peerId) {
+    if (!playerId || !peerId || playerId === peerId) return 75;
+    const prof = this.playerRelations[playerId] || this.ensurePlayerProfile(playerId);
+    if (!prof) return 70;
+    const direct = prof.teammateBonds?.[peerId]?.score;
+    if (typeof direct === 'number') return direct;
+    const integration = prof.metrics?.teamIntegration ?? 75;
+    const harmony = prof.metrics?.dressingRoomHarmony ?? 75;
+    return clamp(Math.round(integration * 0.6 + harmony * 0.4), 25, 98);
+  }
+
   // ==================== 1. PHONG CÁCH & TÂM LÝ HLV TRƯỞNG ====================
 
   getCoachStyleProfile(coachStaff = null) {

@@ -3,11 +3,15 @@
 // AI Lịch sinh hoạt 24h cá nhân hóa + 4-Tier Simulation/Animation LOD + Quản lý phòng cá nhân & Save/Load đồng bộ
 import { PathfindingSystem } from '../ai/PathfindingSystem.js';
 import { ActivityPointSystem } from '../ai/ActivityPointSystem.js';
+import { CrowdDistributionSystem, CROWD_DENSITY } from '../ai/CrowdDistributionSystem.js';
 import { formatKitName } from '../characters/PlayerKitSystem.js';
 
 export const NPC_STATES = Object.freeze([
   'IDLE',
+  'WORKING',
   'WALKING',
+  'WAITING',
+  'QUEUING',
   'GOING_TO_ROOM',
   'WAITING_FOR_DOOR',
   'OPENING_DOOR',
@@ -18,14 +22,20 @@ export const NPC_STATES = Object.freeze([
   'EATING',
   'SOCIALIZING',
   'GOING_TO_GYM',
+  'USING_GYM',
   'TRAINING',
   'MEDICAL_CHECK',
   'RECOVERY',
+  'ATTENDING_MEETING',
   'GOING_TO_LOCKER_ROOM',
+  'USING_LOCKER',
   'SLEEPING',
+  'RETURNING_TO_WORK',
   'WAITING_FOR_ACTIVITY',
   'AVOIDING_OBSTACLE',
   'AVOIDING_NPC',
+  'STUCK',
+  'REROUTING',
   'STUCK_RECOVERY'
 ]);
 
@@ -150,6 +160,8 @@ export class NpcSystem {
     this._wasMeetingActive = false;
     this.pathfinder = new PathfindingSystem(campusScene);
     this.activitySystem = new ActivityPointSystem();
+    this.crowdSystem = new CrowdDistributionSystem();
+    this.pathfinder.attachCrowdSystem(this.crowdSystem);
     this.trainingSystem = null;
     this.activeClubKit = 'home';
     this.captainId = null;
@@ -158,6 +170,12 @@ export class NpcSystem {
     this._curtainEvalTimer = 0;
     this._shouldEvalCurtains = false;
     this._simClock = 0;
+    this._crowdSyncTimer = 0;
+    this._pathQueue = [];
+    this._pathBudgetPerFrame = 6;
+    this._crowdDebugEnabled = false;
+    this._crowdDebugEl = null;
+    this._crowdDebugTimer = 0;
     this.lodCounts = [0, 0, 0, 0];
     this._avoidOut = { vx: 0, vz: 0, waiting: false };
     this._avoidOpts = { out: this._avoidOut, useSpatialGrid: true, skipWhiskers: false };
@@ -165,6 +183,13 @@ export class NpcSystem {
 
   attachActivitySystem(activitySystem) {
     if (activitySystem) this.activitySystem = activitySystem;
+  }
+
+  attachCrowdSystem(crowdSystem) {
+    if (crowdSystem) {
+      this.crowdSystem = crowdSystem;
+      this.pathfinder.attachCrowdSystem(crowdSystem);
+    }
   }
 
   _getSharedAssets() {
@@ -313,16 +338,20 @@ export class NpcSystem {
     if (p.isCoachingStaff) this.attachCoachProp(mesh, p.roleKey);
 
     const seatRotY = this.getCorrectDeskRotation(p);
-    const restSpot = p.isPlayer ? PLAYER_REST_SPOTS[idx % PLAYER_REST_SPOTS.length] : (p.home || { x: 0, z: 6 });
+    const restSpot = p.isPlayer
+      ? ((idx % 30 < 10)
+        ? PLAYER_REST_SPOTS[idx % PLAYER_REST_SPOTS.length]
+        : RESIDENCE_LOUNGE_SPOTS[(idx - 10) % RESIDENCE_LOUNGE_SPOTS.length])
+      : (p.home || { x: 0, z: 6 });
     let startX = p.home?.x ?? 192;
     let startZ = p.home?.z ?? -86;
     if (p.isPlayer && !trainingAtStart) {
-      startX = restSpot.x;
-      startZ = restSpot.z;
+      startX = restSpot.x + ((idx % 3) - 1) * 0.45;
+      startZ = restSpot.z + (((idx >> 1) % 3) - 1) * 0.45;
     }
     const homeHasChair = this.campus?.hasChairAt ? this.campus.hasChairAt(startX, startZ, 0.78) : false;
     let startMode = p.isPlayer
-      ? (trainingAtStart ? 'train' : 'dressing')
+      ? (trainingAtStart ? 'train' : 'rest')
       : (homeHasChair ? 'work_pc' : 'stand_duty');
     let startRotY = seatRotY;
 
@@ -349,8 +378,8 @@ export class NpcSystem {
       finalDest: { x: startX, z: startZ },
       restSpot,
       mode: startMode,
-      state: p.isPlayer ? (trainingAtStart ? 'TRAINING' : 'GOING_TO_LOCKER_ROOM') : 'IDLE',
-      activityType: p.isPlayer ? (trainingAtStart ? 'training' : 'dressing') : 'duty',
+      state: p.isPlayer ? (trainingAtStart ? 'TRAINING' : 'RESTING') : 'IDLE',
+      activityType: p.isPlayer ? (trainingAtStart ? 'training' : 'rest') : 'duty',
       activityLabel: p.task || (p.isPlayer ? 'Sinh hoạt đội một PSG' : 'Làm việc tại CLB'),
       nextActivity: p.isPlayer ? (trainingAtStart ? 'Nghỉ trưa & Phục hồi' : 'Tập luyện cùng đội') : 'Trực văn phòng',
       activePointId: null,
@@ -401,7 +430,26 @@ export class NpcSystem {
       _chairCacheX: NaN,
       _chairCacheZ: NaN,
       _chairCacheHas: homeHasChair,
-      _chairCacheY: 0.14
+      _chairCacheY: 0.14,
+      // Trạng thái điều phối đám đông & chống dao động (Crowd Distribution & Oscillation Guard)
+      currentLocation: 'campus_grounds',
+      destinationLocation: null,
+      assignedActivity: null,
+      groupId: null,
+      priority: p.isPlayer ? 60 : (p.id === 'npc_coach' || p.id === 'npc_med' ? 75 : 55),
+      personalSpaceRadius: 0.58,
+      lastMovementTime: 0,
+      stuckStatus: 'OK',
+      activityHistory: [],
+      _oscAnchorX: startX,
+      _oscAnchorZ: startZ,
+      _oscTimer: 0,
+      _oscTravelDist: 0,
+      _oscFlipCount: 0,
+      _lastVelSignX: 0,
+      _lastVelSignZ: 0,
+      _lockerPrepDone: false,
+      _lockerPrepTimer: 0
     };
 
     Object.defineProperties(npc, {
@@ -413,7 +461,8 @@ export class NpcSystem {
       navigationState: { get() { return this.state; }, enumerable: true },
       movementSpeed: { get() { return this.speed; }, enumerable: true },
       currentPath: { get() { return this.path; }, enumerable: true },
-      targetInteractionPoint: { get() { return this.activePointId; }, enumerable: true }
+      targetInteractionPoint: { get() { return this.activePointId; }, enumerable: true },
+      assignedActivityPoint: { get() { return this.activePointId; }, enumerable: true }
     });
 
     // Đai phân đội mỏng ở gấu áo (luôn giữ mặt lưng thoáng 100% để tên & số áo hiển thị rõ nét!)
@@ -456,6 +505,8 @@ export class NpcSystem {
       this.npcs.push(npc);
       if (npc.id) this.npcById.set(npc.id, npc);
     }
+    this.crowdSystem?.syncRoomOwnership?.(this.trainingSystem?.state?.playerResidenceSystem);
+    this.crowdSystem?.updateFromNpcs?.(this.npcs, this._simClock);
     this.rebuildRaycastMeshes();
   }
 
@@ -481,6 +532,8 @@ export class NpcSystem {
     if (removed.id) {
       this.npcById.delete(removed.id);
       this.activitySystem?.releaseNpc?.(removed.id);
+      this.crowdSystem?.releaseNpc?.(removed.id);
+      this.crowdSystem?.clearWaveForNpc?.(removed.id);
     }
     if (this.summonedPlayerNpc === removed) this.summonedPlayerNpc = null;
     if (removed.mesh) {
@@ -594,6 +647,8 @@ export class NpcSystem {
         playerNpcCount++;
       }
     }
+    this.crowdSystem?.syncRoomOwnership?.(this.trainingSystem?.state?.playerResidenceSystem);
+    this.crowdSystem?.updateFromNpcs?.(this.npcs, this._simClock);
     this.rebuildRaycastMeshes();
   }
 
@@ -819,16 +874,222 @@ export class NpcSystem {
     } else {
       npc.finalDest = { x: targetX, z: targetZ };
     }
-    const pts = this.pathfinder.findPath(npc.mesh.position.x, npc.mesh.position.z, targetX, targetZ, pathOptions);
-    npc.path = pts;
-    npc.pathIdx = 0;
+    if (this.crowdSystem && !pathOptions._skipDestLocSync) {
+      npc.destinationLocation = this.crowdSystem.getLocationAtPosition(targetX, targetZ);
+    }
     npc.stuckTimer = 0;
     npc.recoveryAttempts = 0;
+    npc.stuckStatus = 'OK';
+    npc._oscAnchorX = npc.mesh?.position?.x ?? targetX;
+    npc._oscAnchorZ = npc.mesh?.position?.z ?? targetZ;
+    npc._oscTimer = 0;
+    npc._oscTravelDist = 0;
+    npc._oscFlipCount = 0;
     npc._slotLocked = false;
     npc._lod3Dirty = true;
     npc._lod3InTransit = false;
     npc._chairCacheX = NaN;
+
+    if (pathOptions.queuePath && this._pathQueue.length < 48) {
+      this._enqueuePathRequest(npc, targetX, targetZ, pathOptions);
+      if (!npc.path || npc.path.length === 0) {
+        npc.path = [{ x: targetX, z: targetZ }];
+        npc.pathIdx = 0;
+        npc.target.set(targetX, 0.14, targetZ);
+      }
+      return;
+    }
+
+    const pts = this.pathfinder.findPath(npc.mesh.position.x, npc.mesh.position.z, targetX, targetZ, pathOptions);
+    npc.path = pts;
+    npc.pathIdx = 0;
     if (pts.length > 0) npc.target.set(pts[0].x, 0.14, pts[0].z);
+  }
+
+  _enqueuePathRequest(npc, destX, destZ, pathOptions) {
+    if (!npc?.id) return;
+    for (let i = 0; i < this._pathQueue.length; i++) {
+      if (this._pathQueue[i].npcId === npc.id) {
+        this._pathQueue[i].destX = destX;
+        this._pathQueue[i].destZ = destZ;
+        this._pathQueue[i].options = pathOptions;
+        this._pathQueue[i].priority = npc.priority ?? 50;
+        return;
+      }
+    }
+    this._pathQueue.push({
+      npcId: npc.id,
+      destX,
+      destZ,
+      options: pathOptions,
+      priority: npc.priority ?? 50
+    });
+  }
+
+  _processPathBudgetQueue() {
+    if (this._pathQueue.length === 0) return;
+    if (this._pathQueue.length > 1) {
+      this._pathQueue.sort((a, b) => b.priority - a.priority);
+    }
+    const budget = Math.min(this._pathBudgetPerFrame, this._pathQueue.length);
+    for (let i = 0; i < budget; i++) {
+      const req = this._pathQueue.shift();
+      const npc = req ? this.getById(req.npcId) : null;
+      if (!npc?.mesh) continue;
+      if (npc.finalDest && (Math.abs(npc.finalDest.x - req.destX) > 0.5 || Math.abs(npc.finalDest.z - req.destZ) > 0.5)) {
+        continue; // Đích đã thay đổi trước khi tới lượt
+      }
+      const pts = this.pathfinder.findPath(npc.mesh.position.x, npc.mesh.position.z, req.destX, req.destZ, req.options || EMPTY_PATH_OPTS);
+      npc.path = pts;
+      npc.pathIdx = 0;
+      if (pts.length > 0) npc.target.set(pts[0].x, 0.14, pts[0].z);
+    }
+  }
+
+  _recordActivityHistory(npc, activityKey, area) {
+    if (!npc || !activityKey) return;
+    if (!Array.isArray(npc.activityHistory)) npc.activityHistory = [];
+    const last = npc.activityHistory[0];
+    if (last && last.key === activityKey && (this._simClock - last.at) < 4.0) return;
+    npc.activityHistory.unshift({ key: activityKey, area: area || null, at: this._simClock });
+    if (npc.activityHistory.length > 6) npc.activityHistory.length = 6;
+  }
+
+  // Quy trình 9 bước cấp đích thông minh & giữ chỗ trước khi di chuyển (Reserve-Before-Walk)
+  assignSmartDestination(npc, intent = {}) {
+    if (!npc || !npc.mesh) return null;
+    const prio = typeof intent.priority === 'number' ? intent.priority : (npc.priority ?? 55);
+    npc.priority = prio;
+
+    const resSys = this.trainingSystem?.state?.playerResidenceSystem;
+    if (this.crowdSystem && resSys) {
+      this.crowdSystem.syncRoomOwnership(resSys);
+    }
+
+    let area = intent.area || null;
+    let roomNumber = intent.roomNumber ?? null;
+    let targetTypes = intent.interactionTypes || null;
+    let locId = intent.locationId || (this.crowdSystem ? this.crowdSystem.mapAreaToLocationId(area, roomNumber) : area);
+
+    // 1. Kiểm tra sức chứa & mật độ trước khi lập lộ trình
+    if (this.crowdSystem && locId) {
+      const check = this.crowdSystem.canEnterLocation(locId, npc, prio);
+      if (!check.allowed) {
+        // Ưu tiên tìm địa điểm thay thế tương đương nếu không bị buộc xếp hàng
+        const ownedRm = resSys && npc.playerId ? resSys.getRoomForPlayer(npc.playerId) : null;
+        const alt = this.crowdSystem.findAlternativeLocation(locId, npc, {
+          priority: prio,
+          allowHq: this.isAuthorizedHqVisit(npc),
+          ownedRoomNumber: ownedRm?.roomNumber ?? null
+        });
+        if (alt && !intent.mustWaitOnFull) {
+          locId = alt.locationId;
+          if (alt.locationId === 'res_lounge') {
+            area = 'residence_lounge';
+            roomNumber = null;
+            targetTypes = ['sit_sofa', 'socialize'];
+          } else if (alt.locationId === 'rehab_pitch') {
+            area = 'rehab_pitch';
+            roomNumber = null;
+            targetTypes = ['rehab_drill'];
+          } else if (alt.locationId.startsWith('res_room_') && ownedRm) {
+            area = 'residence_room';
+            roomNumber = ownedRm.roomNumber;
+            targetTypes = ['watch_tv', 'use_desk', 'sleep'];
+          } else {
+            area = alt.locationId;
+            roomNumber = null;
+            targetTypes = null;
+          }
+        } else if (intent.allowQueue !== false && this.activitySystem) {
+          const waitSpot = this.crowdSystem.getWaitingPosition(locId, (npc._decisionSeed || 0) % 8);
+          this.crowdSystem.markWaitingAtLocation(locId, npc.id, true);
+          npc.destinationLocation = locId;
+          npc.assignedActivity = intent.activityKey || 'waiting';
+          npc.state = intent.queueState || 'WAITING_FOR_ACTIVITY';
+          npc.activityLabel = intent.waitLabel || `Đang chờ lượt tại ${this.crowdSystem.getLocation(locId)?.label || locId}`;
+          npc.task = npc.activityLabel;
+          this._routeNpc(npc, waitSpot.x, waitSpot.z, intent.pathOpts || EMPTY_PATH_OPTS, !!intent.isLod3);
+          return { ok: false, queued: true, locationId: locId, waitSpot };
+        }
+      }
+    }
+
+    // 2. Giải phóng điểm cũ (nếu chuyển sang hoạt động mới) và xin ActivityPoint trống trước khi pathfinding
+    let claimedPt = null;
+    if (this.activitySystem && area && this.activitySystem.getPointsByArea(area).length > 0) {
+      claimedPt = this.activitySystem.claimAvailablePoint(npc.id, {
+        area,
+        roomNumber,
+        interactionTypes: targetTypes,
+        preferNearX: npc.mesh.position.x,
+        preferNearZ: npc.mesh.position.z,
+        simTime: this._simClock
+      });
+      if (!claimedPt && intent.allowQueue !== false) {
+        const waitSpot = this.crowdSystem ? this.crowdSystem.getWaitingPosition(locId, (npc._decisionSeed || 0) % 8) : { x: 184, z: 2 };
+        this.crowdSystem?.markWaitingAtLocation?.(locId, npc.id, true);
+        npc.destinationLocation = locId;
+        npc.state = 'WAITING_FOR_ACTIVITY';
+        npc.activityLabel = intent.waitLabel || 'Đang chờ đến lượt hoạt động';
+        npc.task = npc.activityLabel;
+        this._routeNpc(npc, waitSpot.x, waitSpot.z, intent.pathOpts || EMPTY_PATH_OPTS, !!intent.isLod3);
+        return { ok: false, queued: true, locationId: locId, waitSpot };
+      }
+    }
+
+    // 3. Đặt chỗ trước (Reserve-Before-Walk) tại CrowdDistributionSystem
+    if (this.crowdSystem && locId) {
+      this.crowdSystem.reserveSlot(locId, npc.id, prio, this._simClock, 50);
+      npc.destinationLocation = locId;
+    }
+
+    const dest = claimedPt
+      ? claimedPt.standPosition
+      : (intent.fallbackCoord || (this.crowdSystem?.getLocation(locId) ? { x: this.crowdSystem.getLocation(locId).cx, z: this.crowdSystem.getLocation(locId).cz } : { x: 184, z: 9 }));
+
+    if (claimedPt) npc.activePointId = claimedPt.activityPointId;
+    if (intent.activityKey) {
+      npc.assignedActivity = intent.activityKey;
+      this._recordActivityHistory(npc, intent.activityKey, area || locId);
+    }
+    if (intent.activityType) npc.activityType = intent.activityType;
+    if (intent.activityLabel) {
+      npc.activityLabel = intent.activityLabel;
+      npc.task = intent.activityLabel;
+    }
+    if (intent.targetState) npc.state = intent.targetState;
+    if (intent.groupId !== undefined) npc.groupId = intent.groupId;
+
+    this._routeNpc(npc, dest.x, dest.z, intent.pathOpts || EMPTY_PATH_OPTS, !!intent.isLod3);
+    return { ok: true, queued: false, locationId: locId, point: claimedPt, dest };
+  }
+
+  // Hủy tác vụ an toàn: giải phóng hoàn toàn ActivityPoint, CrowdSlot, Wave & Queue của NPC
+  cancelNpcTask(npcOrId) {
+    const npc = typeof npcOrId === 'string' ? this.getById(npcOrId) : npcOrId;
+    if (!npc) return false;
+    this.activitySystem?.releaseNpc?.(npc.id);
+    this.crowdSystem?.releaseNpc?.(npc.id);
+    this.crowdSystem?.clearWaveForNpc?.(npc.id);
+    npc.activePointId = null;
+    npc.queueKey = null;
+    npc.destinationLocation = null;
+    npc.assignedActivity = null;
+    npc.groupId = null;
+    npc._doorTransition = null;
+    npc._waitingDoorRoom = null;
+    npc._waitingDoorResume = null;
+    npc._slotLocked = false;
+    npc.stuckStatus = 'OK';
+    if (npc.path && npc.path.length > 0) npc.path.length = 0;
+    npc.pathIdx = 0;
+    if (npc.mesh) {
+      npc.target.set(npc.mesh.position.x, 0.14, npc.mesh.position.z);
+      npc.finalDest = { x: npc.mesh.position.x, z: npc.mesh.position.z };
+    }
+    npc.state = 'IDLE';
+    return true;
   }
 
   // Đặt đích logic nhẹ cho NPC ở LOD 3 (không chạy A*, vẫn bảo vệ tuyệt đối quy tắc cấm cầu thủ vào HQ!)
@@ -849,6 +1110,9 @@ export class NpcSystem {
       npc.finalDest.z = targetZ;
     } else {
       npc.finalDest = { x: targetX, z: targetZ };
+    }
+    if (this.crowdSystem) {
+      npc.destinationLocation = this.crowdSystem.getLocationAtPosition(targetX, targetZ);
     }
     if (npc.path && npc.path.length > 0) npc.path.length = 0;
     npc.pathIdx = 0;
@@ -917,6 +1181,11 @@ export class NpcSystem {
       const npc = this.getById(execIds[i]);
       const seat = this.campus.boardroomSeats[i];
       if (npc && seat) {
+        npc.groupId = 'board_meeting';
+        npc.priority = 88;
+        npc.state = 'ATTENDING_MEETING';
+        npc.destinationLocation = 'hq_boardroom';
+        this.crowdSystem?.reserveSlot?.('hq_boardroom', npc.id, 88, this._simClock, 90);
         this.setNpcDestination(npc, seat.x, seat.z);
         npc.meetingRotY = seat.rotY;
         npc.mode = 'going_meeting';
@@ -926,12 +1195,29 @@ export class NpcSystem {
 
   endBoardMeeting() {
     this.meetingActive = false;
+    const departing = [];
     for (let i = 0; i < this.npcs.length; i++) {
       const n = this.npcs[i];
       if (n.mode === 'going_meeting' || n.mode === 'meeting') {
-        this.setNpcDestination(n, n.home.x, n.home.z);
-        n.mode = 'returning';
+        departing.push(n);
       }
+    }
+    if (departing.length > 0 && this.crowdSystem) {
+      // Rời phòng họp theo từng nhóm lệch pha (Staggered Departure) tránh kẹt 8 lãnh đạo tại 1 cửa
+      this.crowdSystem.scheduleGroupWaves(
+        `meeting_depart_${Math.floor(this._simClock)}`,
+        departing.map((d) => d.id),
+        this._simClock,
+        { waveSize: 3, intervalSec: 0.65 }
+      );
+    }
+    for (let i = 0; i < departing.length; i++) {
+      const n = departing[i];
+      n.groupId = 'meeting_depart';
+      n.state = 'RETURNING_TO_WORK';
+      this.crowdSystem?.releaseNpc?.(n.id);
+      this.setNpcDestination(n, n.home.x, n.home.z);
+      n.mode = 'returning';
     }
   }
 
@@ -1045,9 +1331,11 @@ export class NpcSystem {
       if (typeof n.eventTargetRotY === 'number') n.mesh.rotation.y = n.eventTargetRotY;
     } else if (n.mode === 'going_meeting') {
       n.mode = 'meeting';
+      n.state = 'ATTENDING_MEETING';
       n.mesh.rotation.y = n.meetingRotY ?? 0;
     } else if (n.mode === 'going_president') {
       n.mode = 'sit_president';
+      n.state = 'ATTENDING_MEETING';
       n.mesh.rotation.y = Math.PI;
     } else if (n.mode === 'supervise_walk') {
       n.mode = 'supervise';
@@ -1077,8 +1365,14 @@ export class NpcSystem {
     } else if (n.mode === 'returning') {
       const homeChair = this.campus?.hasChairAt ? this.campus.hasChairAt(n.home.x, n.home.z, 0.78) : false;
       n.mode = n.isPlayer ? (trainingNow ? 'train' : 'rest') : (homeChair ? 'work_pc' : 'stand_duty');
-      n.state = n.isPlayer ? (trainingNow ? 'TRAINING' : 'RESTING') : 'IDLE';
+      n.state = n.isPlayer ? (trainingNow ? 'TRAINING' : 'RESTING') : 'WORKING';
       n.mesh.rotation.y = n.seatRotY;
+      n.groupId = null;
+    }
+    if (this.crowdSystem && n.mesh) {
+      const locId = this.crowdSystem.getLocationAtPosition(n.mesh.position.x, n.mesh.position.z);
+      n.currentLocation = locId;
+      this.crowdSystem.occupyLocation(locId, n.id);
     }
   }
 
@@ -1315,26 +1609,59 @@ export class NpcSystem {
     n._velZ = vz;
     n._chairCacheX = NaN;
 
-    // Quay mặt mượt theo hướng di chuyển thực tế
+    // Quay mặt mượt theo hướng di chuyển thực tế + theo dõi dao động trái-phải (Oscillation Detection)
     if (movedDist > 0.004) {
       const targetYaw = Math.atan2((nextX - n.lastPosX) || vx, (nextZ - n.lastPosZ) || vz);
       n.mesh.rotation.y = lerpAngle(n.mesh.rotation.y, targetYaw, dt * 10);
       n.stuckTimer = Math.max(0, n.stuckTimer - dt * 1.5);
-      if (movedDist > 0.03 && n.stuckTimer <= 0) n.recoveryAttempts = 0;
+      n.lastMovementTime = this._simClock;
+      n._oscTravelDist = (n._oscTravelDist || 0) + movedDist;
+      const sx = Math.sign(movedX);
+      const sz = Math.sign(movedZ);
+      if ((sx !== 0 && n._lastVelSignX !== 0 && sx !== n._lastVelSignX) ||
+          (sz !== 0 && n._lastVelSignZ !== 0 && sz !== n._lastVelSignZ)) {
+        n._oscFlipCount = (n._oscFlipCount || 0) + 1;
+      }
+      if (sx !== 0) n._lastVelSignX = sx;
+      if (sz !== 0) n._lastVelSignZ = sz;
+
+      const netFromAnchor = Math.hypot(nextX - (n._oscAnchorX ?? nextX), nextZ - (n._oscAnchorZ ?? nextZ));
+      if (movedDist > 0.03 && n.stuckTimer <= 0 && (n.stuckStatus === 'OK' || netFromAnchor > 0.65)) {
+        n.recoveryAttempts = 0;
+        if (n.stuckStatus !== 'OK') n.stuckStatus = 'OK';
+      }
     } else if (lod <= 2) {
       n.stuckTimer += dt;
+    }
+
+    // Kiểm tra dao động tại chỗ (đi qua lại nhiều lần nhưng tịnh tiến ròng < 0.42m trong 1.6s)
+    if (lod <= 2) {
+      n._oscTimer = (n._oscTimer || 0) + dt;
+      if (n._oscTimer >= 1.6) {
+        const netDisp = Math.hypot(nextX - (n._oscAnchorX ?? nextX), nextZ - (n._oscAnchorZ ?? nextZ));
+        if ((n._oscTravelDist > 1.1 || (n._oscFlipCount || 0) >= 3) && netDisp < 0.42) {
+          n.stuckTimer = Math.max(n.stuckTimer, 0.92);
+          n.stuckStatus = 'STUCK';
+        }
+        n._oscAnchorX = nextX;
+        n._oscAnchorZ = nextZ;
+        n._oscTimer = 0;
+        n._oscTravelDist = 0;
+        n._oscFlipCount = 0;
+      }
     }
     n.lastPosX = nextX;
     n.lastPosZ = nextZ;
 
     if (n.replanCooldown > 0) n.replanCooldown -= dt;
 
-    // Chống kẹt đa tầng (STUCK_RECOVERY) cho TẤT CẢ NPC: A* toàn tuyến -> lách ngang có kiểm tra LOS -> đổi điểm dự phòng an toàn
+    // Chống kẹt đa tầng & chống dao động (STUCK -> REROUTING -> Fallback Target -> Escalation Diagnostic, KHÔNG BAO GIỜ TELEPORT)
     if (lod <= 2 && n.stuckTimer > 0.85 && n.replanCooldown <= 0) {
       n.stuckTimer = 0;
       n.replanCooldown = 1.4;
       n.recoveryAttempts = (n.recoveryAttempts || 0) + 1;
       n.stuckLogCount = (n.stuckLogCount || 0) + 1;
+      n.stuckStatus = n.recoveryAttempts === 1 ? 'STUCK' : 'REROUTING';
       n.state = 'STUCK_RECOVERY';
 
       if (n.mode === 'roam') {
@@ -1342,34 +1669,49 @@ export class NpcSystem {
         this.setNpcDestination(n, n.home.x, n.home.z);
       } else if (n.recoveryAttempts >= 3 && n.isPlayer) {
         n.recoveryAttempts = 0;
+        this.pathfinder.recordNavDiagnostic({
+          npcId: n.id,
+          reason: 'escalation_fallback',
+          location: n.currentLocation || 'campus_grounds',
+          x: nextX,
+          z: nextZ,
+          time: this._simClock
+        });
         this.activitySystem?.releaseNpc?.(n.id);
+        this.crowdSystem?.releaseNpc?.(n.id);
         n.activePointId = null;
         n.queueKey = null;
         const alt = RESIDENCE_LOUNGE_SPOTS[Math.abs(n._decisionSeed || 0) % RESIDENCE_LOUNGE_SPOTS.length];
         this.setNpcDestination(n, alt.x, alt.z, EMPTY_PATH_OPTS);
       } else if (n.recoveryAttempts >= 3 && !n.isPlayer) {
         n.recoveryAttempts = 0;
+        this.pathfinder.recordNavDiagnostic({
+          npcId: n.id,
+          reason: 'staff_escalation_fallback',
+          location: n.currentLocation || 'campus_grounds',
+          x: nextX,
+          z: nextZ,
+          time: this._simClock
+        });
         n._staffSlotKey = null;
         const fallbackX = n.home?.x ?? 0;
         const fallbackZ = n.home?.z ?? 7;
         this.setNpcDestination(n, fallbackX, fallbackZ, EMPTY_PATH_OPTS);
       } else if (n.finalDest) {
-        if (n.recoveryAttempts === 2 && this.campus) {
-          // Thử dịch nhẹ sang cạnh thông thoáng gần nhất (kiểm tra cả điểm đích lẫn tia LOS để KHÔNG nhảy xuyên tường mỏng)
-          const perpX = -dirZ;
-          const perpZ = dirX;
-          for (const sign of [1, -1]) {
-            const cx = nextX + perpX * 0.65 * sign;
-            const cz = nextZ + perpZ * 0.65 * sign;
-            if (!this.pathfinder.isPointBlocked(cx, cz, 0.34, true) &&
-                this.pathfinder.hasLineOfSight(nextX, nextZ, cx, cz, 0.26, true)) {
-              n.mesh.position.x = cx;
-              n.mesh.position.z = cz;
-              break;
-            }
-          }
+        // Bước 1: Dừng ngắn nhường đường; Bước 2: Tìm đường thay thế tránh ô đang kẹt (không dịch chuyển tức thời)
+        if (n.recoveryAttempts === 1) {
+          n.waitTimer = 0.35;
         }
-        const altPath = this.pathfinder.findPath(n.mesh.position.x, n.mesh.position.z, n.finalDest.x, n.finalDest.z, EMPTY_PATH_OPTS);
+        const avoidKey = this.pathfinder.staticGrid
+          ? (Math.max(0, Math.min(this.pathfinder.rows - 1, Math.floor((nextZ + dirZ * 0.6 - this.pathfinder.minZ) / this.pathfinder.gridStep))) * this.pathfinder.cols +
+             Math.max(0, Math.min(this.pathfinder.cols - 1, Math.floor((nextX + dirX * 0.6 - this.pathfinder.minX) / this.pathfinder.gridStep))))
+          : null;
+        const rerouteOpts = {
+          alternateRouteAttempt: n.recoveryAttempts,
+          avoidCellKey: avoidKey
+        };
+        if (n.isPlayer && !this.isAuthorizedHqVisit(n)) rerouteOpts.forbidHqInterior = true;
+        const altPath = this.pathfinder.findPath(n.mesh.position.x, n.mesh.position.z, n.finalDest.x, n.finalDest.z, rerouteOpts);
         if (altPath.length > 0) {
           n.path = altPath;
           n.pathIdx = 0;
@@ -1414,6 +1756,24 @@ export class NpcSystem {
 
     if (trainingChanged) {
       this.wasTraining = trainingNow;
+      // Khi kết thúc buổi tập: phân chia nhóm rời sân lệch pha (Staggered Departure) tránh 30 cầu thủ ùa 1 lúc
+      if (!trainingNow && this.crowdSystem) {
+        const squadIds = [];
+        for (let i = 0; i < this.npcs.length; i++) {
+          const pNpc = this.npcs[i];
+          if (pNpc.isPlayer) {
+            pNpc._lockerPrepDone = false;
+            pNpc.groupId = 'post_training_depart';
+            squadIds.push(pNpc.id);
+          }
+        }
+        if (squadIds.length > 0) {
+          this.crowdSystem.scheduleGroupWaves(`post_train_${Math.floor(this._simClock)}`, squadIds, this._simClock, {
+            waveSize: 7,
+            intervalSec: 0.65
+          });
+        }
+      }
       if (onScheduleToast) {
         onScheduleToast(trainingNow
           ? `⚽ Đã đến giờ tập! HLV ${coachName} và toàn đội PSG đã ra Trung tâm Huấn luyện PSG tập luyện 3D.`
@@ -1422,8 +1782,42 @@ export class NpcSystem {
     } else if (this.wasTraining === null) {
       this.wasTraining = trainingNow;
     }
+
+    if (drChanged) {
+      if (drNow && this.crowdSystem) {
+        // Bắt đầu giờ Phòng Thay Đồ -> chia 30 cầu thủ thành các đợt lệch pha (cap = 18)
+        const lockerQueueIds = [];
+        for (let i = 0; i < this.npcs.length; i++) {
+          const pNpc = this.npcs[i];
+          if (pNpc.isPlayer) {
+            pNpc._lockerPrepDone = false;
+            pNpc._lockerPrepTimer = 0;
+            pNpc.groupId = 'locker_entry_wave';
+            lockerQueueIds.push(pNpc.id);
+          }
+        }
+        if (lockerQueueIds.length > 0) {
+          this.crowdSystem.scheduleGroupWaves(`locker_wave_${Math.floor(this._simClock)}`, lockerQueueIds, this._simClock, {
+            waveSize: 8,
+            intervalSec: 0.70,
+            targetLocId: 'locker_room'
+          });
+        }
+      }
+    }
     this._wasDrNow = drNow;
     this._wasMeetingActive = this.meetingActive;
+
+    // Đồng bộ mật độ không gian, giải phóng đặt chỗ quá hạn & cấp phát lộ trình theo ngân sách/frame
+    this._crowdSyncTimer += dt;
+    if (scheduleEdge || this._crowdSyncTimer >= 0.35) {
+      this._crowdSyncTimer = 0;
+      this.crowdSystem?.syncRoomOwnership?.(this.trainingSystem?.state?.playerResidenceSystem);
+      this.crowdSystem?.updateFromNpcs?.(this.npcs, this._simClock);
+      this.activitySystem?.pruneStaleReservations?.(this._simClock, 55);
+      this._enforceMidWalkCapacityAndDispersal(drNow);
+    }
+    this._processPathBudgetQueue();
 
     const focusPos = (options && options.focusPos) || playerPos || null;
     const lodStrideMult = Math.max(0.5, Math.min(4.0, (options && typeof options.lodStrideMultiplier === 'number') ? options.lodStrideMultiplier : 1.0));
@@ -1447,6 +1841,14 @@ export class NpcSystem {
 
     // Dựng lại NPC Spatial Hash 1 lần/frame cho Local Avoidance O(1)
     this.pathfinder.rebuildNpcSpatialGrid(this.npcs);
+
+    if (this._crowdDebugEnabled) {
+      this._crowdDebugTimer += dt;
+      if (this._crowdDebugTimer >= 0.45) {
+        this._crowdDebugTimer = 0;
+        this._renderCrowdDebugOverlay();
+      }
+    }
 
     this.lodCounts[0] = 0;
     this.lodCounts[1] = 0;
@@ -1654,6 +2056,15 @@ export class NpcSystem {
             if (typeof tr.faceRotY === 'number') {
               n.mesh.rotation.y = lerpAngle(n.mesh.rotation.y, tr.faceRotY, animDt * 10);
             }
+            const doorKey = `door_room_${tr.roomNumber}`;
+            const passage = this.crowdSystem
+              ? this.crowdSystem.requestDoorwayPassage(doorKey, n.id, tr.phase === 'exit_walk' ? 'exit' : 'enter', n.priority ?? 60, this._simClock)
+              : { granted: true };
+            if (!passage.granted) {
+              n.state = 'WAITING_FOR_DOOR';
+              if (animateStationary) this.animSystem.updateRig(n.mesh, 'idle', animDt, 1.0, lod);
+              continue;
+            }
             tr.timer -= stepDt;
             if (!tr.opened && tr.timer <= 0.60) {
               tr.opened = true;
@@ -1672,7 +2083,8 @@ export class NpcSystem {
               n._doorTransition = null;
               n.mode = tr.resumeMode || 'rest';
               n.state = tr.phase === 'enter_walk' ? 'ENTERING_ROOM' : (tr.resumeState || 'WALKING');
-              this.activitySystem?.dequeue?.(`door_room_${tr.roomNumber}`, n.id);
+              this.activitySystem?.dequeue?.(doorKey, n.id);
+              this.crowdSystem?.releaseDoorwayPassage?.(doorKey, n.id);
               n._autoCloseRoomNumber = tr.roomNumber;
               n._autoCloseTimer = 2.6;
               const resSys = this.trainingSystem?.state?.playerResidenceSystem;
@@ -1759,11 +2171,17 @@ export class NpcSystem {
               else if (actPt.interactionType === 'watch_tv') n.state = 'WATCHING_TV';
               else if (actPt.interactionType === 'eat') n.state = 'EATING';
               else if (actPt.interactionType === 'socialize' || actPt.interactionType === 'talk') n.state = 'SOCIALIZING';
-              else if (actPt.interactionType.startsWith('gym_')) n.state = 'GOING_TO_GYM';
+              else if (actPt.interactionType.startsWith('gym_') || actPt.interactionType === 'stretch') n.state = 'USING_GYM';
+              else if (actPt.interactionType === 'dress') n.state = 'USING_LOCKER';
               else if (actPt.interactionType === 'recovery_bed' || actPt.interactionType === 'physio' || actPt.interactionType === 'cryo' || actPt.interactionType === 'ice_tub') n.state = 'RECOVERY';
               else if (actPt.interactionType === 'medical_exam' || actPt.interactionType === 'biometrics') n.state = 'MEDICAL_CHECK';
               else if (actPt.area === 'residence_room') n.state = 'INSIDE_ROOM';
               else n.state = 'RESTING';
+
+              if (n.mode === 'dressing' && !n._lockerPrepDone) {
+                n._lockerPrepTimer = (n._lockerPrepTimer || 0) + stepDt;
+                if (n._lockerPrepTimer >= 3.2) n._lockerPrepDone = true;
+              }
 
               if (animateStationary) {
                 const safeAnim = SITTING_ANIMS.has(resolvedAnim) ? this.resolveSafePosture(n, resolvedAnim) : resolvedAnim;
@@ -1775,6 +2193,10 @@ export class NpcSystem {
           } else if (n.mode === 'medical_rehab') {
             if (animateStationary) this.animSystem.updateRig(n.mesh, n.drillAnim || 'idle', animDt, 1.0, lod);
           } else {
+            if (n.mode === 'dressing') {
+              n._lockerPrepTimer = (n._lockerPrepTimer || 0) + stepDt;
+              if (n._lockerPrepTimer >= 3.2) n._lockerPrepDone = true;
+            }
             if (animateStationary) this.animSystem.updateRig(n.mesh, n.mode === 'dressing' ? 'talk' : 'idle', animDt, 1.0, lod);
           }
         } else {
@@ -2072,7 +2494,7 @@ export class NpcSystem {
       return;
     }
 
-    // 6. Cơ sở vật chất & Kỹ thuật sân tập
+    // 6. Cơ sở vật chất & Kỹ thuật sân tập (kiểm tra kho dụng cụ, sân tập, Residence)
     if (n.id === 'npc_fac' || n.id === 'npc_fac_tech') {
       n.timer -= stepDt;
       if (n.timer > 0 && n._staffSlotKey) return;
@@ -2082,6 +2504,7 @@ export class NpcSystem {
         n.staffSpotIdx++;
         n._staffSlotKey = 'fac_inspect';
         n.mode = 'stand_duty';
+        n.state = 'WORKING';
         n._staffActivityAnim = 'observe';
         n.task = wp.task;
         n.activityLabel = wp.task;
@@ -2091,6 +2514,7 @@ export class NpcSystem {
         n._staffSlotKey = 'fac_home';
         const hasHomeChair = this.campus?.hasChairAt ? this.campus.hasChairAt(n.home.x, n.home.z, 0.78) : false;
         n.mode = hasHomeChair ? 'work_pc' : 'stand_duty';
+        n.state = 'WORKING';
         n._staffActivityAnim = hasHomeChair ? 'work_pc' : 'observe';
         n._targetRotY = n.seatRotY;
         this._routeNpc(n, n.home.x, n.home.z, pathOpts, isLod3);
@@ -2098,7 +2522,7 @@ export class NpcSystem {
       return;
     }
 
-    // 7. Lễ tân & Ban điều hành / Giám đốc phòng ban HQ
+    // 7. Lễ tân, Học viện, Sporting Director, CFO & Ban điều hành HQ (chu trình công việc đa bước theo giờ)
     n.timer -= stepDt;
     if (n.timer > 0 && n._staffSlotKey) return;
     n.timer = 14 + (n._decisionSeed % 8);
@@ -2111,10 +2535,21 @@ export class NpcSystem {
       n.staffSpotIdx++;
       n._staffSlotKey = 'exec_lunch';
       n.mode = 'stand_duty';
-      n.state = 'RESTING';
       n._staffActivityAnim = 'idle';
-      n.task = 'Nghỉ trưa & trao đổi nhanh tại Khu VIP Trụ sở PSG';
-      this._routeNpc(n, -1.2 + ((n._decisionSeed % 5) - 2) * 0.9, -9.2, pathOpts, isLod3);
+      this.assignSmartDestination(n, {
+        locationId: 'hq_vip',
+        area: 'hq_vip',
+        interactionTypes: ['sit_sofa', 'socialize'],
+        activityKey: 'staff_vip_break',
+        activityType: 'rest',
+        activityLabel: 'Nghỉ trưa & trao đổi nhanh tại Khu VIP Trụ sở PSG',
+        targetState: 'EATING',
+        priority: 45,
+        allowQueue: false,
+        fallbackCoord: { x: -1.2 + ((n._decisionSeed % 5) - 2) * 0.9, z: -9.2 },
+        pathOpts,
+        isLod3
+      });
     } else if (consultTarget && isConsultWindow && (n.staffSpotIdx % 3 === 1)) {
       n.staffSpotIdx++;
       n._staffSlotKey = 'exec_consult';
@@ -2122,45 +2557,261 @@ export class NpcSystem {
       n.state = 'SOCIALIZING';
       n._staffActivityAnim = 'talk';
       n.task = consultTarget.task;
-      this._routeNpc(n, consultTarget.x, consultTarget.z, pathOpts, isLod3);
+      n.activityLabel = consultTarget.task;
+      const targetLoc = this.crowdSystem ? this.crowdSystem.getLocationAtPosition(consultTarget.x, consultTarget.z) : null;
+      const check = targetLoc && this.crowdSystem ? this.crowdSystem.canEnterLocation(targetLoc, n, 65) : { allowed: true };
+      if (check.allowed) {
+        this.crowdSystem?.reserveSlot?.(targetLoc, n.id, 65, this._simClock, 30);
+        this._routeNpc(n, consultTarget.x, consultTarget.z, pathOpts, isLod3);
+      } else {
+        this._routeNpc(n, n.home.x, n.home.z, pathOpts, isLod3);
+      }
     } else {
       n.staffSpotIdx++;
       n._staffSlotKey = 'office_desk';
       const hasHomeChair = this.campus?.hasChairAt ? this.campus.hasChairAt(n.home.x, n.home.z, 0.78) : false;
       n.mode = hasHomeChair ? 'work_pc' : 'stand_duty';
-      n.state = 'IDLE';
+      n.state = 'WORKING';
       n._staffActivityAnim = hasHomeChair ? 'work_pc' : (n.id === 'npc_recep' ? 'observe' : 'idle');
       n._targetRotY = n.seatRotY;
+      this.activitySystem?.releaseNpc?.(n.id);
       this._routeNpc(n, n.home.x, n.home.z, pathOpts, isLod3);
     }
   }
 
+  // Giải tỏa quá tải giữa đường & phân tán nhẹ khi điểm đến đã đầy (không đuổi ca bắt buộc)
+  _enforceMidWalkCapacityAndDispersal(drNow) {
+    if (!this.crowdSystem) return;
+    const sharedCheckLocs = ['locker_room', 'fitness_gym', 'res_dining', 'res_lounge', 'medical_center'];
+    for (let li = 0; li < sharedCheckLocs.length; li++) {
+      const locId = sharedCheckLocs[li];
+      const stats = this.crowdSystem.getLocationStats(locId);
+      if (!stats) continue;
+      if (stats.crowdDensity === CROWD_DENSITY.OVERCROWDED) {
+        const candidates = this.crowdSystem.selectDispersalCandidates(locId, 2, (id) => this.getById(id));
+        for (let ci = 0; ci < candidates.length; ci++) {
+          const c = candidates[ci];
+          if (!c.isPlayer || c.mode === 'medical_rehab' || c._doorTransition) continue;
+          const resSys = this.trainingSystem?.state?.playerResidenceSystem;
+          const ownedRm = resSys && c.playerId ? resSys.getRoomForPlayer(c.playerId) : null;
+          const alt = this.crowdSystem.findAlternativeLocation(locId, c, {
+            priority: c.priority ?? 55,
+            allowHq: this.isAuthorizedHqVisit(c),
+            ownedRoomNumber: ownedRm?.roomNumber ?? null
+          });
+          if (alt) {
+            this.assignSmartDestination(c, {
+              locationId: alt.locationId,
+              area: alt.locationId === 'res_lounge' ? 'residence_lounge' : (alt.locationId.startsWith('res_room_') ? 'residence_room' : alt.locationId),
+              roomNumber: alt.roomNumber,
+              activityKey: `dispersal_${alt.locationId}`,
+              activityLabel: `Chuyển sang ${alt.label} để tránh đông đúc`,
+              targetState: 'WALKING',
+              priority: 52,
+              pathOpts: { queuePath: true }
+            });
+          }
+        }
+      }
+    }
+
+    // Kiểm tra NPC đang đi bộ tới khu vực đã FULL mà chưa giữ chỗ/chưa vào bên trong -> chuyển hướng êm ái
+    for (let i = 0; i < this.npcs.length; i++) {
+      const n = this.npcs[i];
+      if (!n?.isPlayer || !n.destinationLocation || n.currentLocation === n.destinationLocation) continue;
+      if (n.mode === 'medical_rehab' || n.mode === 'train' || n.mode === 'drill' || n._doorTransition) continue;
+      if (!['locker_room', 'fitness_gym', 'res_dining', 'res_lounge'].includes(n.destinationLocation)) continue;
+
+      const loc = this.crowdSystem.getLocation(n.destinationLocation);
+      if (!loc) continue;
+      const hasClaim = loc.currentOccupants.has(n.id) || loc.reservations.has(n.id);
+      if (hasClaim) continue;
+      const stats = this.crowdSystem.getLocationStats(n.destinationLocation);
+      if (stats && (stats.crowdDensity === CROWD_DENSITY.FULL || stats.crowdDensity === CROWD_DENSITY.OVERCROWDED)) {
+        if (drNow && n.destinationLocation === 'locker_room') {
+          const waitSpot = this.crowdSystem.getWaitingPosition('locker_room', (n._decisionSeed || i) % 8);
+          this.crowdSystem.markWaitingAtLocation('locker_room', n.id, true);
+          n.state = 'WAITING_FOR_ACTIVITY';
+          n.activityLabel = 'Chờ lượt vào Phòng Thay Đồ PSG';
+          this._routeNpc(n, waitSpot.x, waitSpot.z, { queuePath: true }, n._lod === 3);
+        } else {
+          n._decisionCooldown = 0;
+        }
+      }
+    }
+  }
+
+  _scoreFreeActivityOption(n, optionKey, targetLocId, pObj, clockHour) {
+    const seed = n._decisionSeed || 0;
+    const stamina = typeof pObj?.stamina === 'number' ? pObj.stamina : 82;
+    const fatigue = typeof pObj?.health?.fatigue === 'number' ? pObj.health.fatigue : (100 - stamina);
+    const morale = typeof pObj?.morale === 'number' ? pObj.morale : (n.morale || 80);
+    const personality = String(pObj?.personality || n.personality || '').toLowerCase();
+
+    let score = 40 + (((seed + Math.floor(clockHour * 2)) % 7) * 3);
+
+    if (optionKey === 'free_gym') {
+      if (fatigue >= 65 || stamina < 55) score -= 35;
+      else score += 16;
+      if (personality.includes('tham vọng') || personality.includes('chuyên nghiệp') || personality.includes('quyết tâm')) {
+        score += 18;
+      }
+    } else if (optionKey === 'free_lounge') {
+      if (morale >= 75 && !personality.includes('hướng nội')) score += 15;
+      // Ảnh hưởng bởi quan hệ đồng đội đang có mặt tại Lounge
+      const relSys = this.trainingSystem?.state?.relationshipSystem;
+      const loungeLoc = this.crowdSystem?.getLocation('res_lounge');
+      if (relSys && loungeLoc && loungeLoc.currentOccupants.size > 0) {
+        let friendBonus = 0;
+        for (const occId of loungeLoc.currentOccupants) {
+          if (occId === n.id) continue;
+          const occNpc = this.getById(occId);
+          if (occNpc?.playerId) {
+            const aff = typeof relSys.getTeammateAffinity === 'function'
+              ? relSys.getTeammateAffinity(n.playerId, occNpc.playerId)
+              : (typeof relSys.getPlayerAffinity === 'function' ? relSys.getPlayerAffinity(n.playerId, occNpc.playerId) : 70);
+            if (aff >= 75) friendBonus += 6;
+            else if (aff >= 60) friendBonus += 3;
+          } else {
+            friendBonus += 2;
+          }
+        }
+        score += Math.min(18, friendBonus);
+      }
+    } else if (optionKey === 'free_locker_recovery') {
+      score += 6;
+      if (fatigue >= 45) score += 8;
+    } else if (optionKey === 'post_recovery_med') {
+      score += fatigue >= 60 ? 32 : -18;
+    } else if (optionKey === 'free_own_room') {
+      if (personality.includes('hướng nội') || fatigue >= 55) score += 18;
+      if (clockHour >= 19.5) score += 14;
+    }
+
+    // Tránh lặp lại hoạt động vừa mới làm liên tiếp (ActivityHistory cooldown)
+    if (Array.isArray(n.activityHistory)) {
+      for (let i = 0; i < n.activityHistory.length; i++) {
+        if (n.activityHistory[i].key === optionKey) {
+          score -= (i === 0 ? 34 : i === 1 ? 18 : 8);
+          break;
+        }
+      }
+    }
+
+    // Tránh dồn vào nơi có mật độ HIGH / FULL / OVERCROWDED
+    const stats = this.crowdSystem?.getLocationStats?.(targetLocId);
+    if (stats) {
+      if (stats.crowdDensity === CROWD_DENSITY.LOW) score += 10;
+      else if (stats.crowdDensity === CROWD_DENSITY.HIGH) score -= 24;
+      else if (stats.crowdDensity === CROWD_DENSITY.FULL || stats.crowdDensity === CROWD_DENSITY.OVERCROWDED) score -= 70;
+    }
+
+    return score;
+  }
+
   _tickPlayerDailySchedule(n, stepDt, clockHour, trainingNow, drNow, playerPos, pathOpts, resSys, pObj, isLod3 = false) {
-    // 1. Pha thay đồ trước/sau tập (08:45-09:25, 12:15-13:00, 14:25-15:00)
+    // 1. Pha thay đồ trước/sau tập (08:45-09:25, 12:15-13:00, 14:25-15:00) — Staggered Entry & cap Phòng Thay Đồ = 18
     if (drNow) {
       n.curtainTask = null;
       if (n.bibMesh) n.bibMesh.visible = false;
       n.scrimmageTeam = null;
       n.nextActivity = clockHour < 10 ? 'Tập luyện buổi sáng' : clockHour < 13.5 ? 'Ăn trưa & Nghỉ ngơi' : 'Tập luyện buổi chiều';
       n.activityType = 'dressing';
-      n.activityLabel = 'Đang chuẩn bị tại Phòng Thay Đồ PSG';
-      n.task = 'Có mặt tại Phòng Thay Đồ thay trang phục & chuẩn bị giáo án';
-      if (n.mode !== 'dressing' && !(n.mode === 'door_walk' && n._doorTransition?.resumeMode === 'dressing') && !(n.mode === 'door_action' && n._doorTransition?.resumeMode === 'dressing')) {
-        n._doorTransition = null;
-        this.activitySystem?.releaseNpc?.(n.id);
-        n.activePointId = null;
-        n.mode = 'dressing';
-        n.state = 'GOING_TO_LOCKER_ROOM';
-        const pt = this.activitySystem?.claimAvailablePoint(n.id, {
-          area: 'locker_room',
-          interactionTypes: ['dress', 'talk', 'sit_sofa'],
-          preferNearX: n.mesh.position.x,
-          preferNearZ: n.mesh.position.z,
-          simTime: this._simClock
-        });
-        const dest = pt ? pt.standPosition : n.restSpot;
-        if (pt) n.activePointId = pt.activityPointId;
-        this._routeNpc(n, dest.x, dest.z, pathOpts, isLod3);
+      n.priority = 82;
+
+      const waveInfo = this.crowdSystem ? this.crowdSystem.getWaveInfo(n.id, this._simClock) : { ready: true };
+      const inLocker = n.currentLocation === 'locker_room';
+
+      // Đã xong khâu thay đồ sau 1 lúc hoặc khi phòng quá đông -> nhường chỗ cho lượt sau (giải tỏa tự nhiên)
+      if (inLocker && n._lockerPrepDone && n.mode === 'dressing') {
+        const lockerStats = this.crowdSystem?.getLocationStats?.('locker_room');
+        if (lockerStats && lockerStats.waitingCount > 0) {
+          this.activitySystem?.releaseNpc?.(n.id);
+          this.crowdSystem?.releaseNpc?.(n.id);
+          n.activePointId = null;
+          const postSpot = clockHour >= 12.15 && clockHour < 13.0
+            ? this.crowdSystem.getWaitingPosition('res_dining', (n._decisionSeed || 0) % 4)
+            : { x: 162 + ((n._decisionSeed || 0) % 8) * 3.5, z: -22 - ((n._decisionSeed || 0) % 3) * 2.5 };
+          n.mode = 'rest';
+          n.state = 'RESTING';
+          n.activityLabel = 'Đã thay đồ xong, ra khu vực tập trung chờ';
+          n.task = n.activityLabel;
+          this._routeNpc(n, postSpot.x, postSpot.z, pathOpts, isLod3);
+          return;
+        }
+      }
+
+      if (!waveInfo.ready && !inLocker) {
+        // Chưa tới đợt vào phòng thay đồ -> xếp hàng trật tự ở khu chờ bên ngoài (không ùa 30 người cùng lúc!)
+        if (n.state !== 'WAITING_FOR_ACTIVITY' && n.state !== 'QUEUING') {
+          const waitSpot = this.crowdSystem.getWaitingPosition('locker_room', (n._decisionSeed || 0) % 8);
+          this.crowdSystem.markWaitingAtLocation('locker_room', n.id, true);
+          n.state = 'WAITING_FOR_ACTIVITY';
+          n.destinationLocation = 'locker_room';
+          n.activityLabel = `Chờ đợt vào Phòng Thay Đồ (Nhóm #${waveInfo.waveIndex + 1})`;
+          n.task = n.activityLabel;
+          this._routeNpc(n, waitSpot.x, waitSpot.z, pathOpts, isLod3);
+        }
+        return;
+      }
+
+      // Nếu phòng thay đồ vượt quá sức chứa (18) và cầu thủ chưa giữ điểm trong phòng -> ra hàng chờ ngoài cửa
+      if (inLocker && !n.activePointId) {
+        const lkStats = this.crowdSystem?.getLocationStats?.('locker_room');
+        if (lkStats && lkStats.currentOccupancy > lkStats.maxCapacity) {
+          const waitSpot = this.crowdSystem.getWaitingPosition('locker_room', (n._decisionSeed || 0) % 8);
+          this.crowdSystem.releaseNpc(n.id);
+          this.crowdSystem.markWaitingAtLocation('locker_room', n.id, true);
+          n.mode = 'rest';
+          n.state = 'WAITING_FOR_ACTIVITY';
+          n.destinationLocation = 'locker_room';
+          n.activityLabel = 'Nhường chỗ & xếp hàng chờ vào Phòng Thay Đồ PSG';
+          this._routeNpc(n, waitSpot.x, waitSpot.z, pathOpts, isLod3);
+          return;
+        }
+      }
+
+      const needLockerAssign = (!n.activePointId || n.mode !== 'dressing') &&
+        !(n.mode === 'door_walk' && n._doorTransition?.resumeMode === 'dressing') &&
+        !(n.mode === 'door_action' && n._doorTransition?.resumeMode === 'dressing');
+      const waitingToEnterLocker = !inLocker && (n.state === 'WAITING_FOR_ACTIVITY' || n.state === 'QUEUING') && n.destinationLocation === 'locker_room';
+
+      if ((needLockerAssign || waitingToEnterLocker) && !n._lockerPrepDone) {
+        const lockerCheck = this.crowdSystem ? this.crowdSystem.canEnterLocation('locker_room', n, 82) : { allowed: true };
+        if (lockerCheck.allowed) {
+          n._doorTransition = null;
+          this.activitySystem?.releaseNpc?.(n.id);
+          n.activePointId = null;
+          const pt = this.activitySystem?.claimAvailablePoint(n.id, {
+            area: 'locker_room',
+            interactionTypes: ['dress', 'talk', 'sit_sofa'],
+            preferNearX: n.mesh.position.x,
+            preferNearZ: n.mesh.position.z,
+            simTime: this._simClock
+          });
+          if (pt) {
+            n.mode = 'dressing';
+            n.state = 'GOING_TO_LOCKER_ROOM';
+            n.activePointId = pt.activityPointId;
+            n.destinationLocation = 'locker_room';
+            n.activityLabel = 'Đang chuẩn bị tại Phòng Thay Đồ PSG';
+            n.task = 'Có mặt tại Phòng Thay Đồ thay trang phục & chuẩn bị giáo án';
+            this.crowdSystem?.reserveSlot?.('locker_room', n.id, 82, this._simClock, 45);
+            this._routeNpc(n, pt.standPosition.x, pt.standPosition.z, pathOpts, isLod3);
+            return;
+          }
+        }
+        // Phòng thay đồ đang đủ 18 người -> giữ hàng chờ trật tự ngoài cửa hoặc chuyển chuẩn bị nhẹ
+        if (n.state !== 'WAITING_FOR_ACTIVITY') {
+          const waitSpot = this.crowdSystem ? this.crowdSystem.getWaitingPosition('locker_room', (n._decisionSeed || 0) % 8) : { x: 148, z: -46 };
+          this.crowdSystem?.markWaitingAtLocation?.('locker_room', n.id, true);
+          n.mode = 'dressing';
+          n.state = 'WAITING_FOR_ACTIVITY';
+          n.destinationLocation = 'locker_room';
+          n.activityLabel = 'Đang xếp hàng chờ lượt vào Phòng Thay Đồ PSG';
+          n.task = n.activityLabel;
+          this._routeNpc(n, waitSpot.x, waitSpot.z, pathOpts, isLod3);
+        }
       }
       return;
     }
@@ -2168,6 +2819,8 @@ export class NpcSystem {
     // 2. Pha tập luyện chính thức trên sân tập (09:25-12:15, 15:00-16:30)
     if (trainingNow) {
       n.curtainTask = null;
+      n._lockerPrepDone = false;
+      n.priority = 90;
       n.nextActivity = clockHour < 13 ? 'Hồi phục & Ăn trưa' : 'Tự do phục hồi / Gym / Về phòng';
       n.activityType = 'training';
       n.activityLabel = 'Đang tập luyện cùng đội một PSG';
@@ -2175,9 +2828,11 @@ export class NpcSystem {
         if (!(n._doorTransition?.resumeMode === 'train')) {
           n._doorTransition = null;
           this.activitySystem?.releaseNpc?.(n.id);
+          this.crowdSystem?.releaseNpc?.(n.id);
           n.activePointId = null;
           n.mode = 'train';
           n.state = 'TRAINING';
+          n.destinationLocation = 'training_pitch';
           this._routeNpc(n, n.home.x, n.home.z, pathOpts, isLod3);
         }
       } else {
@@ -2206,58 +2861,67 @@ export class NpcSystem {
       return;
     }
 
-    // 4. Trạng thái ngoài giờ tập: áp dụng AI lịch sinh hoạt cá nhân hóa 24h
+    // Chờ đợt rời sân lệch pha (nếu vừa hết buổi tập) trước khi chọn hoạt động tự do
+    const postWave = this.crowdSystem ? this.crowdSystem.getWaveInfo(n.id, this._simClock) : { ready: true };
+    if (postWave.active && !postWave.ready && n.groupId === 'post_training_depart') {
+      return;
+    } else if (postWave.active && postWave.ready && n.groupId === 'post_training_depart') {
+      this.crowdSystem?.clearWaveForNpc?.(n.id);
+      n.groupId = null;
+    }
+
+    // 4. Trạng thái ngoài giờ tập: áp dụng Smart Daily Activity AI (Utility + Personality + Relations + History + Crowd)
     n.nextActivity = this._getUpcomingActivityLabel(clockHour);
     n._decisionCooldown = (n._decisionCooldown ?? 0) - stepDt;
 
-    // Xác định khung hoạt động hiện tại phù hợp với từng cầu thủ
     const ownedRoom = resSys && n.playerId ? resSys.getRoomForPlayer(n.playerId) : null;
     const seed = n._decisionSeed;
     const stamina = typeof pObj?.stamina === 'number' ? pObj.stamina : 82;
     const fatigue = typeof pObj?.health?.fatigue === 'number' ? pObj.health.fatigue : (100 - stamina);
-    const morale = typeof pObj?.morale === 'number' ? pObj.morale : (n.morale || 80);
-    const personality = String(pObj?.personality || n.personality || '').toLowerCase();
 
     let desiredSlotKey = 'room_rest';
     let targetArea = 'residence_room';
     let targetTypes = ['watch_tv', 'use_desk', 'sleep'];
     let fallbackState = 'INSIDE_ROOM';
     let desiredLabel = 'Đang nghỉ ngơi trong phòng riêng';
+    let desiredPriority = 60;
 
     if (clockHour < 6.5 || clockHour >= 22.5) {
-      // Giờ ngủ đêm trong phòng cá nhân
       desiredSlotKey = 'night_sleep';
       targetArea = 'residence_room';
       targetTypes = ['sleep'];
       fallbackState = 'SLEEPING';
       desiredLabel = ownedRoom ? `Đang ngủ tại ${ownedRoom.code}` : 'Đang ngủ nghỉ';
+      desiredPriority = 85;
     } else if (clockHour >= 21.25 && clockHour < 22.5) {
-      // Trở về phòng cá nhân buổi tối
       desiredSlotKey = 'evening_room';
       targetArea = 'residence_room';
       targetTypes = (seed % 2 === 0) ? ['watch_tv', 'use_desk', 'sleep'] : ['use_desk', 'watch_tv', 'sleep'];
       fallbackState = 'GOING_TO_ROOM';
       desiredLabel = ownedRoom ? `Sinh hoạt tối tại ${ownedRoom.code}` : 'Nghỉ ngơi tối';
+      desiredPriority = 75;
     } else if (clockHour >= 6.5 && clockHour < 7.35) {
       desiredSlotKey = 'morning_wake';
       targetArea = 'residence_room';
       targetTypes = ['use_wardrobe', 'use_desk'];
       fallbackState = 'INSIDE_ROOM';
       desiredLabel = ownedRoom ? `Chuẩn bị buổi sáng tại ${ownedRoom.code}` : 'Vệ sinh buổi sáng';
+      desiredPriority = 72;
     } else if ((clockHour >= 7.35 && clockHour < 8.75) || (clockHour >= 13.0 && clockHour < 13.75)) {
-      // Ăn sáng hoặc ăn trưa dinh dưỡng (hoặc nghỉ trưa nếu mệt)
       if (clockHour >= 13.0 && (fatigue > 62 || stamina < 58)) {
         desiredSlotKey = 'midday_nap';
         targetArea = 'residence_room';
         targetTypes = ['sleep'];
         fallbackState = 'RESTING';
         desiredLabel = ownedRoom ? `Nghỉ trưa hồi phục tại ${ownedRoom.code}` : 'Nghỉ trưa hồi phục';
+        desiredPriority = 72;
       } else {
         desiredSlotKey = clockHour < 9 ? 'breakfast' : 'lunch';
         targetArea = 'residence_dining';
         targetTypes = ['eat'];
         fallbackState = 'EATING';
         desiredLabel = clockHour < 9 ? 'Đang ăn sáng dinh dưỡng tại Residence' : 'Đang ăn trưa & bù năng lượng';
+        desiredPriority = 74;
       }
     } else if (clockHour >= 13.75 && clockHour < 14.25) {
       desiredSlotKey = 'midday_rest';
@@ -2265,66 +2929,84 @@ export class NpcSystem {
       targetTypes = ['sleep', 'watch_tv'];
       fallbackState = 'RESTING';
       desiredLabel = ownedRoom ? `Nghỉ ngơi giữa ngày tại ${ownedRoom.code}` : 'Nghỉ giữa ngày';
+      desiredPriority = 70;
     } else {
-      // Khung tự do sau tập (16:30–21:25): quyết định cá nhân hóa đa dạng theo thể lực, tâm lý, tính cách
-      const dinnerWindowStart = 17.6 + ((seed % 5) * 0.42); // Phân tán giờ ăn tối 17:36..19:20
+      // Khung tự do sau tập (16:30–21:25): dùng hàm tiện ích đa tiêu chí (thể lực + đồng đội + lịch sử + mật độ)
+      const dinnerWindowStart = 17.6 + ((seed % 5) * 0.42);
       if (clockHour >= dinnerWindowStart && clockHour < dinnerWindowStart + 0.55) {
         desiredSlotKey = 'dinner';
         targetArea = 'residence_dining';
         targetTypes = ['eat'];
         fallbackState = 'EATING';
         desiredLabel = 'Đang dùng bữa tối dinh dưỡng tại Residence';
-      } else if (fatigue >= 60 || stamina <= 55) {
-        if ((seed % 3) === 0) {
-          desiredSlotKey = 'post_recovery_med';
-          targetArea = 'medical';
-          targetTypes = ['cryo', 'ice_tub', 'physio', 'recovery_bed'];
-          fallbackState = 'RECOVERY';
-          desiredLabel = 'Đang phục hồi Cryo/Vật lý trị liệu tại Trung tâm Y tế';
-        } else {
-          desiredSlotKey = 'post_rest_room';
-          targetArea = 'residence_room';
-          targetTypes = ['sleep', 'watch_tv'];
-          fallbackState = 'RESTING';
-          desiredLabel = ownedRoom ? `Nghỉ ngơi phục hồi tại ${ownedRoom.code}` : 'Nghỉ ngơi phục hồi';
-        }
+        desiredPriority = 72;
       } else {
-        // Phân nhóm tự nhiên theo tính cách & seed + luân phiên theo slot giờ
-        const slotRoll = (seed + Math.floor(clockHour * 2)) % 5;
-        const lovesGym = personality.includes('tham vọng') || personality.includes('chuyên nghiệp') || personality.includes('quyết tâm');
-        const lovesSocial = morale >= 78 && !personality.includes('hướng nội');
+        const candidates = [
+          {
+            key: 'free_gym',
+            area: 'gym',
+            locId: 'fitness_gym',
+            types: ['gym_treadmill', 'gym_bike', 'gym_weights', 'stretch'],
+            state: 'GOING_TO_GYM',
+            label: 'Đang tập gym bổ trợ tại Fitness Center PSG'
+          },
+          {
+            key: 'free_lounge',
+            area: 'residence_lounge',
+            locId: 'res_lounge',
+            types: ['sit_sofa', 'socialize'],
+            state: 'SOCIALIZING',
+            label: 'Đang giao lưu & thư giãn tại Lounge Cầu thủ'
+          },
+          {
+            key: 'free_locker_recovery',
+            area: 'locker_room',
+            locId: 'locker_room',
+            types: ['sit_sofa', 'eat', 'lie_rest'],
+            state: 'RESTING',
+            label: 'Đang thư giãn tại Phòng Thay Đồ'
+          },
+          {
+            key: 'post_recovery_med',
+            area: 'medical',
+            locId: 'medical_center',
+            types: ['cryo', 'ice_tub', 'physio', 'recovery_bed'],
+            state: 'RECOVERY',
+            label: 'Đang phục hồi Cryo/Vật lý trị liệu tại Trung tâm Y tế'
+          },
+          {
+            key: 'free_own_room',
+            area: 'residence_room',
+            locId: ownedRoom ? `res_room_${String(ownedRoom.roomNumber).padStart(2, '0')}` : 'res_lounge',
+            types: (seed % 2 === 0) ? ['watch_tv', 'use_desk'] : ['use_desk', 'watch_tv'],
+            state: 'INSIDE_ROOM',
+            label: ownedRoom ? `Sinh hoạt riêng tư tại ${ownedRoom.code}` : 'Thư giãn tại phòng riêng'
+          }
+        ];
 
-        if ((lovesGym && slotRoll <= 2 && stamina >= 65) || slotRoll === 0) {
-          desiredSlotKey = 'free_gym';
-          targetArea = 'gym';
-          targetTypes = ['gym_treadmill', 'gym_bike', 'gym_weights', 'stretch'];
-          fallbackState = 'GOING_TO_GYM';
-          desiredLabel = 'Đang tập gym bổ trợ tại Fitness Center PSG';
-        } else if ((lovesSocial && slotRoll === 1) || slotRoll === 2) {
-          desiredSlotKey = 'free_lounge';
-          targetArea = 'residence_lounge';
-          targetTypes = ['sit_sofa', 'socialize'];
-          fallbackState = 'SOCIALIZING';
-          desiredLabel = 'Đang giao lưu & thư giãn tại Lounge Cầu thủ';
-        } else if (slotRoll === 3) {
-          desiredSlotKey = 'free_locker_recovery';
-          targetArea = 'locker_room';
-          targetTypes = ['sit_sofa', 'eat', 'lie_rest'];
-          fallbackState = 'RESTING';
-          desiredLabel = 'Đang thư giãn tại Phòng Thay Đồ';
-        } else {
-          desiredSlotKey = 'free_own_room';
-          targetArea = 'residence_room';
-          targetTypes = (seed % 2 === 0) ? ['watch_tv', 'use_desk'] : ['use_desk', 'watch_tv'];
-          fallbackState = 'INSIDE_ROOM';
-          desiredLabel = ownedRoom ? `Sinh hoạt riêng tư tại ${ownedRoom.code}` : 'Thư giãn tại phòng riêng';
+        let bestCand = candidates[candidates.length - 1];
+        let bestScore = -Infinity;
+        for (let ci = 0; ci < candidates.length; ci++) {
+          const cand = candidates[ci];
+          const sc = this._scoreFreeActivityOption(n, cand.key, cand.locId, pObj, clockHour);
+          if (sc > bestScore) {
+            bestScore = sc;
+            bestCand = cand;
+          }
         }
+        desiredSlotKey = bestCand.key;
+        targetArea = bestCand.area;
+        targetTypes = bestCand.types;
+        fallbackState = bestCand.state;
+        desiredLabel = bestCand.label;
+        desiredPriority = 54;
       }
     }
 
-    const needSwitch = (n._curActivityKey !== desiredSlotKey) ||
-      (n._decisionCooldown <= 0 && !n.activePointId && n.mode !== 'rest') ||
-      (n.mode !== 'rest');
+    const needSwitch = (n._curActivityKey !== desiredSlotKey && n._decisionCooldown <= 0) ||
+      (n.mode !== 'rest') ||
+      (desiredSlotKey === 'night_sleep' && n._curActivityKey !== 'night_sleep') ||
+      (n._decisionCooldown <= 0 && !n.activePointId && n.state !== 'WAITING_FOR_ACTIVITY');
 
     if (needSwitch) {
       n._curActivityKey = desiredSlotKey;
@@ -2333,91 +3015,70 @@ export class NpcSystem {
       n._waitingDoorRoom = null;
       n._waitingDoorResume = null;
       this.activitySystem?.releaseNpc?.(n.id);
+      this.crowdSystem?.releaseNpc?.(n.id);
       n.activePointId = null;
       n.mode = 'rest';
 
-      let pt = null;
-      if (this.activitySystem) {
-        if (targetArea === 'residence_room') {
-          if (ownedRoom) {
-            pt = this.activitySystem.claimAvailablePoint(n.id, {
-              area: 'residence_room',
-              roomNumber: ownedRoom.roomNumber,
-              interactionTypes: targetTypes,
-              simTime: this._simClock
-            });
-          } else {
-            // Cầu thủ overflow chưa có phòng: dùng Lounge thay vì vào nhầm phòng người khác
-            pt = this.activitySystem.claimAvailablePoint(n.id, {
-              area: 'residence_lounge',
-              interactionTypes: ['sit_sofa', 'socialize'],
-              simTime: this._simClock
-            });
-          }
-        } else {
-          pt = this.activitySystem.claimAvailablePoint(n.id, {
-            area: targetArea,
-            interactionTypes: targetTypes,
-            preferNearX: n.mesh.position.x,
-            preferNearZ: n.mesh.position.z,
-            simTime: this._simClock
-          });
-        }
-      }
+      const useRoomNum = (targetArea === 'residence_room' && ownedRoom) ? ownedRoom.roomNumber : null;
+      const effectiveArea = (targetArea === 'residence_room' && !ownedRoom) ? 'residence_lounge' : targetArea;
+      const effectiveTypes = (targetArea === 'residence_room' && !ownedRoom) ? ['sit_sofa', 'socialize'] : targetTypes;
 
-      if (pt) {
-        n.activePointId = pt.activityPointId;
-        n.activityType = targetArea === 'gym' ? 'gym'
-          : targetArea === 'medical' ? 'recovery'
-          : targetArea === 'residence_dining' ? 'eat'
-          : targetArea === 'residence_lounge' ? 'socialize'
-          : targetTypes[0] === 'sleep' ? 'sleep'
-          : 'rest';
-        n.activityLabel = desiredLabel;
-        n.task = desiredLabel;
-        n.state = fallbackState;
-        this._routeNpc(n, pt.standPosition.x, pt.standPosition.z, pathOpts, isLod3);
-      } else if (this.activitySystem && (targetArea === 'gym' || targetArea === 'residence_dining' || targetArea === 'medical')) {
-        // Kín chỗ: xếp hàng trật tự ở bên ngoài điểm hoạt động thay vì chen đè lên người khác!
-        const qKey = `queue_${targetArea}`;
-        const anchor = targetArea === 'gym'
+      const resAssign = this.assignSmartDestination(n, {
+        area: effectiveArea,
+        roomNumber: useRoomNum,
+        interactionTypes: effectiveTypes,
+        activityKey: desiredSlotKey,
+        activityType: effectiveArea === 'gym' ? 'gym'
+          : effectiveArea === 'medical' ? 'recovery'
+          : effectiveArea === 'residence_dining' ? 'eat'
+          : effectiveArea === 'residence_lounge' ? 'socialize'
+          : effectiveTypes[0] === 'sleep' ? 'sleep' : 'rest',
+        activityLabel: desiredLabel,
+        targetState: fallbackState,
+        priority: desiredPriority,
+        allowQueue: (effectiveArea === 'gym' || effectiveArea === 'residence_dining' || effectiveArea === 'medical'),
+        mustWaitOnFull: (effectiveArea === 'gym' || effectiveArea === 'residence_dining' || effectiveArea === 'medical'),
+        fallbackCoord: this._getPlayerResidenceSpot(n),
+        pathOpts,
+        isLod3
+      });
+
+      if (resAssign?.queued && this.activitySystem) {
+        const qKey = `queue_${effectiveArea}`;
+        const anchor = effectiveArea === 'gym'
           ? { x: 200, z: -31.5, dirX: 0, dirZ: 1, spacing: 1.05 }
-          : targetArea === 'medical'
+          : effectiveArea === 'medical'
             ? { x: 168, z: -30.5, dirX: 1, dirZ: 0, spacing: 1.05 }
             : { x: 184, z: 4.8, dirX: 0, dirZ: 1, spacing: 1.05 };
         const qEntry = this.activitySystem.enqueue(qKey, n.id, anchor, this._simClock);
         n.queueKey = qKey;
-        n.state = 'WAITING_FOR_ACTIVITY';
-        n.activityType = targetArea === 'gym' ? 'gym' : targetArea === 'medical' ? 'recovery' : 'eat';
-        n.activityLabel = `Đang xếp hàng chờ tại ${targetArea === 'gym' ? 'Gym' : targetArea === 'medical' ? 'Trung tâm Y tế' : 'Khu Ăn uống'}`;
-        n.task = n.activityLabel;
         if (qEntry?.waitSpot) {
           this._routeNpc(n, qEntry.waitSpot.x, qEntry.waitSpot.z, pathOpts, isLod3);
         }
-      } else {
-        const fallbackSpot = this._getPlayerResidenceSpot(n);
-        n.activityType = 'rest';
-        n.activityLabel = desiredLabel;
-        n.task = desiredLabel;
-        n.state = fallbackState;
-        this._routeNpc(n, fallbackSpot.x, fallbackSpot.z, pathOpts, isLod3);
       }
     } else if (n.state === 'WAITING_FOR_ACTIVITY' && this.activitySystem && n._decisionCooldown <= 0) {
-      // Thử lại xin slot trống cho người đang xếp hàng
+      // Thử lại xin slot trống cho người đang xếp hàng (hoặc chuyển sang điểm thay thế nếu chờ lâu)
       n._decisionCooldown = 4.0;
-      const pt = this.activitySystem.claimAvailablePoint(n.id, {
+      const locId = this.crowdSystem ? this.crowdSystem.mapAreaToLocationId(targetArea, ownedRoom?.roomNumber) : null;
+      const locAllowed = !locId || !this.crowdSystem || this.crowdSystem.canEnterLocation(locId, n, desiredPriority).allowed;
+      const pt = locAllowed ? this.activitySystem.claimAvailablePoint(n.id, {
         area: targetArea,
         interactionTypes: targetTypes,
         preferNearX: n.mesh.position.x,
         preferNearZ: n.mesh.position.z,
         simTime: this._simClock
-      });
+      }) : null;
       if (pt) {
         this.activitySystem.dequeue(n.queueKey, n.id);
         n.queueKey = null;
         n.activePointId = pt.activityPointId;
         n.state = fallbackState;
         n.activityLabel = desiredLabel;
+        if (this.crowdSystem && locId) {
+          this.crowdSystem.markWaitingAtLocation(locId, n.id, false);
+          this.crowdSystem.reserveSlot(locId, n.id, desiredPriority, this._simClock, 50);
+          n.destinationLocation = locId;
+        }
         this._routeNpc(n, pt.standPosition.x, pt.standPosition.z, pathOpts, isLod3);
       }
     } else if (this._shouldEvalCurtains && targetArea === 'residence_room' && !(n.state === 'SLEEPING' && n._slotLocked)) {
@@ -2440,7 +3101,7 @@ export class NpcSystem {
     if (n.state === 'TRAINING' || n.mode === 'train' || n.mode === 'drill') {
       dStamina = -0.35 * stepDt;
       dFatigue = 0.28 * stepDt;
-    } else if (n.state === 'GOING_TO_GYM' && n._slotLocked) {
+    } else if ((n.state === 'GOING_TO_GYM' || n.state === 'USING_GYM') && n._slotLocked) {
       dStamina = -0.22 * stepDt;
       dFatigue = 0.18 * stepDt;
     } else if (n.state === 'SLEEPING') {
@@ -2619,13 +3280,21 @@ export class NpcSystem {
         queueKey: n.queueKey || null,
         _curActivityKey: n._curActivityKey || null,
         _decisionCooldown: n._decisionCooldown ?? 5,
+        currentLocation: n.currentLocation || 'campus_grounds',
+        destinationLocation: n.destinationLocation || null,
+        assignedActivity: n.assignedActivity || null,
+        groupId: n.groupId || null,
+        priority: n.priority ?? 55,
+        stuckStatus: n.stuckStatus || 'OK',
+        activityHistory: Array.isArray(n.activityHistory) ? n.activityHistory.slice(0, 6) : [],
         destX: n.finalDest?.x ?? n.mesh.position.x,
         destZ: n.finalDest?.z ?? n.mesh.position.z
       });
     }
     return {
       npcs: items,
-      activityState: this.activitySystem ? this.activitySystem.exportState() : null
+      activityState: this.activitySystem ? this.activitySystem.exportState() : null,
+      crowdState: this.crowdSystem ? this.crowdSystem.exportState() : null
     };
   }
 
@@ -2633,6 +3302,9 @@ export class NpcSystem {
     if (!snap || typeof snap !== 'object') return;
     if (snap.activityState && this.activitySystem) {
       this.activitySystem.importState(snap.activityState);
+    }
+    if (snap.crowdState && this.crowdSystem) {
+      this.crowdSystem.importState(snap.crowdState);
     }
     if (!Array.isArray(snap.npcs)) return;
 
@@ -2702,6 +3374,13 @@ export class NpcSystem {
       n.queueKey = saved.queueKey || null;
       n._curActivityKey = saved._curActivityKey || null;
       n._decisionCooldown = typeof saved._decisionCooldown === 'number' ? saved._decisionCooldown : 8;
+      n.currentLocation = saved.currentLocation || (this.crowdSystem ? this.crowdSystem.getLocationAtPosition(sx, sz) : 'campus_grounds');
+      n.destinationLocation = saved.destinationLocation || null;
+      n.assignedActivity = saved.assignedActivity || null;
+      n.groupId = saved.groupId || null;
+      if (typeof saved.priority === 'number') n.priority = saved.priority;
+      n.stuckStatus = saved.stuckStatus || 'OK';
+      n.activityHistory = Array.isArray(saved.activityHistory) ? saved.activityHistory.slice(0, 6) : [];
       n._doorTransition = null;
       n._waitingDoorRoom = null;
       n._waitingDoorResume = null;
@@ -2723,8 +3402,60 @@ export class NpcSystem {
       }
       if (n.isPlayer) this._tickResidenceRoomComfort(n, clockHour, null, 0.1, true);
     }
+    this.crowdSystem?.syncRoomOwnership?.(resSys);
+    this.crowdSystem?.updateFromNpcs?.(this.npcs, this._simClock);
     this.pathfinder.rebuildNpcSpatialGrid(this.npcs);
     this.pathfinder.resolveNpcSeparation(this.npcs, 0.72);
+  }
+
+  // ==================== CHẾ ĐỘ DEBUG CROWD MANAGEMENT (ẨN HOÀN TOÀN KHI TẮT) ====================
+  isCrowdDebugEnabled() {
+    return this._crowdDebugEnabled;
+  }
+
+  setCrowdDebug(enabled) {
+    this._crowdDebugEnabled = Boolean(enabled);
+    if (this.crowdSystem) this.crowdSystem._debugEnabled = this._crowdDebugEnabled;
+    if (!this._crowdDebugEnabled) {
+      if (this._crowdDebugEl && this._crowdDebugEl.parentNode) {
+        this._crowdDebugEl.parentNode.removeChild(this._crowdDebugEl);
+      }
+      this._crowdDebugEl = null;
+    } else {
+      this._renderCrowdDebugOverlay();
+    }
+    return this._crowdDebugEnabled;
+  }
+
+  getCrowdDebugSnapshot() {
+    this.crowdSystem?.updateFromNpcs?.(this.npcs, this._simClock);
+    const snap = this.crowdSystem ? this.crowdSystem.getDebugSnapshot(this.npcs, this.pathfinder) : { counts: {}, locations: [], groups: [], activeRoutes: [] };
+    return {
+      ...snap,
+      pathQueuePending: this._pathQueue.length,
+      activityAreaSummary: this.activitySystem ? this.activitySystem.getAreaOccupancySummary() : {}
+    };
+  }
+
+  _renderCrowdDebugOverlay() {
+    if (!this._crowdDebugEnabled || typeof document === 'undefined' || !document.body) return;
+    if (!this._crowdDebugEl) {
+      const el = document.createElement('div');
+      el.id = 'crowd-debug-hud';
+      el.style.cssText = 'position:fixed;top:64px;right:12px;z-index:9500;width:320px;max-height:72vh;overflow:auto;background:rgba(9,17,36,0.92);color:#e2e8f0;border:1px solid rgba(56,189,248,0.45);border-radius:8px;padding:10px 12px;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;pointer-events:auto;';
+      document.body.appendChild(el);
+      this._crowdDebugEl = el;
+    }
+    const snap = this.getCrowdDebugSnapshot();
+    const c = snap.counts || {};
+    const topLocs = (snap.locations || []).slice(0, 10).map((l) =>
+      `<div>${l.locationId}: <b>${l.currentOccupancy}</b>+${l.reservedCapacity}/${l.maxCapacity} [${l.crowdDensity}]${l.waitingCount ? ` · wait:${l.waitingCount}` : ''}</div>`
+    ).join('');
+    this._crowdDebugEl.innerHTML =
+      `<div style="font-weight:700;color:#38bdf8;margin-bottom:4px;">CROWD DEBUG MODE (F9)</div>` +
+      `<div>NPC Total: ${c.total ?? 0} | Move: ${c.moving ?? 0} | Wait: ${c.waiting ?? 0} | Active: ${c.active ?? 0} | Stuck: ${c.stuck ?? 0}</div>` +
+      `<div>PathQueue: ${snap.pathQueuePending} | Groups: ${snap.groups.length} | Routes: ${snap.activeRoutesCount}</div>` +
+      `<div style="margin-top:6px;border-top:1px solid rgba(148,163,184,0.25);padding-top:4px;">${topLocs}</div>`;
   }
 
   getById(id) {

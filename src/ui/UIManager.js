@@ -2899,7 +2899,7 @@ export class UIManager {
       else if (px >= 145 && px <= 165 && pz >= -58 && pz <= -38) areaLabel = 'Trung tâm Y tế & Phục hồi';
       else if (px >= 160 && px <= 212 && pz >= -10 && pz <= 30) {
         if (activityType === 'dining' || activityType === 'eating' || npcState === 'EATING') areaLabel = 'Phòng Ăn Residence';
-        else if (activityType === 'gym' || npcState === 'GOING_TO_GYM') areaLabel = 'Phòng Gym Residence';
+        else if (activityType === 'gym' || npcState === 'GOING_TO_GYM' || npcState === 'USING_GYM') areaLabel = 'Phòng Gym Residence';
         else if (room && ['INSIDE_ROOM', 'SLEEPING', 'WATCHING_TV', 'OPENING_DOOR', 'ENTERING_ROOM'].includes(npcState)) areaLabel = `${room.code} (Player Residence)`;
         else areaLabel = 'Khu Sinh Hoạt Chung Residence';
       } else {
@@ -2913,9 +2913,9 @@ export class UIManager {
       areaLabel = 'Trung tâm Y tế PSG';
     } else if (npcState === 'EATING') {
       areaLabel = 'Phòng Ăn Residence';
-    } else if (npcState === 'GOING_TO_GYM') {
+    } else if (npcState === 'GOING_TO_GYM' || npcState === 'USING_GYM') {
       areaLabel = 'Phòng Gym & Thể lực';
-    } else if (npcState === 'RECOVERY' || npcState === 'GOING_TO_LOCKER_ROOM') {
+    } else if (npcState === 'RECOVERY' || npcState === 'GOING_TO_LOCKER_ROOM' || npcState === 'USING_LOCKER') {
       areaLabel = 'Phòng Thay Đồ & Phục hồi';
     }
 
@@ -2933,10 +2933,10 @@ export class UIManager {
     if (npcState === 'EATING' || ['eating', 'dining', 'residence_dining'].includes(activityType)) {
       categories.add('eating');
     }
-    if (['RESTING', 'SLEEPING', 'WATCHING_TV', 'IDLE'].includes(npcState) || ['sleep', 'rest', 'watch_tv'].includes(activityType)) {
+    if (['RESTING', 'SLEEPING', 'WATCHING_TV', 'IDLE', 'WAITING', 'WAITING_FOR_ACTIVITY', 'QUEUING'].includes(npcState) || ['sleep', 'rest', 'watch_tv'].includes(activityType)) {
       categories.add('resting');
     }
-    if (['RECOVERY', 'GOING_TO_GYM', 'GOING_TO_LOCKER_ROOM'].includes(npcState) || ['recovery', 'rehab_pitch', 'gym', 'locker_room'].includes(activityType)) {
+    if (['RECOVERY', 'GOING_TO_GYM', 'USING_GYM', 'GOING_TO_LOCKER_ROOM', 'USING_LOCKER'].includes(npcState) || ['recovery', 'rehab_pitch', 'gym', 'locker_room'].includes(activityType)) {
       categories.add('recovery');
     }
     if (npcState === 'MEDICAL_CHECK' || ['medical', 'medical_rehab'].includes(activityType) || injured) {
@@ -3009,9 +3009,9 @@ export class UIManager {
     });
 
     const stateTagColor = (st) => {
-      if (st === 'TRAINING') return 'ok';
-      if (st === 'MEDICAL_CHECK' || st === 'STUCK_RECOVERY') return 'bad';
-      if (st === 'SLEEPING' || st === 'RESTING' || st === 'INSIDE_ROOM' || st === 'WATCHING_TV') return 'warn';
+      if (st === 'TRAINING' || st === 'USING_GYM' || st === 'USING_LOCKER' || st === 'WORKING') return 'ok';
+      if (st === 'MEDICAL_CHECK' || st === 'STUCK_RECOVERY' || st === 'STUCK') return 'bad';
+      if (st === 'SLEEPING' || st === 'RESTING' || st === 'INSIDE_ROOM' || st === 'WATCHING_TV' || st === 'WAITING' || st === 'WAITING_FOR_ACTIVITY' || st === 'QUEUING' || st === 'REROUTING') return 'warn';
       return '';
     };
 

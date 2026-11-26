@@ -130,6 +130,9 @@ class FootballPresidentGame3D {
     );
     this.state.registerNpcSystem?.(this.npcSystem);
     this.state.signingEventSystem.attach3D(this.mediaRooms, this.npcSystem);
+    if (typeof window !== 'undefined' && window.location?.search?.includes('crowddebug=1')) {
+      this.npcSystem.setCrowdDebug(true);
+    }
 
     this.eventCameraAngle = null; // Góc máy truyền hình 3D khi đang diễn ra Lễ Ký Kết / Họp Báo / PSG TV LIVE
     this.stadiumCctvKey = null;   // Camera giám sát SVĐ Parc des Princes từ xa (dùng LOD thấp không tải nặng)
@@ -336,6 +339,14 @@ class FootballPresidentGame3D {
     this._onWindowResize = () => this._scheduleResize();
     window.addEventListener('resize', this._onWindowResize);
     window.addEventListener('orientationchange', this._onWindowResize);
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'F9') {
+        const tag = String(document.activeElement?.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+        e.preventDefault();
+        this.npcSystem?.setCrowdDebug?.(!this.npcSystem.isCrowdDebugEnabled());
+      }
+    });
 
     if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
       const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -537,6 +548,14 @@ class FootballPresidentGame3D {
 
   getPerfReport() {
     return this.perfManager.getPerfReport(this.renderer, this.npcSystem, this.stadiumZone);
+  }
+
+  setCrowdDebug(enabled) {
+    return this.npcSystem?.setCrowdDebug?.(enabled) ?? false;
+  }
+
+  getCrowdDebugSnapshot() {
+    return this.npcSystem?.getCrowdDebugSnapshot?.() ?? null;
   }
 
   getMemorySnapshot() {
